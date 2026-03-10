@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CSVSQL - CSV Database</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/alasql/4.5.2/alasql.min.js"></script>
+</head>
+<body>
+  <div id="menubar">
+    <div class="menu-item" id="menu-file">
+      <span class="menu-label">File</span>
+      <div class="menu-dropdown">
+        <button onclick="app.openCSV()">Open CSV...</button>
+        <button onclick="app.saveActiveTable()">Save Table</button>
+        <button onclick="app.saveActiveTableAs()">Save Table As...</button>
+        <hr>
+        <button onclick="app.newTable()">New Table</button>
+      </div>
+    </div>
+    <div class="menu-item" id="menu-view">
+      <span class="menu-label">View</span>
+      <div class="menu-dropdown">
+        <button onclick="app.layoutTileH()">Tile Horizontally</button>
+        <button onclick="app.layoutTileV()">Tile Vertically</button>
+        <button onclick="app.layoutGrid()">Grid</button>
+        <button onclick="app.layoutCascade()">Cascade</button>
+        <hr>
+        <button onclick="app.minimizeAll()">Minimize All</button>
+        <button onclick="app.restoreAll()">Restore All</button>
+      </div>
+    </div>
+    <div class="menu-item" id="menu-windows">
+      <span class="menu-label">Windows</span>
+      <div class="menu-dropdown" id="windows-list">
+      </div>
+    </div>
+  </div>
+
+  <div id="workspace">
+    <div id="window-area"></div>
+  </div>
+
+  <div id="console-panel">
+    <div id="console-resize-handle"></div>
+    <div id="console-header">
+      <span>SQL Console</span>
+      <div id="console-actions">
+        <button onclick="app.executeQuery()" title="Execute (Ctrl+Enter)">Run</button>
+        <button onclick="app.clearConsole()" title="Clear">Clear</button>
+      </div>
+    </div>
+    <div id="console-body">
+      <textarea id="sql-input" placeholder="SELECT * FROM tablename WHERE ..." spellcheck="false"></textarea>
+      <div id="console-status"></div>
+    </div>
+  </div>
+
+  <input type="file" id="file-input" accept=".csv,.tsv,.txt" multiple style="display:none">
+  <script src="app.js"></script>
+</body>
+</html>
