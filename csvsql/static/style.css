@@ -1,0 +1,581 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --bg: #1e1e2e;
+  --surface: #2a2a3d;
+  --surface2: #33334d;
+  --border: #444466;
+  --text: #e0e0f0;
+  --text-dim: #9999bb;
+  --accent: #7c6ff7;
+  --accent-hover: #9588ff;
+  --danger: #e05577;
+  --success: #55cc88;
+  --win-title: #333355;
+  --win-title-active: #444477;
+  --cell-edit: #3a3a5a;
+  --menu-bg: #2a2a44;
+  --scrollbar: #555577;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  font-size: 13px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* ---- Menubar ---- */
+#menubar {
+  display: flex;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  height: 30px;
+  user-select: none;
+  z-index: 1000;
+  position: relative;
+}
+
+.menu-item {
+  position: relative;
+  padding: 0 14px;
+  line-height: 30px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.menu-item:hover {
+  background: var(--surface2);
+}
+
+.menu-dropdown {
+  display: none;
+  position: absolute;
+  top: 30px;
+  left: 0;
+  background: var(--menu-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  min-width: 180px;
+  padding: 4px 0;
+  z-index: 1001;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+}
+
+.menu-item:hover .menu-dropdown,
+.menu-item.open .menu-dropdown {
+  display: block;
+}
+
+.menu-dropdown button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 16px;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.menu-dropdown button:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+.menu-dropdown hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 4px 0;
+}
+
+/* ---- Workspace ---- */
+#workspace {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+#window-area {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+/* ---- Subwindows ---- */
+.subwindow {
+  position: absolute;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  min-width: 280px;
+  min-height: 160px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+  transition: box-shadow 0.15s;
+}
+
+.subwindow.active {
+  border-color: var(--accent);
+  box-shadow: 0 4px 20px rgba(124,111,247,0.25);
+}
+
+.subwindow.minimized {
+  display: none;
+}
+
+.win-titlebar {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 8px;
+  background: var(--win-title);
+  border-radius: 6px 6px 0 0;
+  cursor: grab;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.subwindow.active .win-titlebar {
+  background: var(--win-title-active);
+}
+
+.win-titlebar .win-title {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.win-titlebar .win-modified {
+  color: var(--danger);
+  margin-left: 4px;
+}
+
+.win-controls button {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 14px;
+  width: 26px;
+  height: 26px;
+  cursor: pointer;
+  border-radius: 3px;
+  line-height: 26px;
+  text-align: center;
+}
+
+.win-controls button:hover {
+  background: rgba(255,255,255,0.1);
+  color: var(--text);
+}
+
+.win-controls .btn-close:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
+.win-body {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+/* ---- Toolbar ---- */
+.win-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--surface2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.win-toolbar input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 3px 8px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  flex: 1;
+}
+
+.win-toolbar input:focus {
+  border-color: var(--accent);
+}
+
+.win-toolbar label {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.win-toolbar select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 3px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-family: inherit;
+  outline: none;
+}
+
+.win-toolbar button {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 3px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.win-toolbar button:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ---- Table ---- */
+.table-container {
+  flex: 1;
+  overflow: auto;
+}
+
+.table-container::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.table-container::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+.table-container::-webkit-scrollbar-thumb {
+  background: var(--scrollbar);
+  border-radius: 4px;
+}
+
+.data-table {
+  border-collapse: collapse;
+  width: max-content;
+  min-width: 100%;
+}
+
+.data-table th,
+.data-table td {
+  border: 1px solid var(--border);
+  padding: 3px 8px;
+  text-align: left;
+  white-space: nowrap;
+  font-size: 12px;
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.data-table th {
+  background: var(--surface2);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  cursor: pointer;
+  user-select: none;
+  font-weight: 600;
+}
+
+.data-table th:hover {
+  background: var(--accent);
+}
+
+.data-table th .sort-arrow {
+  margin-left: 4px;
+  font-size: 10px;
+  color: var(--accent);
+}
+
+.data-table th.row-num-header {
+  background: var(--surface);
+  cursor: default;
+  color: var(--text-dim);
+  text-align: center;
+  width: 50px;
+  min-width: 50px;
+}
+
+.data-table th.row-num-header:hover {
+  background: var(--surface);
+}
+
+.data-table td.row-num {
+  background: var(--surface);
+  color: var(--text-dim);
+  text-align: center;
+  font-size: 11px;
+  user-select: none;
+}
+
+.data-table td[contenteditable="true"] {
+  cursor: text;
+  outline: none;
+}
+
+.data-table td[contenteditable="true"]:focus {
+  background: var(--cell-edit);
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.data-table tr:hover td:not(.row-num) {
+  background: rgba(124,111,247,0.06);
+}
+
+.data-table td.modified {
+  background: rgba(85,204,136,0.1) !important;
+}
+
+.win-statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+  background: var(--surface2);
+  border-radius: 0 0 6px 6px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+/* ---- Resize handles ---- */
+.resize-handle {
+  position: absolute;
+  z-index: 5;
+}
+
+.resize-handle.rh-right {
+  top: 0; right: -3px; width: 6px; height: 100%;
+  cursor: ew-resize;
+}
+
+.resize-handle.rh-bottom {
+  bottom: -3px; left: 0; width: 100%; height: 6px;
+  cursor: ns-resize;
+}
+
+.resize-handle.rh-corner {
+  bottom: -3px; right: -3px; width: 12px; height: 12px;
+  cursor: nwse-resize;
+}
+
+/* ---- Console ---- */
+#console-panel {
+  height: 160px;
+  min-height: 60px;
+  max-height: 50vh;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  flex-shrink: 0;
+}
+
+#console-resize-handle {
+  position: absolute;
+  top: -3px;
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: ns-resize;
+  z-index: 10;
+}
+
+#console-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 12px;
+  background: var(--surface2);
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+#console-actions {
+  display: flex;
+  gap: 6px;
+}
+
+#console-actions button {
+  background: var(--accent);
+  border: none;
+  color: #fff;
+  padding: 2px 12px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+#console-actions button:hover {
+  background: var(--accent-hover);
+}
+
+#console-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#sql-input {
+  flex: 1;
+  background: var(--bg);
+  color: var(--text);
+  border: none;
+  padding: 8px 12px;
+  font-family: inherit;
+  font-size: 13px;
+  resize: none;
+  outline: none;
+}
+
+#console-status {
+  padding: 3px 12px;
+  font-size: 11px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+#console-status.error {
+  color: var(--danger);
+}
+
+#console-status.success {
+  color: var(--success);
+}
+
+/* ---- New Table Dialog ---- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+  min-width: 340px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+
+.modal h3 {
+  margin-bottom: 12px;
+  font-size: 14px;
+}
+
+.modal input,
+.modal textarea {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 13px;
+  margin-bottom: 10px;
+  outline: none;
+}
+
+.modal input:focus,
+.modal textarea:focus {
+  border-color: var(--accent);
+}
+
+.modal-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.modal-buttons button {
+  padding: 6px 16px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.modal-buttons button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.modal-buttons button:hover {
+  opacity: 0.9;
+}
+
+/* ---- Context menu for rows ---- */
+.context-menu {
+  position: fixed;
+  background: var(--menu-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 0;
+  z-index: 3000;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  min-width: 150px;
+}
+
+.context-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 16px;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.context-menu button:hover {
+  background: var(--accent);
+  color: #fff;
+}

@@ -1,0 +1,882 @@
+// ============================================================
+// CSVSQL - CSV Database Application
+// ============================================================
+
+const app = (() => {
+  let windows = [];
+  let nextWinId = 1;
+  let nextZIndex = 100;
+  let activeWinId = null;
+  let tables = {};  // tableName -> { columns, rows, filename, modified }
+
+  // ---- Init ----
+  function init() {
+    setupConsoleResize();
+    setupFileInput();
+    setupKeyboard();
+    setupMenuClose();
+  }
+
+  // ---- File Menu ----
+  function setupFileInput() {
+    document.getElementById('file-input').addEventListener('change', (e) => {
+      for (const file of e.target.files) {
+        loadCSVFile(file);
+      }
+      e.target.value = '';
+    });
+  }
+
+  function openCSV() {
+    document.getElementById('file-input').click();
+  }
+
+  function loadCSVFile(file) {
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      dynamicTyping: false,
+      complete(results) {
+        const name = sanitizeTableName(file.name.replace(/\.[^.]+$/, ''));
+        const uniqueName = getUniqueTableName(name);
+        const columns = results.meta.fields || [];
+        const rows = results.data.map((row, i) => ({ _rownum: i + 1, ...row }));
+        tables[uniqueName] = { columns, rows, filename: file.name, modified: false };
+        registerAlaSQL(uniqueName);
+        createTableWindow(uniqueName);
+      },
+      error(err) {
+        setStatus(`Error parsing ${file.name}: ${err.message}`, 'error');
+      }
+    });
+  }
+
+  function sanitizeTableName(name) {
+    return name.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^[0-9]/, '_$&');
+  }
+
+  function getUniqueTableName(base) {
+    let name = base;
+    let i = 2;
+    while (tables[name]) { name = base + '_' + i; i++; }
+    return name;
+  }
+
+  function registerAlaSQL(tableName) {
+    const t = tables[tableName];
+    try { alasql(`DROP TABLE IF EXISTS [${tableName}]`); } catch (e) {}
+    const colDefs = t.columns.map(c => `[${c}] STRING`).join(', ');
+    alasql(`CREATE TABLE [${tableName}] (${colDefs})`);
+    const insertRows = t.rows.map(r => {
+      const obj = {};
+      t.columns.forEach(c => { obj[c] = r[c] ?? ''; });
+      return obj;
+    });
+    alasql.tables[tableName].data = insertRows;
+  }
+
+  function saveActiveTable() {
+    const win = getActiveDataWindow();
+    if (!win) return;
+    const t = tables[win.tableName];
+    if (!t) return;
+    downloadCSV(win.tableName, t.filename || win.tableName + '.csv');
+  }
+
+  function saveActiveTableAs() {
+    const win = getActiveDataWindow();
+    if (!win) return;
+    const t = tables[win.tableName];
+    const defaultName = t ? t.filename : win.tableName + '.csv';
+    showPrompt('Save As', 'Filename:', defaultName, (filename) => {
+      if (filename) downloadCSV(win.tableName, filename);
+    });
+  }
+
+  function downloadCSV(tableName, filename) {
+    const t = tables[tableName];
+    if (!t) return;
+    const data = t.rows.map(r => {
+      const obj = {};
+      t.columns.forEach(c => { obj[c] = r[c]; });
+      return obj;
+    });
+    const csv = Papa.unparse(data, { columns: t.columns });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    t.modified = false;
+    t.filename = filename;
+    updateWindowTitle(tableName);
+    setStatus(`Saved ${filename}`, 'success');
+  }
+
+  function newTable() {
+    showPrompt('New Table', 'Table name:', '', (name) => {
+      if (!name) return;
+      const safeName = sanitizeTableName(name);
+      const uniqueName = getUniqueTableName(safeName);
+      showPrompt('Columns', 'Column names (comma-separated):', 'id, name, value', (colStr) => {
+        if (!colStr) return;
+        const columns = colStr.split(',').map(c => c.trim()).filter(Boolean);
+        tables[uniqueName] = { columns, rows: [], filename: null, modified: true };
+        registerAlaSQL(uniqueName);
+        createTableWindow(uniqueName);
+      });
+    });
+  }
+
+  // ---- Window Management ----
+  function createSubwindow(title, contentFn, opts = {}) {
+    const id = nextWinId++;
+    const area = document.getElementById('window-area');
+    const rect = area.getBoundingClientRect();
+    const cascadeOffset = ((windows.length) % 8) * 30;
+    const w = opts.width || Math.min(700, rect.width - 40);
+    const h = opts.height || Math.min(400, rect.height - 40);
+    const x = opts.x ?? Math.min(cascadeOffset + 20, rect.width - w - 10);
+    const y = opts.y ?? Math.min(cascadeOffset + 20, rect.height - h - 10);
+
+    const el = document.createElement('div');
+    el.className = 'subwindow';
+    el.id = `win-${id}`;
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
+    el.style.width = w + 'px';
+    el.style.height = h + 'px';
+    el.style.zIndex = ++nextZIndex;
+
+    el.innerHTML = `
+      <div class="win-titlebar">
+        <span class="win-title">${escHtml(title)}</span>
+        <div class="win-controls">
+          <button class="btn-min" title="Minimize">&#8211;</button>
+          <button class="btn-max" title="Maximize">&#9633;</button>
+          <button class="btn-close" title="Close">&#10005;</button>
+        </div>
+      </div>
+      <div class="win-body"></div>
+      <div class="win-statusbar"><span class="status-left"></span><span class="status-right"></span></div>
+      <div class="resize-handle rh-right"></div>
+      <div class="resize-handle rh-bottom"></div>
+      <div class="resize-handle rh-corner"></div>
+    `;
+
+    area.appendChild(el);
+
+    const winObj = {
+      id, el, title,
+      tableName: opts.tableName || null,
+      isQuery: opts.isQuery || false,
+      maximized: false,
+      prevBounds: null,
+      sortCol: null,
+      sortDir: 'asc',
+      filterText: '',
+    };
+    windows.push(winObj);
+
+    setupWindowDrag(winObj);
+    setupWindowResize(winObj);
+    setupWindowButtons(winObj);
+
+    el.addEventListener('mousedown', () => focusWindow(id));
+
+    if (contentFn) contentFn(winObj, el.querySelector('.win-body'));
+    focusWindow(id);
+    updateWindowsList();
+    return winObj;
+  }
+
+  function focusWindow(id) {
+    activeWinId = id;
+    windows.forEach(w => w.el.classList.toggle('active', w.id === id));
+    const win = windows.find(w => w.id === id);
+    if (win) win.el.style.zIndex = ++nextZIndex;
+  }
+
+  function closeWindow(id) {
+    const idx = windows.findIndex(w => w.id === id);
+    if (idx === -1) return;
+    const win = windows[idx];
+    // If it's a table window (not a query result), also remove from tables
+    if (win.tableName && !win.isQuery && tables[win.tableName]) {
+      const t = tables[win.tableName];
+      if (t.modified) {
+        if (!confirm(`Table "${win.tableName}" has unsaved changes. Close anyway?`)) return;
+      }
+      try { alasql(`DROP TABLE IF EXISTS [${win.tableName}]`); } catch (e) {}
+      delete tables[win.tableName];
+    }
+    win.el.remove();
+    windows.splice(idx, 1);
+    if (activeWinId === id) {
+      activeWinId = windows.length ? windows[windows.length - 1].id : null;
+      if (activeWinId) focusWindow(activeWinId);
+    }
+    updateWindowsList();
+  }
+
+  function minimizeWindow(id) {
+    const win = windows.find(w => w.id === id);
+    if (win) {
+      win.el.classList.add('minimized');
+      updateWindowsList();
+    }
+  }
+
+  function restoreWindow(id) {
+    const win = windows.find(w => w.id === id);
+    if (win) {
+      win.el.classList.remove('minimized');
+      focusWindow(id);
+      updateWindowsList();
+    }
+  }
+
+  function toggleMaximize(id) {
+    const win = windows.find(w => w.id === id);
+    if (!win) return;
+    const area = document.getElementById('window-area');
+    const rect = area.getBoundingClientRect();
+    if (win.maximized) {
+      const b = win.prevBounds;
+      win.el.style.left = b.left + 'px';
+      win.el.style.top = b.top + 'px';
+      win.el.style.width = b.width + 'px';
+      win.el.style.height = b.height + 'px';
+      win.maximized = false;
+    } else {
+      win.prevBounds = {
+        left: parseInt(win.el.style.left),
+        top: parseInt(win.el.style.top),
+        width: parseInt(win.el.style.width),
+        height: parseInt(win.el.style.height),
+      };
+      win.el.style.left = '0px';
+      win.el.style.top = '0px';
+      win.el.style.width = rect.width + 'px';
+      win.el.style.height = rect.height + 'px';
+      win.maximized = true;
+    }
+  }
+
+  function setupWindowDrag(win) {
+    const titlebar = win.el.querySelector('.win-titlebar');
+    let dragging = false, startX, startY, origX, origY;
+
+    titlebar.addEventListener('mousedown', (e) => {
+      if (e.target.tagName === 'BUTTON') return;
+      dragging = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      origX = parseInt(win.el.style.left);
+      origY = parseInt(win.el.style.top);
+      titlebar.style.cursor = 'grabbing';
+      e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!dragging) return;
+      win.el.style.left = (origX + e.clientX - startX) + 'px';
+      win.el.style.top = (origY + e.clientY - startY) + 'px';
+      if (win.maximized) win.maximized = false;
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (dragging) {
+        dragging = false;
+        titlebar.style.cursor = 'grab';
+      }
+    });
+  }
+
+  function setupWindowResize(win) {
+    const handles = win.el.querySelectorAll('.resize-handle');
+    handles.forEach(handle => {
+      let resizing = false, startX, startY, origW, origH, origLeft, origTop;
+      const isRight = handle.classList.contains('rh-right') || handle.classList.contains('rh-corner');
+      const isBottom = handle.classList.contains('rh-bottom') || handle.classList.contains('rh-corner');
+
+      handle.addEventListener('mousedown', (e) => {
+        resizing = true;
+        startX = e.clientX;
+        startY = e.clientY;
+        origW = parseInt(win.el.style.width);
+        origH = parseInt(win.el.style.height);
+        origLeft = parseInt(win.el.style.left);
+        origTop = parseInt(win.el.style.top);
+        e.preventDefault();
+        e.stopPropagation();
+      });
+
+      document.addEventListener('mousemove', (e) => {
+        if (!resizing) return;
+        if (isRight) win.el.style.width = Math.max(280, origW + e.clientX - startX) + 'px';
+        if (isBottom) win.el.style.height = Math.max(160, origH + e.clientY - startY) + 'px';
+      });
+
+      document.addEventListener('mouseup', () => { resizing = false; });
+    });
+  }
+
+  function setupWindowButtons(win) {
+    win.el.querySelector('.btn-close').addEventListener('click', () => closeWindow(win.id));
+    win.el.querySelector('.btn-min').addEventListener('click', () => minimizeWindow(win.id));
+    win.el.querySelector('.btn-max').addEventListener('click', () => toggleMaximize(win.id));
+    // Double-click titlebar to maximize
+    win.el.querySelector('.win-titlebar').addEventListener('dblclick', (e) => {
+      if (e.target.tagName !== 'BUTTON') toggleMaximize(win.id);
+    });
+  }
+
+  function getActiveDataWindow() {
+    return windows.find(w => w.id === activeWinId) || null;
+  }
+
+  function updateWindowTitle(tableName) {
+    windows.filter(w => w.tableName === tableName).forEach(w => {
+      const t = tables[tableName];
+      const mod = t && t.modified ? ' *' : '';
+      w.el.querySelector('.win-title').textContent = tableName + mod;
+    });
+  }
+
+  function updateWindowsList() {
+    const list = document.getElementById('windows-list');
+    list.innerHTML = '';
+    if (windows.length === 0) {
+      list.innerHTML = '<button disabled style="color:var(--text-dim)">No windows</button>';
+      return;
+    }
+    windows.forEach(w => {
+      const btn = document.createElement('button');
+      const minimized = w.el.classList.contains('minimized');
+      btn.textContent = (minimized ? '[_] ' : '') + w.title;
+      btn.addEventListener('click', () => {
+        if (minimized) restoreWindow(w.id);
+        else focusWindow(w.id);
+      });
+      list.appendChild(btn);
+    });
+  }
+
+  // ---- Layout ----
+  function getVisibleWindows() {
+    return windows.filter(w => !w.el.classList.contains('minimized'));
+  }
+
+  function layoutTileH() {
+    const vw = getVisibleWindows();
+    if (!vw.length) return;
+    const area = document.getElementById('window-area').getBoundingClientRect();
+    const h = area.height / vw.length;
+    vw.forEach((w, i) => {
+      w.el.style.left = '0px';
+      w.el.style.top = Math.round(i * h) + 'px';
+      w.el.style.width = area.width + 'px';
+      w.el.style.height = Math.round(h) + 'px';
+      w.maximized = false;
+    });
+  }
+
+  function layoutTileV() {
+    const vw = getVisibleWindows();
+    if (!vw.length) return;
+    const area = document.getElementById('window-area').getBoundingClientRect();
+    const w = area.width / vw.length;
+    vw.forEach((win, i) => {
+      win.el.style.left = Math.round(i * w) + 'px';
+      win.el.style.top = '0px';
+      win.el.style.width = Math.round(w) + 'px';
+      win.el.style.height = area.height + 'px';
+      win.maximized = false;
+    });
+  }
+
+  function layoutGrid() {
+    const vw = getVisibleWindows();
+    if (!vw.length) return;
+    const area = document.getElementById('window-area').getBoundingClientRect();
+    const cols = Math.ceil(Math.sqrt(vw.length));
+    const rows = Math.ceil(vw.length / cols);
+    const cellW = area.width / cols;
+    const cellH = area.height / rows;
+    vw.forEach((win, i) => {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      win.el.style.left = Math.round(col * cellW) + 'px';
+      win.el.style.top = Math.round(row * cellH) + 'px';
+      win.el.style.width = Math.round(cellW) + 'px';
+      win.el.style.height = Math.round(cellH) + 'px';
+      win.maximized = false;
+    });
+  }
+
+  function layoutCascade() {
+    const vw = getVisibleWindows();
+    if (!vw.length) return;
+    const area = document.getElementById('window-area').getBoundingClientRect();
+    const w = Math.min(600, area.width * 0.7);
+    const h = Math.min(400, area.height * 0.7);
+    vw.forEach((win, i) => {
+      const offset = (i % 10) * 30;
+      win.el.style.left = (20 + offset) + 'px';
+      win.el.style.top = (20 + offset) + 'px';
+      win.el.style.width = w + 'px';
+      win.el.style.height = h + 'px';
+      win.maximized = false;
+      win.el.style.zIndex = ++nextZIndex;
+    });
+  }
+
+  function minimizeAll() {
+    windows.forEach(w => w.el.classList.add('minimized'));
+    updateWindowsList();
+  }
+
+  function restoreAll() {
+    windows.forEach(w => w.el.classList.remove('minimized'));
+    updateWindowsList();
+  }
+
+  // ---- Table Window ----
+  function createTableWindow(tableName) {
+    const t = tables[tableName];
+    createSubwindow(tableName, (win, body) => {
+      win.tableName = tableName;
+      renderTableView(win, body, t);
+    }, { tableName });
+  }
+
+  function renderTableView(win, body, tableData) {
+    body.innerHTML = '';
+
+    // Toolbar
+    const toolbar = document.createElement('div');
+    toolbar.className = 'win-toolbar';
+    toolbar.innerHTML = `
+      <label>Filter:</label>
+      <input type="text" class="filter-input" placeholder="Search all columns..." value="${escHtml(win.filterText)}">
+      <button class="btn-add-row">+ Row</button>
+      <button class="btn-add-col">+ Col</button>
+    `;
+    body.appendChild(toolbar);
+
+    const filterInput = toolbar.querySelector('.filter-input');
+    let filterTimeout;
+    filterInput.addEventListener('input', () => {
+      clearTimeout(filterTimeout);
+      filterTimeout = setTimeout(() => {
+        win.filterText = filterInput.value;
+        rebuildTable(win);
+      }, 200);
+    });
+
+    toolbar.querySelector('.btn-add-row').addEventListener('click', () => {
+      addRow(win.tableName);
+      rebuildTable(win);
+    });
+
+    toolbar.querySelector('.btn-add-col').addEventListener('click', () => {
+      showPrompt('Add Column', 'Column name:', '', (colName) => {
+        if (!colName) return;
+        addColumn(win.tableName, colName);
+        rebuildTable(win);
+      });
+    });
+
+    // Table container
+    const container = document.createElement('div');
+    container.className = 'table-container';
+    body.appendChild(container);
+
+    buildTableHTML(win, container, tableData);
+  }
+
+  function buildTableHTML(win, container, tableData) {
+    const { columns, rows } = tableData;
+    let displayRows = [...rows];
+
+    // Filter
+    if (win.filterText) {
+      const q = win.filterText.toLowerCase();
+      displayRows = displayRows.filter(row =>
+        columns.some(c => String(row[c] ?? '').toLowerCase().includes(q))
+      );
+    }
+
+    // Sort
+    if (win.sortCol) {
+      const col = win.sortCol;
+      const dir = win.sortDir === 'asc' ? 1 : -1;
+      displayRows.sort((a, b) => {
+        const va = a[col] ?? '', vb = b[col] ?? '';
+        const na = Number(va), nb = Number(vb);
+        if (!isNaN(na) && !isNaN(nb) && va !== '' && vb !== '') return (na - nb) * dir;
+        return String(va).localeCompare(String(vb)) * dir;
+      });
+    }
+
+    const table = document.createElement('table');
+    table.className = 'data-table';
+
+    // Header
+    const thead = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+    const rowNumTh = document.createElement('th');
+    rowNumTh.className = 'row-num-header';
+    rowNumTh.textContent = '#';
+    headerRow.appendChild(rowNumTh);
+
+    columns.forEach(col => {
+      const th = document.createElement('th');
+      th.textContent = col;
+      if (win.sortCol === col) {
+        const arrow = document.createElement('span');
+        arrow.className = 'sort-arrow';
+        arrow.textContent = win.sortDir === 'asc' ? '\u25B2' : '\u25BC';
+        th.appendChild(arrow);
+      }
+      th.addEventListener('click', () => {
+        if (win.sortCol === col) {
+          win.sortDir = win.sortDir === 'asc' ? 'desc' : 'asc';
+        } else {
+          win.sortCol = col;
+          win.sortDir = 'asc';
+        }
+        rebuildTable(win);
+      });
+      headerRow.appendChild(th);
+    });
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+
+    // Body
+    const tbody = document.createElement('tbody');
+    displayRows.forEach(row => {
+      const tr = document.createElement('tr');
+      const numTd = document.createElement('td');
+      numTd.className = 'row-num';
+      numTd.textContent = row._rownum;
+      tr.appendChild(numTd);
+
+      // Right-click context menu on row number
+      numTd.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        showRowContextMenu(e.clientX, e.clientY, win.tableName, row._rownum, win);
+      });
+
+      columns.forEach(col => {
+        const td = document.createElement('td');
+        td.textContent = row[col] ?? '';
+        td.setAttribute('contenteditable', 'true');
+        td.addEventListener('blur', () => {
+          const newVal = td.textContent;
+          if (newVal !== (row[col] ?? '')) {
+            row[col] = newVal;
+            td.classList.add('modified');
+            markModified(win.tableName);
+            syncToAlaSQL(win.tableName);
+          }
+        });
+        td.addEventListener('keydown', (e) => {
+          if (e.key === 'Tab') {
+            e.preventDefault();
+            const cells = [...tr.querySelectorAll('td[contenteditable]')];
+            const idx = cells.indexOf(td);
+            const next = e.shiftKey ? cells[idx - 1] : cells[idx + 1];
+            if (next) next.focus();
+          } else if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            td.blur();
+            // Move to next row same column
+            const nextTr = tr.nextElementSibling;
+            if (nextTr) {
+              const colIdx = [...tr.children].indexOf(td);
+              const nextTd = nextTr.children[colIdx];
+              if (nextTd && nextTd.getAttribute('contenteditable')) nextTd.focus();
+            }
+          } else if (e.key === 'Escape') {
+            td.textContent = row[col] ?? '';
+            td.blur();
+          }
+        });
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+
+    container.innerHTML = '';
+    container.appendChild(table);
+
+    // Update statusbar
+    const statusLeft = win.el.querySelector('.status-left');
+    const statusRight = win.el.querySelector('.status-right');
+    statusLeft.textContent = `${displayRows.length} of ${rows.length} rows`;
+    statusRight.textContent = `${columns.length} columns`;
+  }
+
+  function rebuildTable(win) {
+    const t = tables[win.tableName];
+    if (!t) return;
+    const container = win.el.querySelector('.table-container');
+    if (container) buildTableHTML(win, container, t);
+  }
+
+  function addRow(tableName) {
+    const t = tables[tableName];
+    const newRow = { _rownum: t.rows.length + 1 };
+    t.columns.forEach(c => { newRow[c] = ''; });
+    t.rows.push(newRow);
+    markModified(tableName);
+    syncToAlaSQL(tableName);
+  }
+
+  function deleteRow(tableName, rownum, win) {
+    const t = tables[tableName];
+    t.rows = t.rows.filter(r => r._rownum !== rownum);
+    // Renumber
+    t.rows.forEach((r, i) => { r._rownum = i + 1; });
+    markModified(tableName);
+    syncToAlaSQL(tableName);
+    rebuildTable(win);
+  }
+
+  function addColumn(tableName, colName) {
+    const t = tables[tableName];
+    if (t.columns.includes(colName)) return;
+    t.columns.push(colName);
+    t.rows.forEach(r => { r[colName] = ''; });
+    markModified(tableName);
+    registerAlaSQL(tableName);
+  }
+
+  function markModified(tableName) {
+    const t = tables[tableName];
+    if (t) t.modified = true;
+    updateWindowTitle(tableName);
+  }
+
+  function syncToAlaSQL(tableName) {
+    const t = tables[tableName];
+    if (!t) return;
+    try {
+      const data = t.rows.map(r => {
+        const obj = {};
+        t.columns.forEach(c => { obj[c] = r[c] ?? ''; });
+        return obj;
+      });
+      alasql.tables[tableName].data = data;
+    } catch (e) {}
+  }
+
+  // ---- Row Context Menu ----
+  function showRowContextMenu(x, y, tableName, rownum, win) {
+    removeContextMenu();
+    const menu = document.createElement('div');
+    menu.className = 'context-menu';
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+
+    const insertBtn = document.createElement('button');
+    insertBtn.textContent = 'Insert Row Above';
+    insertBtn.addEventListener('click', () => {
+      const t = tables[tableName];
+      const idx = t.rows.findIndex(r => r._rownum === rownum);
+      const newRow = { _rownum: 0 };
+      t.columns.forEach(c => { newRow[c] = ''; });
+      t.rows.splice(idx, 0, newRow);
+      t.rows.forEach((r, i) => { r._rownum = i + 1; });
+      markModified(tableName);
+      syncToAlaSQL(tableName);
+      rebuildTable(win);
+      removeContextMenu();
+    });
+    menu.appendChild(insertBtn);
+
+    const delBtn = document.createElement('button');
+    delBtn.textContent = 'Delete Row';
+    delBtn.addEventListener('click', () => {
+      deleteRow(tableName, rownum, win);
+      removeContextMenu();
+    });
+    menu.appendChild(delBtn);
+
+    document.body.appendChild(menu);
+    setTimeout(() => {
+      document.addEventListener('click', removeContextMenu, { once: true });
+    }, 0);
+  }
+
+  function removeContextMenu() {
+    document.querySelectorAll('.context-menu').forEach(m => m.remove());
+  }
+
+  // ---- SQL Console ----
+  function setupKeyboard() {
+    document.getElementById('sql-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        executeQuery();
+      }
+    });
+  }
+
+  function executeQuery() {
+    const input = document.getElementById('sql-input');
+    const sql = input.value.trim();
+    if (!sql) return;
+
+    try {
+      const result = alasql(sql);
+      if (Array.isArray(result) && result.length > 0 && typeof result[0] === 'object') {
+        showQueryResult(sql, result);
+        setStatus(`Query returned ${result.length} row(s)`, 'success');
+      } else if (Array.isArray(result)) {
+        setStatus(`Query returned: ${JSON.stringify(result)}`, 'success');
+        // Refresh any affected tables
+        refreshAllTableWindows();
+      } else {
+        setStatus(`Result: ${JSON.stringify(result)}`, 'success');
+        refreshAllTableWindows();
+      }
+    } catch (e) {
+      setStatus(`Error: ${e.message}`, 'error');
+    }
+  }
+
+  function showQueryResult(sql, resultRows) {
+    const columns = Object.keys(resultRows[0]);
+    const queryLabel = sql.length > 40 ? sql.substring(0, 40) + '...' : sql;
+    const tableName = '_query_' + nextWinId;
+
+    // Store as a table so it can be saved
+    const rows = resultRows.map((r, i) => ({ _rownum: i + 1, ...r }));
+    tables[tableName] = { columns, rows, filename: null, modified: false };
+
+    createSubwindow('Query: ' + queryLabel, (win, body) => {
+      win.tableName = tableName;
+      win.isQuery = true;
+      renderTableView(win, body, tables[tableName]);
+    }, { tableName, isQuery: true });
+  }
+
+  function refreshAllTableWindows() {
+    windows.forEach(w => {
+      if (w.tableName && tables[w.tableName] && !w.isQuery) {
+        // Re-sync from alasql data
+        const alaData = alasql.tables[w.tableName]?.data;
+        if (alaData) {
+          const t = tables[w.tableName];
+          t.rows = alaData.map((r, i) => ({ _rownum: i + 1, ...r }));
+        }
+        rebuildTable(w);
+      }
+    });
+  }
+
+  function clearConsole() {
+    document.getElementById('sql-input').value = '';
+    setStatus('');
+  }
+
+  function setStatus(msg, type = '') {
+    const el = document.getElementById('console-status');
+    el.textContent = msg;
+    el.className = type;
+  }
+
+  // ---- Console Resize ----
+  function setupConsoleResize() {
+    const handle = document.getElementById('console-resize-handle');
+    const panel = document.getElementById('console-panel');
+    let resizing = false, startY, origH;
+
+    handle.addEventListener('mousedown', (e) => {
+      resizing = true;
+      startY = e.clientY;
+      origH = panel.offsetHeight;
+      e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!resizing) return;
+      const newH = origH - (e.clientY - startY);
+      panel.style.height = Math.max(60, Math.min(window.innerHeight * 0.5, newH)) + 'px';
+    });
+
+    document.addEventListener('mouseup', () => { resizing = false; });
+  }
+
+  // ---- Menu close on outside click ----
+  function setupMenuClose() {
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.menu-item')) {
+        document.querySelectorAll('.menu-item').forEach(m => m.classList.remove('open'));
+      }
+    });
+  }
+
+  // ---- Modals ----
+  function showPrompt(title, label, defaultValue, callback) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal">
+        <h3>${escHtml(title)}</h3>
+        <label style="font-size:12px;display:block;margin-bottom:4px;">${escHtml(label)}</label>
+        <input type="text" class="modal-input" value="${escHtml(defaultValue)}">
+        <div class="modal-buttons">
+          <button class="cancel">Cancel</button>
+          <button class="primary ok">OK</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    const input = overlay.querySelector('.modal-input');
+    input.focus();
+    input.select();
+
+    const close = (val) => { overlay.remove(); callback(val); };
+    overlay.querySelector('.cancel').addEventListener('click', () => close(null));
+    overlay.querySelector('.ok').addEventListener('click', () => close(input.value));
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') close(input.value);
+      if (e.key === 'Escape') close(null);
+    });
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) close(null);
+    });
+  }
+
+  // ---- Utilities ----
+  function escHtml(str) {
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  // ---- Public API ----
+  return {
+    init,
+    openCSV,
+    saveActiveTable,
+    saveActiveTableAs,
+    newTable,
+    executeQuery,
+    clearConsole,
+    layoutTileH,
+    layoutTileV,
+    layoutGrid,
+    layoutCascade,
+    minimizeAll,
+    restoreAll,
+  };
+})();
+
+document.addEventListener('DOMContentLoaded', app.init);
