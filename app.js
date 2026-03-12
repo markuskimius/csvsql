@@ -13,6 +13,7 @@ const app = (() => {
   function init() {
     setupConsoleResize();
     setupFileInput();
+    setupDragAndDrop();
     setupKeyboard();
     setupMenuClose();
   }
@@ -21,14 +22,57 @@ const app = (() => {
   function setupFileInput() {
     document.getElementById('file-input').addEventListener('change', (e) => {
       for (const file of e.target.files) {
-        loadCSVFile(file);
+        openFileByType(file);
       }
       e.target.value = '';
     });
   }
 
-  function openCSV() {
+  function setupDragAndDrop() {
+    const overlay = document.getElementById('drop-overlay');
+    let dragCounter = 0;
+
+    document.addEventListener('dragenter', (e) => {
+      e.preventDefault();
+      dragCounter++;
+      overlay.classList.add('visible');
+    });
+
+    document.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      dragCounter--;
+      if (dragCounter <= 0) {
+        dragCounter = 0;
+        overlay.classList.remove('visible');
+      }
+    });
+
+    document.addEventListener('dragover', (e) => {
+      e.preventDefault();
+    });
+
+    document.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dragCounter = 0;
+      overlay.classList.remove('visible');
+      closeMenus();
+      for (const file of e.dataTransfer.files) {
+        openFileByType(file);
+      }
+    });
+  }
+
+  function openFile() {
     document.getElementById('file-input').click();
+  }
+
+  function openFileByType(file) {
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (ext === 'xlsx' || ext === 'xls') {
+      loadExcelFile(file);
+    } else {
+      loadCSVFile(file);
+    }
   }
 
   function loadCSVFile(file) {
@@ -49,6 +93,37 @@ const app = (() => {
         setStatus(`Error parsing ${file.name}: ${err.message}`, 'error');
       }
     });
+  }
+
+  function loadExcelFile(file) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const workbook = XLSX.read(e.target.result, { type: 'array' });
+        workbook.SheetNames.forEach(sheetName => {
+          const sheet = workbook.Sheets[sheetName];
+          const jsonData = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+          if (jsonData.length === 0) return;
+          const baseName = file.name.replace(/\.[^.]+$/, '');
+          const label = workbook.SheetNames.length > 1 ? baseName + '_' + sheetName : baseName;
+          const name = sanitizeTableName(label);
+          const uniqueName = getUniqueTableName(name);
+          const columns = Object.keys(jsonData[0]);
+          const rows = jsonData.map((row, i) => {
+            const r = { _rownum: i + 1 };
+            columns.forEach(c => { r[c] = row[c] != null ? String(row[c]) : ''; });
+            return r;
+          });
+          tables[uniqueName] = { columns, rows, filename: file.name, modified: false };
+          registerAlaSQL(uniqueName);
+          createTableWindow(uniqueName);
+        });
+        setStatus(`Opened ${file.name} (${workbook.SheetNames.length} sheet(s))`, 'success');
+      } catch (err) {
+        setStatus(`Error reading ${file.name}: ${err.message}`, 'error');
+      }
+    };
+    reader.readAsArrayBuffer(file);
   }
 
   function sanitizeTableName(name) {
@@ -160,9 +235,14 @@ const app = (() => {
       </div>
       <div class="win-body"></div>
       <div class="win-statusbar"><span class="status-left"></span><span class="status-right"></span></div>
-      <div class="resize-handle rh-right"></div>
+      <div class="resize-handle rh-top"></div>
       <div class="resize-handle rh-bottom"></div>
-      <div class="resize-handle rh-corner"></div>
+      <div class="resize-handle rh-left"></div>
+      <div class="resize-handle rh-right"></div>
+      <div class="resize-handle rh-tl"></div>
+      <div class="resize-handle rh-tr"></div>
+      <div class="resize-handle rh-bl"></div>
+      <div class="resize-handle rh-br"></div>
     `;
 
     area.appendChild(el);
@@ -298,8 +378,11 @@ const app = (() => {
     const handles = win.el.querySelectorAll('.resize-handle');
     handles.forEach(handle => {
       let resizing = false, startX, startY, origW, origH, origLeft, origTop;
-      const isRight = handle.classList.contains('rh-right') || handle.classList.contains('rh-corner');
-      const isBottom = handle.classList.contains('rh-bottom') || handle.classList.contains('rh-corner');
+      const cl = handle.classList;
+      const resizeR = cl.contains('rh-right') || cl.contains('rh-tr') || cl.contains('rh-br');
+      const resizeB = cl.contains('rh-bottom') || cl.contains('rh-bl') || cl.contains('rh-br');
+      const resizeL = cl.contains('rh-left') || cl.contains('rh-tl') || cl.contains('rh-bl');
+      const resizeT = cl.contains('rh-top') || cl.contains('rh-tl') || cl.contains('rh-tr');
 
       handle.addEventListener('mousedown', (e) => {
         resizing = true;
@@ -315,8 +398,20 @@ const app = (() => {
 
       document.addEventListener('mousemove', (e) => {
         if (!resizing) return;
-        if (isRight) win.el.style.width = Math.max(280, origW + e.clientX - startX) + 'px';
-        if (isBottom) win.el.style.height = Math.max(160, origH + e.clientY - startY) + 'px';
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+        if (resizeR) win.el.style.width = Math.max(280, origW + dx) + 'px';
+        if (resizeB) win.el.style.height = Math.max(160, origH + dy) + 'px';
+        if (resizeL) {
+          const newW = Math.max(280, origW - dx);
+          win.el.style.width = newW + 'px';
+          win.el.style.left = (origLeft + origW - newW) + 'px';
+        }
+        if (resizeT) {
+          const newH = Math.max(160, origH - dy);
+          win.el.style.height = newH + 'px';
+          win.el.style.top = (origTop + origH - newH) + 'px';
+        }
       });
 
       document.addEventListener('mouseup', () => { resizing = false; });
@@ -814,11 +909,70 @@ const app = (() => {
   }
 
   // ---- Menu close on outside click ----
+  let _menuBarActive = false;
+  let _menuDragging = false;
+
+  function closeMenus() {
+    _menuBarActive = false;
+    _menuDragging = false;
+    document.querySelectorAll('.menu-item').forEach(m => m.classList.remove('open'));
+  }
+
   function setupMenuClose() {
-    document.addEventListener('click', (e) => {
-      if (!e.target.closest('.menu-item')) {
-        document.querySelectorAll('.menu-item').forEach(m => m.classList.remove('open'));
+    const menubar = document.getElementById('menubar');
+    const allItems = document.querySelectorAll('.menu-item');
+
+    function openItem(item) {
+      allItems.forEach(m => m.classList.remove('open'));
+      item.classList.add('open');
+    }
+
+    allItems.forEach(item => {
+      item.querySelector('.menu-label').addEventListener('mousedown', (e) => {
+        if (_menuBarActive) {
+          closeMenus();
+        } else {
+          _menuBarActive = true;
+          _menuDragging = true;
+          openItem(item);
+        }
+        e.preventDefault();
+      });
+
+      // Clicking a label when already active (handled by mousedown above)
+      item.querySelector('.menu-label').addEventListener('click', (e) => {
+        e.stopPropagation();
+      });
+
+      item.addEventListener('mouseenter', () => {
+        if (_menuBarActive) openItem(item);
+      });
+    });
+
+    // On mouseup over a dropdown button during drag, activate it
+    menubar.addEventListener('mouseup', (e) => {
+      const btn = e.target.closest('.menu-dropdown button');
+      if (_menuDragging && btn) {
+        btn.click();
+        closeMenus();
       }
+      _menuDragging = false;
+    });
+
+    // Clicking a dropdown button closes the menu bar (non-drag case)
+    menubar.addEventListener('click', (e) => {
+      if (e.target.closest('.menu-dropdown button')) closeMenus();
+    });
+
+    document.addEventListener('mouseup', (e) => {
+      if (_menuDragging && !e.target.closest('.menu-item')) {
+        closeMenus();
+      }
+      _menuDragging = false;
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.menu-item')) closeMenus();
     });
   }
 
@@ -864,7 +1018,7 @@ const app = (() => {
   // ---- Public API ----
   return {
     init,
-    openCSV,
+    openFile,
     saveActiveTable,
     saveActiveTableAs,
     newTable,
