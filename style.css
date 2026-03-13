@@ -172,6 +172,20 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: default;
+}
+
+.win-titlebar .win-title .inline-rename {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  padding: 0 4px;
+  border-radius: 3px;
+  outline: none;
 }
 
 .win-titlebar .win-modified {

@@ -172,8 +172,13 @@ const app = (() => {
   function registerAlaSQL(tableName) {
     const t = tables[tableName];
     try { alasql(`DROP TABLE IF EXISTS [${tableName}]`); } catch (e) {}
-    const colDefs = t.columns.map(c => `[${c}] STRING`).join(', ');
-    alasql(`CREATE TABLE [${tableName}] (${colDefs})`);
+    if (t.columns.length === 0) {
+      alasql(`CREATE TABLE [${tableName}]`);
+    } else {
+      const colDefs = t.columns.map(c => `[${c}] STRING`).join(', ');
+      alasql(`CREATE TABLE [${tableName}] (${colDefs})`);
+    }
+    if (!alasql.tables[tableName]) return;
     const insertRows = t.rows.map(r => {
       const obj = {};
       t.columns.forEach(c => { obj[c] = r[c] ?? ''; });
@@ -494,10 +499,78 @@ const app = (() => {
     win.el.querySelector('.btn-close').addEventListener('click', () => closeWindow(win.id));
     win.el.querySelector('.btn-min').addEventListener('click', () => minimizeWindow(win.id));
     win.el.querySelector('.btn-max').addEventListener('click', () => toggleMaximize(win.id));
-    // Double-click titlebar to maximize
-    win.el.querySelector('.win-titlebar').addEventListener('dblclick', (e) => {
-      if (e.target.tagName !== 'BUTTON') toggleMaximize(win.id);
+    // Double-click title text to rename, double-click elsewhere on titlebar to maximize
+    win.el.querySelector('.win-title').addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      if (win.tableName) startInlineRename(win);
     });
+    win.el.querySelector('.win-titlebar').addEventListener('dblclick', (e) => {
+      if (e.target.tagName !== 'BUTTON' && !e.target.classList.contains('win-title')) {
+        toggleMaximize(win.id);
+      }
+    });
+  }
+
+  function startInlineRename(win) {
+    const oldName = win.tableName;
+    const t = tables[oldName];
+    if (!t) return;
+    const titleEl = win.el.querySelector('.win-title');
+    const input = document.createElement('input');
+    input.className = 'inline-rename';
+    input.value = oldName;
+    titleEl.textContent = '';
+    titleEl.appendChild(input);
+    input.focus();
+    input.select();
+
+    function commit() {
+      const raw = input.value.trim();
+      // Remove input and restore text
+      if (input.parentNode) input.remove();
+      if (!raw || raw === oldName) {
+        updateWindowTitle(oldName);
+        return;
+      }
+      const newName = sanitizeTableName(raw);
+      if (newName === oldName) {
+        updateWindowTitle(oldName);
+        return;
+      }
+      const uniqueName = tables[newName] ? getUniqueTableName(newName) : newName;
+
+      // Move table data
+      tables[uniqueName] = t;
+      delete tables[oldName];
+
+      // Re-register in AlaSQL under new name
+      try { alasql(`DROP TABLE IF EXISTS [${oldName}]`); } catch (_) {}
+      registerAlaSQL(uniqueName);
+
+      // Update all windows referencing this table
+      windows.filter(w => w.tableName === oldName).forEach(w => {
+        w.tableName = uniqueName;
+        w.title = uniqueName;
+      });
+      updateWindowTitle(uniqueName);
+      updateWindowsList();
+      setStatus(`Renamed "${oldName}" to "${uniqueName}"`, 'success');
+    }
+
+    let done = false;
+    function finish() {
+      if (done) return;
+      done = true;
+      commit();
+    }
+
+    input.addEventListener('blur', finish);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+      if (e.key === 'Escape') { e.preventDefault(); input.value = oldName; input.blur(); }
+      e.stopPropagation();
+    });
+    input.addEventListener('mousedown', (e) => e.stopPropagation());
   }
 
   function getActiveDataWindow() {
@@ -917,19 +990,76 @@ const app = (() => {
     });
   }
 
+  function extractIntoClause(sql) {
+    // Match INTO [tablename] anywhere in a SELECT statement and strip it out
+    // Supports: SELECT ... INTO name FROM ..., SELECT ... FROM ... INTO name WHERE ...
+    const intoPattern = /\bINTO\s+\[?([^\]\s,;]+)\]?/i;
+    const match = sql.match(intoPattern);
+    if (match && /^\s*SELECT\b/i.test(sql)) {
+      const targetName = match[1];
+      const selectSQL = sql.replace(intoPattern, ' ').replace(/\s+/g, ' ').trim();
+      return { targetName, selectSQL };
+    }
+    return null;
+  }
+
   function executeQuery() {
     const input = document.getElementById('sql-input');
     const sql = input.value.trim();
     if (!sql) return;
 
+    // Handle SELECT ... INTO ... by running the SELECT and creating the table from results
+    const intoInfo = extractIntoClause(sql);
+    if (intoInfo) {
+      try {
+        const rows = alasql(intoInfo.selectSQL);
+        if (!Array.isArray(rows) || rows.length === 0 || typeof rows[0] !== 'object') {
+          setStatus('INTO query returned no rows', 'error');
+          return;
+        }
+        const name = sanitizeTableName(intoInfo.targetName);
+        const uniqueName = tables[name] ? getUniqueTableName(name) : name;
+        const columns = Object.keys(rows[0]);
+        const tableRows = rows.map((r, i) => {
+          const row = { _rownum: i + 1 };
+          columns.forEach(c => { row[c] = r[c] != null ? String(r[c]) : ''; });
+          return row;
+        });
+        tables[uniqueName] = { columns, rows: tableRows, filename: null, modified: true, fileHandle: null };
+        registerAlaSQL(uniqueName);
+        createTableWindow(uniqueName);
+        setStatus(`Created table "${uniqueName}" with ${rows.length} row(s)`, 'success');
+      } catch (e) {
+        setStatus(`Error: ${e.message}`, 'error');
+      }
+      return;
+    }
+
+    // Snapshot existing AlaSQL tables before query
+    const tablesBefore = new Set(Object.keys(alasql.tables));
+
     try {
       const result = alasql(sql);
-      if (Array.isArray(result) && result.length > 0 && typeof result[0] === 'object') {
+
+      // Detect new tables created by CREATE TABLE etc.
+      const newAlaTables = Object.keys(alasql.tables).filter(n => !tablesBefore.has(n));
+
+      const createMatch = sql.match(/\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?\[?([^\]\s,(;]+)\]?/i);
+      if (createMatch) {
+        const createName = createMatch[1];
+        if (!newAlaTables.includes(createName) && alasql.tables[createName] && !tables[createName]) {
+          newAlaTables.push(createName);
+        }
+      }
+
+      if (newAlaTables.length > 0) {
+        importNewAlaTables(newAlaTables);
+        setStatus(`Created table(s): ${newAlaTables.join(', ')}`, 'success');
+      } else if (Array.isArray(result) && result.length > 0 && typeof result[0] === 'object') {
         showQueryResult(sql, result);
         setStatus(`Query returned ${result.length} row(s)`, 'success');
       } else if (Array.isArray(result)) {
         setStatus(`Query returned: ${JSON.stringify(result)}`, 'success');
-        // Refresh any affected tables
         refreshAllTableWindows();
       } else {
         setStatus(`Result: ${JSON.stringify(result)}`, 'success');
@@ -940,16 +1070,36 @@ const app = (() => {
     }
   }
 
+  function importNewAlaTables(tableNames) {
+    tableNames.forEach(name => {
+      const alaTable = alasql.tables[name];
+      if (!alaTable) return;
+      const data = alaTable.data || [];
+      const colDefs = alaTable.columns || [];
+      const columns = data.length > 0
+        ? Object.keys(data[0])
+        : colDefs.map(c => c.columnid);
+      const rows = data.map((r, i) => {
+        const row = { _rownum: i + 1 };
+        columns.forEach(c => { row[c] = r[c] != null ? String(r[c]) : ''; });
+        return row;
+      });
+      tables[name] = { columns, rows, filename: null, modified: true, fileHandle: null };
+      // Keep AlaSQL in sync with string values
+      registerAlaSQL(name);
+      createTableWindow(name);
+    });
+  }
+
   function showQueryResult(sql, resultRows) {
     const columns = Object.keys(resultRows[0]);
-    const queryLabel = sql.length > 40 ? sql.substring(0, 40) + '...' : sql;
     const tableName = '_query_' + nextWinId;
 
     // Store as a table so it can be saved
     const rows = resultRows.map((r, i) => ({ _rownum: i + 1, ...r }));
     tables[tableName] = { columns, rows, filename: null, modified: false };
 
-    createSubwindow('Query: ' + queryLabel, (win, body) => {
+    createSubwindow(tableName, (win, body) => {
       win.tableName = tableName;
       win.isQuery = true;
       renderTableView(win, body, tables[tableName]);
