@@ -62,7 +62,7 @@ html, body {
   background: var(--menu-bg);
   border: 1px solid var(--border);
   border-radius: 4px;
-  min-width: 180px;
+  min-width: 260px;
   padding: 4px 0;
   z-index: 1001;
   box-shadow: 0 4px 16px rgba(0,0,0,0.4);
@@ -73,7 +73,9 @@ html, body {
 }
 
 .menu-dropdown button {
-  display: block;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   width: 100%;
   text-align: left;
   padding: 6px 16px;
@@ -85,9 +87,19 @@ html, body {
   cursor: pointer;
 }
 
+.menu-dropdown button .shortcut {
+  color: var(--text-dim);
+  font-size: 11px;
+  margin-left: 24px;
+}
+
 .menu-dropdown button:hover {
   background: var(--accent);
   color: #fff;
+}
+
+.menu-dropdown button:hover .shortcut {
+  color: rgba(255,255,255,0.7);
 }
 
 .menu-dropdown hr {

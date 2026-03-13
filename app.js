@@ -16,6 +16,15 @@ const app = (() => {
     setupDragAndDrop();
     setupKeyboard();
     setupMenuClose();
+    fixShortcutLabels();
+  }
+
+  function fixShortcutLabels() {
+    if (navigator.platform.includes('Mac') || navigator.userAgent.includes('Mac')) {
+      document.querySelectorAll('.shortcut').forEach(el => {
+        el.textContent = el.textContent.replace('Ctrl+', '\u2318').replace('Shift+', '\u21E7');
+      });
+    }
   }
 
   // ---- File Menu ----
@@ -51,31 +60,54 @@ const app = (() => {
       e.preventDefault();
     });
 
-    document.addEventListener('drop', (e) => {
+    document.addEventListener('drop', async (e) => {
       e.preventDefault();
       dragCounter = 0;
       overlay.classList.remove('visible');
       closeMenus();
-      for (const file of e.dataTransfer.files) {
-        openFileByType(file);
+      const entries = [...e.dataTransfer.items].map(item => ({
+        file: item.getAsFile(),
+        handlePromise: item.getAsFileSystemHandle ? item.getAsFileSystemHandle().catch(() => null) : Promise.resolve(null),
+      }));
+      for (const entry of entries) {
+        const handle = await entry.handlePromise;
+        if (entry.file) openFileByType(entry.file, handle);
       }
     });
   }
 
-  function openFile() {
-    document.getElementById('file-input').click();
+  async function openFile() {
+    if (window.showOpenFilePicker) {
+      try {
+        const handles = await showOpenFilePicker({
+          multiple: true,
+          types: [
+            { description: 'CSV files', accept: { 'text/csv': ['.csv', '.tsv', '.txt'] } },
+            { description: 'Excel files', accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'], 'application/vnd.ms-excel': ['.xls'] } },
+          ],
+        });
+        for (const handle of handles) {
+          const file = await handle.getFile();
+          openFileByType(file, handle);
+        }
+      } catch (e) {
+        if (e.name !== 'AbortError') setStatus(`Error opening file: ${e.message}`, 'error');
+      }
+    } else {
+      document.getElementById('file-input').click();
+    }
   }
 
-  function openFileByType(file) {
+  function openFileByType(file, fileHandle) {
     const ext = file.name.split('.').pop().toLowerCase();
     if (ext === 'xlsx' || ext === 'xls') {
       loadExcelFile(file);
     } else {
-      loadCSVFile(file);
+      loadCSVFile(file, fileHandle);
     }
   }
 
-  function loadCSVFile(file) {
+  function loadCSVFile(file, fileHandle) {
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
@@ -85,7 +117,7 @@ const app = (() => {
         const uniqueName = getUniqueTableName(name);
         const columns = results.meta.fields || [];
         const rows = results.data.map((row, i) => ({ _rownum: i + 1, ...row }));
-        tables[uniqueName] = { columns, rows, filename: file.name, modified: false };
+        tables[uniqueName] = { columns, rows, filename: file.name, modified: false, fileHandle: fileHandle || null };
         registerAlaSQL(uniqueName);
         createTableWindow(uniqueName);
       },
@@ -150,33 +182,63 @@ const app = (() => {
     alasql.tables[tableName].data = insertRows;
   }
 
-  function saveActiveTable() {
+  async function saveActiveTable() {
     const win = getActiveDataWindow();
     if (!win) return;
     const t = tables[win.tableName];
     if (!t) return;
-    downloadCSV(win.tableName, t.filename || win.tableName + '.csv');
+    if (t.fileHandle) {
+      await writeToHandle(win.tableName, t.fileHandle);
+    } else {
+      const filename = t.filename || win.tableName + '.csv';
+      downloadCSV(win.tableName, filename);
+    }
   }
 
-  function saveActiveTableAs() {
+  async function saveActiveTableAs() {
     const win = getActiveDataWindow();
     if (!win) return;
     const t = tables[win.tableName];
-    const defaultName = t ? t.filename : win.tableName + '.csv';
-    showPrompt('Save As', 'Filename:', defaultName, (filename) => {
-      if (filename) downloadCSV(win.tableName, filename);
-    });
+    if (!t) return;
+    const filename = t.filename || win.tableName + '.csv';
+    if (window.showSaveFilePicker) {
+      try {
+        const handle = await showSaveFilePicker({
+          suggestedName: filename,
+          types: [
+            { description: 'CSV files', accept: { 'text/csv': ['.csv'] } },
+          ],
+        });
+        await writeToHandle(win.tableName, handle);
+        t.fileHandle = handle;
+      } catch (e) {
+        if (e.name !== 'AbortError') setStatus(`Error saving: ${e.message}`, 'error');
+      }
+    } else {
+      showPrompt('Save As', 'Filename:', filename, (newName) => {
+        if (newName) downloadCSV(win.tableName, newName);
+      });
+    }
+  }
+
+  async function writeToHandle(tableName, handle) {
+    const t = tables[tableName];
+    if (!t) return;
+    const csv = serializeCSV(tableName);
+    const writable = await handle.createWritable();
+    await writable.write(csv);
+    await writable.close();
+    const filename = handle.name;
+    t.modified = false;
+    t.filename = filename;
+    updateWindowTitle(tableName);
+    setStatus(`Saved ${filename}`, 'success');
   }
 
   function downloadCSV(tableName, filename) {
     const t = tables[tableName];
     if (!t) return;
-    const data = t.rows.map(r => {
-      const obj = {};
-      t.columns.forEach(c => { obj[c] = r[c]; });
-      return obj;
-    });
-    const csv = Papa.unparse(data, { columns: t.columns });
+    const csv = serializeCSV(tableName);
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -187,6 +249,16 @@ const app = (() => {
     t.filename = filename;
     updateWindowTitle(tableName);
     setStatus(`Saved ${filename}`, 'success');
+  }
+
+  function serializeCSV(tableName) {
+    const t = tables[tableName];
+    const data = t.rows.map(r => {
+      const obj = {};
+      t.columns.forEach(c => { obj[c] = r[c]; });
+      return obj;
+    });
+    return Papa.unparse(data, { columns: t.columns });
   }
 
   function newTable() {
@@ -820,6 +892,29 @@ const app = (() => {
         executeQuery();
       }
     });
+
+    document.addEventListener('keydown', (e) => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (!mod) return;
+      const key = e.key.toLowerCase();
+
+      if (key === 'o' && !e.shiftKey) {
+        e.preventDefault();
+        openFile();
+      } else if (key === 's' && !e.shiftKey) {
+        e.preventDefault();
+        saveActiveTable();
+      } else if (key === 's' && e.shiftKey) {
+        e.preventDefault();
+        saveActiveTableAs();
+      } else if (key === 'n' && !e.shiftKey) {
+        e.preventDefault();
+        newTable();
+      } else if (key === 'w' && !e.shiftKey) {
+        e.preventDefault();
+        if (activeWinId) closeWindow(activeWinId);
+      }
+    });
   }
 
   function executeQuery() {
@@ -1015,6 +1110,10 @@ const app = (() => {
     return d.innerHTML;
   }
 
+  function closeActiveWindow() {
+    if (activeWinId) closeWindow(activeWinId);
+  }
+
   // ---- Public API ----
   return {
     init,
@@ -1022,6 +1121,7 @@ const app = (() => {
     saveActiveTable,
     saveActiveTableAs,
     newTable,
+    closeActiveWindow,
     executeQuery,
     clearConsole,
     layoutTileH,
