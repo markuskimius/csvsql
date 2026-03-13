@@ -7,17 +7,19 @@
   <link rel="stylesheet" href="style.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/alasql/4.5.2/alasql.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
   <div id="menubar">
     <div class="menu-item" id="menu-file">
       <span class="menu-label">File</span>
       <div class="menu-dropdown">
-        <button onclick="app.openCSV()">Open CSV...</button>
-        <button onclick="app.saveActiveTable()">Save Table</button>
-        <button onclick="app.saveActiveTableAs()">Save Table As...</button>
+        <button onclick="app.openFile()">Open...<span class="shortcut">Ctrl+O</span></button>
+        <button onclick="app.saveActiveTable()">Save Table<span class="shortcut">Ctrl+S</span></button>
+        <button onclick="app.saveActiveTableAs()">Save Table As...<span class="shortcut">Ctrl+Shift+S</span></button>
         <hr>
-        <button onclick="app.newTable()">New Table</button>
+        <button onclick="app.newTable()">New Table<span class="shortcut">Ctrl+N</span></button>
+        <button onclick="app.closeActiveWindow()">Close Window<span class="shortcut">Ctrl+W</span></button>
       </div>
     </div>
     <div class="menu-item" id="menu-view">
@@ -58,7 +60,8 @@
     </div>
   </div>
 
-  <input type="file" id="file-input" accept=".csv,.tsv,.txt" multiple style="display:none">
+  <input type="file" id="file-input" accept=".csv,.tsv,.txt,.xlsx,.xls" multiple style="display:none">
+  <div id="drop-overlay">Drop files here</div>
   <script src="app.js"></script>
 </body>
 </html>
