@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "csvsql"
-version = "0.7.0"
+version = "0.7.1"
 description = "A browser-based CSV database with SQL query support"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.8"
 authors = [
-    {name = "Markus Kim"},
+    {name = "Mark Kim"},
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
