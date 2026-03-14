@@ -2315,6 +2315,148 @@ const app = (() => {
     if (activeWinId) closeWindow(activeWinId);
   }
 
+  // ---- Help ----
+  function showHelpWindow(title, bodyHTML) {
+    const area = document.getElementById('window-area');
+    const rect = area.getBoundingClientRect();
+    const w = Math.min(600, rect.width - 60);
+    const h = Math.min(500, rect.height - 40);
+    createSubwindow(title, (win, body) => {
+      body.innerHTML = `<div class="help-body">${bodyHTML}</div>`;
+    }, { width: w, height: h });
+  }
+
+  function showAbout() {
+    const license = `MIT License
+
+Copyright (c) 2026 Mark Kim
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
+    showHelpWindow('About CSVSQL', `
+      <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
+      <p>Version 0.7.2 &mdash; &copy; 2026 Mark Kim</p>
+      <h4>License</h4>
+      <div class="about-text">${escHtml(license)}</div>
+    `);
+  }
+
+  function showManual() {
+    showHelpWindow("User's Manual", `
+<h4>Overview</h4>
+<p>CSVSQL treats CSV and other data files as database tables. Open files, edit cells, run SQL queries, and save &mdash; all in the browser with no server required.</p>
+
+<h4>Opening Files</h4>
+<p>Use <strong>File &rarr; Open</strong> (<code>Ctrl+O</code> / <code>&#8984;O</code>), <strong>File &rarr; Open URL</strong>, or drag and drop files onto the window.</p>
+
+<table>
+<tr><th>Format</th><th>Extensions</th><th>Notes</th></tr>
+<tr><td>CSV</td><td>.csv, .txt</td><td>Delimiter auto-detected (comma, tab, pipe, etc.)</td></tr>
+<tr><td>TSV</td><td>.tsv</td><td>Tab-delimited</td></tr>
+<tr><td>PSV</td><td>.psv</td><td>Pipe-delimited</td></tr>
+<tr><td>Excel</td><td>.xlsx, .xls</td><td>Each non-empty worksheet opens as a separate table</td></tr>
+<tr><td>Gzip</td><td>.csv.gz, etc.</td><td>Decompressed in browser; inner file opened by type</td></tr>
+<tr><td>ZIP</td><td>.zip</td><td>All recognized data files inside the archive are opened</td></tr>
+</table>
+<p>Compressed formats (.bz2, .xz, .rar, .7z, .zst) are recognized but not yet supported for in-browser decompression &mdash; decompress these externally first.</p>
+
+<h4>Saving Files</h4>
+<p><strong>Save</strong> (<code>Ctrl+S</code> / <code>&#8984;S</code>) writes directly back to the original file if the browser supports the File System Access API (Chrome, Edge). On browsers without this API (Firefox), Save triggers a download.</p>
+<p><strong>Save As</strong> (<code>Ctrl+Shift+S</code>) always prompts for a new filename and location. You can choose CSV, TSV, PSV, Excel (.xlsx), Gzip, or ZIP format.</p>
+<p><strong>When Save acts as Save As:</strong> Save falls back to Save As when the table has no associated file handle &mdash; for example, tables created via <code>New Table</code>, SQL query results, or tables created with <code>SELECT INTO</code>.</p>
+
+<p><strong>Multi-file save behavior:</strong></p>
+<ul>
+<li><strong>ZIP archives:</strong> Saving any table from a ZIP re-packs all tables from that archive into the same ZIP. If any table from the archive has been closed, Save falls back to Save As to avoid data loss.</li>
+<li><strong>Excel workbooks:</strong> Saving any sheet from an Excel file re-packs all sheets into the same workbook. If any sheet has been closed, Save falls back to Save As.</li>
+<li><strong>Gzip files:</strong> Saved back to the original .gz file with compression.</li>
+</ul>
+
+<h4>Editing</h4>
+<ul>
+<li><strong>Edit cells:</strong> Click any cell to edit. Press <code>Tab</code>/<code>Shift+Tab</code> to move between cells, <code>Enter</code> to move down, <code>Escape</code> to cancel.</li>
+<li><strong>Add rows:</strong> Click <code>+ Row</code> in the toolbar, or right-click a row number to insert above.</li>
+<li><strong>Delete rows:</strong> Right-click a row number and choose Delete Row.</li>
+<li><strong>Add columns:</strong> Click <code>+ Col</code> in the toolbar.</li>
+<li><strong>Rename columns:</strong> <code>Ctrl</code>/<code>&#8984;</code>+click a column header.</li>
+<li><strong>Reorder columns:</strong> <code>Ctrl</code>/<code>&#8984;</code>+drag a column header to a new position.</li>
+<li><strong>Rename tables:</strong> <code>Ctrl</code>/<code>&#8984;</code>+click the window title.</li>
+</ul>
+
+<h4>Sorting &amp; Filtering</h4>
+<ul>
+<li><strong>Sort:</strong> Click a column header to sort ascending &rarr; descending &rarr; unsorted.</li>
+<li><strong>Multi-column sort:</strong> Shift+click additional column headers. Numbers next to arrows indicate sort priority.</li>
+<li><strong>Filter:</strong> Type a SQL <code>WHERE</code> clause in the filter bar (without the <code>WHERE</code> keyword). For example: <code>age > 30 AND name LIKE '%Smith%'</code></li>
+<li>The filter supports all SQLite expressions including <code>REGEXP</code> (see below).</li>
+</ul>
+
+<h4>SQL Console</h4>
+<p>The SQL Console at the bottom runs queries against all open tables using SQLite syntax. Press <code>Ctrl+Enter</code> / <code>&#8984;+Enter</code> to execute.</p>
+<p>Tables are referenced by the name shown in their window title bar. Names are sanitized to <code>[a-zA-Z0-9_]</code> characters.</p>
+
+<h4>SQL Syntax Reference</h4>
+<p>Standard SQLite syntax is supported. All column values are stored as TEXT.</p>
+
+<pre>SELECT column1, column2 FROM tablename
+  WHERE condition
+  ORDER BY column1 ASC
+  LIMIT 100</pre>
+
+<p><strong>Joins, subqueries, aggregates, GROUP BY, HAVING, UNION, CASE</strong> &mdash; all standard SQLite features work.</p>
+
+<h4>REGEXP</h4>
+<p>CSVSQL adds a <code>REGEXP</code> function (not available in standard SQLite). It performs a case-insensitive regular expression match.</p>
+<pre>SELECT * FROM employees
+  WHERE name REGEXP '^(John|Jane)'
+
+-- In the filter bar:
+name REGEXP 'smith|jones'</pre>
+
+<h4>SELECT INTO</h4>
+<p>Use <code>SELECT ... INTO tablename ...</code> to create a new table from query results. The <code>INTO</code> clause can appear anywhere in the SELECT statement.</p>
+<pre>SELECT name, salary INTO high_earners
+  FROM employees WHERE salary > 100000
+
+SELECT * FROM orders
+  INTO us_orders
+  WHERE country = 'US'</pre>
+<p>The new table opens in its own window and can be edited, queried, and saved like any other table.</p>
+
+<h4>CREATE TABLE</h4>
+<p>New tables created via SQL automatically open as editable windows:</p>
+<pre>CREATE TABLE projects (id, name, status)
+
+INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
+
+<h4>DDL &amp; DML</h4>
+<p><code>INSERT</code>, <code>UPDATE</code>, <code>DELETE</code>, <code>ALTER TABLE</code>, and <code>DROP TABLE</code> all work. Changes to existing tables are reflected in their windows immediately after execution.</p>
+
+<h4>Window Management</h4>
+<ul>
+<li><strong>Move:</strong> Drag the title bar.</li>
+<li><strong>Resize:</strong> Drag any edge or corner.</li>
+<li><strong>Maximize/Restore:</strong> Double-click the title bar, or click the maximize button.</li>
+<li><strong>Minimize:</strong> Click the minimize button. Restore from the Windows menu.</li>
+<li><strong>Close:</strong> Click the close button. <code>Ctrl</code>/<code>&#8984;</code>+click closes all windows.</li>
+<li><strong>Layout:</strong> Use the View menu to tile, grid, or cascade all windows.</li>
+</ul>
+
+<h4>Keyboard Shortcuts</h4>
+<table>
+<tr><th>Shortcut</th><th>Action</th></tr>
+<tr><td><code>Ctrl+O</code> / <code>&#8984;O</code></td><td>Open file</td></tr>
+<tr><td><code>Ctrl+S</code> / <code>&#8984;S</code></td><td>Save table</td></tr>
+<tr><td><code>Ctrl+N</code> / <code>&#8984;N</code></td><td>New table</td></tr>
+<tr><td><code>Ctrl+W</code> / <code>&#8984;W</code></td><td>Close window</td></tr>
+<tr><td><code>Ctrl+Enter</code></td><td>Execute SQL query</td></tr>
+</table>
+    `);
+  }
+
   // ---- Public API ----
   return {
     init,
@@ -2333,6 +2475,8 @@ const app = (() => {
     layoutCascade,
     minimizeAll,
     restoreAll,
+    showAbout,
+    showManual,
   };
 })();
 

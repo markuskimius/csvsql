@@ -740,3 +740,99 @@ body {
 #drop-overlay.visible {
   display: flex;
 }
+
+/* ---- Help window body ---- */
+.help-body {
+  overflow-y: auto;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text);
+  padding: 12px 16px;
+  flex: 1;
+}
+
+.help-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.help-body::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+.help-body::-webkit-scrollbar-thumb {
+  background: var(--scrollbar);
+  border-radius: 3px;
+}
+
+.help-body h4 {
+  margin: 14px 0 6px;
+  font-size: 13px;
+  color: var(--accent-hover);
+}
+
+.help-body h4:first-child {
+  margin-top: 0;
+}
+
+.help-body p {
+  margin: 4px 0;
+}
+
+.help-body code {
+  background: var(--bg);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+.help-body pre {
+  background: var(--bg);
+  padding: 8px 10px;
+  border-radius: 4px;
+  margin: 6px 0;
+  overflow-x: auto;
+  font-size: 12px;
+}
+
+.help-body ul,
+.help-body dl {
+  margin: 4px 0 4px 18px;
+}
+
+.help-body li {
+  margin: 2px 0;
+}
+
+.help-body dt {
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+.help-body dd {
+  margin-left: 16px;
+}
+
+.help-body table {
+  border-collapse: collapse;
+  margin: 6px 0;
+  width: 100%;
+}
+
+.help-body table th,
+.help-body table td {
+  border: 1px solid var(--border);
+  padding: 3px 8px;
+  text-align: left;
+  font-size: 12px;
+}
+
+.help-body table th {
+  background: var(--surface2);
+}
+
+.help-body .about-text {
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+}
