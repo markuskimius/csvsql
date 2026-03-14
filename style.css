@@ -537,6 +537,25 @@ body {
   color: var(--success);
 }
 
+#console-status.working {
+  color: var(--accent);
+}
+
+#console-status.working::after {
+  content: '';
+  display: inline-block;
+  width: 3px;
+  height: 10px;
+  background: var(--accent);
+  margin-left: 4px;
+  vertical-align: middle;
+  animation: blink 0.6s step-end infinite;
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
 /* ---- New Table Dialog ---- */
 .modal-overlay {
   position: fixed;

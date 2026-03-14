@@ -123,6 +123,8 @@ const app = (() => {
   }
 
   function loadCSVFile(file, fileHandle) {
+    setStatus(`Loading ${file.name}...`, 'working');
+    const t0 = performance.now();
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
@@ -140,6 +142,8 @@ const app = (() => {
         tables[uniqueName] = { columns, rows, filename: file.name, modified: false, fileHandle: fileHandle || null };
         registerTable(uniqueName);
         createTableWindow(uniqueName);
+        const elapsed = performance.now() - t0;
+        setStatus(`Opened ${file.name} (${rows.length} rows) in ${formatElapsed(elapsed)}`, 'success');
       },
       error(err) {
         setStatus(`Error parsing ${file.name}: ${err.message}`, 'error');
@@ -148,6 +152,8 @@ const app = (() => {
   }
 
   function loadExcelFile(file) {
+    setStatus(`Loading ${file.name}...`, 'working');
+    const t0 = performance.now();
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
@@ -171,7 +177,8 @@ const app = (() => {
           registerTable(uniqueName);
           createTableWindow(uniqueName);
         });
-        setStatus(`Opened ${file.name} (${workbook.SheetNames.length} sheet(s))`, 'success');
+        const elapsed = performance.now() - t0;
+        setStatus(`Opened ${file.name} (${workbook.SheetNames.length} sheet(s)) in ${formatElapsed(elapsed)}`, 'success');
       } catch (err) {
         setStatus(`Error reading ${file.name}: ${err.message}`, 'error');
       }
@@ -222,11 +229,13 @@ const app = (() => {
     }
     if (t.rows.length === 0 || t.columns.length === 0) return;
     const placeholders = t.columns.map(() => '?').join(', ');
+    db.run('BEGIN TRANSACTION');
     const stmt = db.prepare(`INSERT INTO [${tableName}] VALUES (${placeholders})`);
     for (const row of t.rows) {
       stmt.run(t.columns.map(c => row[c] ?? ''));
     }
     stmt.free();
+    db.run('COMMIT');
   }
 
   async function saveActiveTable() {
@@ -869,6 +878,11 @@ const app = (() => {
         row[col] = newVal;
         td.classList.add('modified');
         markModified(win.tableName);
+        const t = tables[win.tableName];
+        if (t) {
+          if (!t._dirtyCells) t._dirtyCells = [];
+          t._dirtyCells.push({ rownum: row._rownum, col, value: newVal });
+        }
         debouncedSync(win.tableName);
       }
     }, true); // capture phase for blur
@@ -1085,7 +1099,25 @@ const app = (() => {
   function syncToSQL(tableName) {
     const t = tables[tableName];
     if (!t || !db || t.columns.length === 0) return;
+
+    // If we have targeted dirty cells, apply only those changes
+    if (t._dirtyCells && t._dirtyCells.length > 0) {
+      try {
+        db.run('BEGIN TRANSACTION');
+        for (const { rownum, col, value } of t._dirtyCells) {
+          db.run(`UPDATE [${tableName}] SET [${col}] = ? WHERE rowid = ?`, [value, rownum]);
+        }
+        db.run('COMMIT');
+      } catch (e) {
+        try { db.run('ROLLBACK'); } catch (_) {}
+      }
+      t._dirtyCells = [];
+      return;
+    }
+
+    // Full resync fallback (for add/delete row, add column, etc.)
     try {
+      db.run('BEGIN TRANSACTION');
       db.run(`DELETE FROM [${tableName}]`);
       const placeholders = t.columns.map(() => '?').join(', ');
       const stmt = db.prepare(`INSERT INTO [${tableName}] VALUES (${placeholders})`);
@@ -1093,7 +1125,10 @@ const app = (() => {
         stmt.run(t.columns.map(c => row[c] ?? ''));
       }
       stmt.free();
-    } catch (e) {}
+      db.run('COMMIT');
+    } catch (e) {
+      try { db.run('ROLLBACK'); } catch (_) {}
+    }
   }
 
   function debouncedSync(tableName, delay = 300) {
@@ -1228,79 +1263,88 @@ const app = (() => {
     return result[0].values.map(r => r[0]);
   }
 
+  // Max rows to materialize from a query result into a window
+  const MAX_RESULT_ROWS = 100000;
+
   function executeQuery() {
-    flushAllSyncs();
     const input = document.getElementById('sql-input');
     const sql = autoQuoteSQL(input.value.trim());
     if (!sql) return;
 
-    const t0 = performance.now();
+    setStatus('Running query...', 'working');
 
-    // Handle SELECT ... INTO ... by running the SELECT and creating the table from results
-    const intoInfo = extractIntoClause(sql);
-    if (intoInfo) {
+    // Defer execution so browser can paint the "working" status
+    setTimeout(() => {
       try {
-        const result = db.exec(intoInfo.selectSQL);
-        const elapsed = performance.now() - t0;
-        const rows = sqlResultToRows(result);
-        if (rows.length === 0) {
-          setStatus('INTO query returned no rows', 'error');
+        flushAllSyncs();
+        const t0 = performance.now();
+
+        // Handle SELECT ... INTO ... by running the SELECT and creating the table from results
+        const intoInfo = extractIntoClause(sql);
+        if (intoInfo) {
+          const result = db.exec(intoInfo.selectSQL);
+          const elapsed = performance.now() - t0;
+          const rows = sqlResultToRows(result);
+          if (rows.length === 0) {
+            setStatus('INTO query returned no rows', 'error');
+            return;
+          }
+          const name = sanitizeTableName(intoInfo.targetName);
+          const uniqueName = tables[name] ? getUniqueTableName(name) : name;
+          const rawColumns = Object.keys(rows[0]);
+          const columns = sanitizeColumns(rawColumns);
+          const tableRows = rows.map((r, i) => {
+            const row = { _rownum: i + 1 };
+            rawColumns.forEach((raw, j) => { row[columns[j]] = r[raw] != null ? String(r[raw]) : ''; });
+            return row;
+          });
+          tables[uniqueName] = { columns, rows: tableRows, filename: null, modified: true, fileHandle: null };
+          registerTable(uniqueName);
+          createTableWindow(uniqueName);
+          setStatus(`Created table "${uniqueName}" with ${tableRows.length} row(s) in ${formatElapsed(elapsed)}`, 'success');
           return;
         }
-        const name = sanitizeTableName(intoInfo.targetName);
-        const uniqueName = tables[name] ? getUniqueTableName(name) : name;
-        const rawColumns = Object.keys(rows[0]);
-        const columns = sanitizeColumns(rawColumns);
-        const tableRows = rows.map((r, i) => {
-          const row = { _rownum: i + 1 };
-          rawColumns.forEach((raw, j) => { row[columns[j]] = r[raw] != null ? String(r[raw]) : ''; });
-          return row;
-        });
-        tables[uniqueName] = { columns, rows: tableRows, filename: null, modified: true, fileHandle: null };
-        registerTable(uniqueName);
-        createTableWindow(uniqueName);
-        setStatus(`Created table "${uniqueName}" with ${tableRows.length} row(s) in ${formatElapsed(elapsed)}`, 'success');
+
+        // Snapshot existing DB tables before query
+        const tablesBefore = new Set(getDBTables());
+
+        const result = db.exec(sql);
+        const elapsed = performance.now() - t0;
+
+        // Detect new tables created by CREATE TABLE etc.
+        const newTables = getDBTables().filter(n => !tablesBefore.has(n));
+
+        const createMatch = sql.match(/\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?\[?([^\]\s,(;]+)\]?/i);
+        if (createMatch) {
+          const createName = createMatch[1];
+          if (!newTables.includes(createName) && !tables[createName]) {
+            const dbTables = getDBTables();
+            if (dbTables.includes(createName)) newTables.push(createName);
+          }
+        }
+
+        if (newTables.length > 0) {
+          importNewDBTables(newTables);
+          setStatus(`Created table(s): ${newTables.join(', ')} in ${formatElapsed(elapsed)}`, 'success');
+        } else if (result.length > 0 && result[0].columns && result[0].values.length > 0) {
+          const totalRows = result[0].values.length;
+          const truncated = totalRows > MAX_RESULT_ROWS;
+          if (truncated) {
+            result[0].values = result[0].values.slice(0, MAX_RESULT_ROWS);
+          }
+          const rows = sqlResultToRows(result);
+          showQueryResult(sql, rows);
+          const suffix = truncated ? ` (showing first ${MAX_RESULT_ROWS.toLocaleString()} of ${totalRows.toLocaleString()})` : '';
+          setStatus(`Query returned ${totalRows.toLocaleString()} row(s) in ${formatElapsed(elapsed)}${suffix}`, 'success');
+        } else {
+          const msg = result.length > 0 ? `${result[0].values.length} row(s) affected` : 'OK';
+          setStatus(`${msg} in ${formatElapsed(elapsed)}`, 'success');
+          refreshAllTableWindows();
+        }
       } catch (e) {
         setStatus(`Error: ${e.message}`, 'error');
       }
-      return;
-    }
-
-    // Snapshot existing DB tables before query
-    const tablesBefore = new Set(getDBTables());
-
-    try {
-      const result = db.exec(sql);
-      const elapsed = performance.now() - t0;
-
-      // Detect new tables created by CREATE TABLE etc.
-      const newTables = getDBTables().filter(n => !tablesBefore.has(n));
-
-      const createMatch = sql.match(/\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?\[?([^\]\s,(;]+)\]?/i);
-      if (createMatch) {
-        const createName = createMatch[1];
-        if (!newTables.includes(createName) && !tables[createName]) {
-          const dbTables = getDBTables();
-          if (dbTables.includes(createName)) newTables.push(createName);
-        }
-      }
-
-      if (newTables.length > 0) {
-        importNewDBTables(newTables);
-        setStatus(`Created table(s): ${newTables.join(', ')} in ${formatElapsed(elapsed)}`, 'success');
-      } else if (result.length > 0 && result[0].columns && result[0].values.length > 0) {
-        const rows = sqlResultToRows(result);
-        showQueryResult(sql, rows);
-        setStatus(`Query returned ${rows.length} row(s) in ${formatElapsed(elapsed)}`, 'success');
-      } else {
-        const msg = result.length > 0 ? `${result[0].values.length} row(s) affected` : 'OK';
-        setStatus(`${msg} in ${formatElapsed(elapsed)}`, 'success');
-        refreshAllTableWindows();
-      }
-    } catch (e) {
-      const elapsed = performance.now() - t0;
-      setStatus(`Error: ${e.message} (${formatElapsed(elapsed)})`, 'error');
-    }
+    }, 0);
   }
 
   function importNewDBTables(tableNames) {
