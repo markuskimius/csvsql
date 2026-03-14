@@ -365,9 +365,10 @@ const app = (() => {
     const handle = t.fileHandle || (t.compression && t.compression.fileHandle);
     if (handle) {
       await writeToHandle(win.tableName, handle);
+    } else if (t.filename) {
+      await downloadCSV(win.tableName, t.filename);
     } else {
-      const filename = t.filename || win.tableName + '.csv';
-      downloadCSV(win.tableName, filename);
+      await saveActiveTableAs();
     }
   }
 
@@ -863,7 +864,8 @@ const app = (() => {
     windows.filter(w => w.tableName === tableName).forEach(w => {
       const t = tables[tableName];
       const mod = t && t.modified ? ' *' : '';
-      w.el.querySelector('.win-title').textContent = tableName + mod;
+      const fname = t && t.filename ? ' — ' + compressedFilename(t.filename, t.compression) : '';
+      w.el.querySelector('.win-title').textContent = tableName + fname + mod;
     });
   }
 
@@ -968,7 +970,8 @@ const app = (() => {
   // ---- Table Window ----
   function createTableWindow(tableName) {
     const t = tables[tableName];
-    createSubwindow(tableName, (win, body) => {
+    const fname = t && t.filename ? ' — ' + compressedFilename(t.filename, t.compression) : '';
+    createSubwindow(tableName + fname, (win, body) => {
       win.tableName = tableName;
       renderTableView(win, body, t);
     }, { tableName });
@@ -1565,25 +1568,13 @@ const app = (() => {
     });
 
     document.addEventListener('keydown', (e) => {
-      const mod = e.ctrlKey || e.metaKey;
-      if (!mod) return;
-      const key = e.key.toLowerCase();
-
-      if (key === 'o' && !e.shiftKey) {
-        e.preventDefault();
-        openFile();
-      } else if (key === 's' && !e.shiftKey) {
-        e.preventDefault();
-        saveActiveTable();
-      } else if (key === 's' && e.shiftKey) {
-        e.preventDefault();
-        saveActiveTableAs();
-      } else if (key === 'n' && !e.shiftKey) {
-        e.preventDefault();
-        newTable();
-      } else if (key === 'w' && !e.shiftKey) {
-        e.preventDefault();
-        if (activeWinId) closeWindow(activeWinId);
+      if (!(e.ctrlKey || e.metaKey)) return;
+      switch (e.key) {
+        case 'S': e.preventDefault(); saveActiveTableAs(); break;
+        case 's': e.preventDefault(); saveActiveTable(); break;
+        case 'o': e.preventDefault(); openFile(); break;
+        case 'n': e.preventDefault(); newTable(); break;
+        case 'w': e.preventDefault(); if (activeWinId) closeWindow(activeWinId); break;
       }
     });
   }
