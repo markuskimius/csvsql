@@ -125,8 +125,13 @@ const app = (() => {
       complete(results) {
         const name = sanitizeTableName(file.name.replace(/\.[^.]+$/, ''));
         const uniqueName = getUniqueTableName(name);
-        const columns = results.meta.fields || [];
-        const rows = results.data.map((row, i) => ({ _rownum: i + 1, ...row }));
+        const rawColumns = results.meta.fields || [];
+        const columns = sanitizeColumns(rawColumns);
+        const rows = results.data.map((row, i) => {
+          const r = { _rownum: i + 1 };
+          rawColumns.forEach((raw, j) => { r[columns[j]] = row[raw] ?? ''; });
+          return r;
+        });
         tables[uniqueName] = { columns, rows, filename: file.name, modified: false, fileHandle: fileHandle || null };
         registerAlaSQL(uniqueName);
         createTableWindow(uniqueName);
@@ -150,10 +155,11 @@ const app = (() => {
           const label = workbook.SheetNames.length > 1 ? baseName + '_' + sheetName : baseName;
           const name = sanitizeTableName(label);
           const uniqueName = getUniqueTableName(name);
-          const columns = Object.keys(jsonData[0]);
+          const rawColumns = Object.keys(jsonData[0]);
+          const columns = sanitizeColumns(rawColumns);
           const rows = jsonData.map((row, i) => {
             const r = { _rownum: i + 1 };
-            columns.forEach(c => { r[c] = row[c] != null ? String(row[c]) : ''; });
+            rawColumns.forEach((raw, j) => { r[columns[j]] = row[raw] != null ? String(row[raw]) : ''; });
             return r;
           });
           tables[uniqueName] = { columns, rows, filename: file.name, modified: false };
@@ -170,6 +176,26 @@ const app = (() => {
 
   function sanitizeTableName(name) {
     return name.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^[0-9]/, '_$&');
+  }
+
+  function sanitizeColumnName(name) {
+    return name.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^[0-9]/, '_$&');
+  }
+
+  // Sanitize column names and dedup collisions (e.g. "First Name" & "First-Name" both → "First_Name")
+  function sanitizeColumns(rawColumns) {
+    const seen = {};
+    return rawColumns.map(raw => {
+      let col = sanitizeColumnName(raw);
+      if (seen[col]) {
+        let n = seen[col] + 1;
+        while (seen[col + '_' + n]) n++;
+        seen[col] = n;
+        col = col + '_' + n;
+      }
+      seen[col] = (seen[col] || 0) + 1;
+      return col;
+    });
   }
 
   function getUniqueTableName(base) {
@@ -1155,6 +1181,16 @@ const app = (() => {
     });
   }
 
+  function autoQuoteSQL(sql) {
+    const names = Object.keys(tables).sort((a, b) => b.length - a.length);
+    for (const name of names) {
+      if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) continue;
+      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      sql = sql.replace(new RegExp('(?<!\\[)\\b' + escaped + '\\b(?!\\])', 'g'), '[' + name + ']');
+    }
+    return sql;
+  }
+
   function extractIntoClause(sql) {
     // Match INTO [tablename] anywhere in a SELECT statement and strip it out
     // Supports: SELECT ... INTO name FROM ..., SELECT ... FROM ... INTO name WHERE ...
@@ -1171,7 +1207,7 @@ const app = (() => {
   function executeQuery() {
     flushAllSyncs();
     const input = document.getElementById('sql-input');
-    const sql = input.value.trim();
+    const sql = autoQuoteSQL(input.value.trim());
     if (!sql) return;
 
     const t0 = performance.now();
@@ -1188,10 +1224,11 @@ const app = (() => {
         }
         const name = sanitizeTableName(intoInfo.targetName);
         const uniqueName = tables[name] ? getUniqueTableName(name) : name;
-        const columns = Object.keys(rows[0]);
+        const rawColumns = Object.keys(rows[0]);
+        const columns = sanitizeColumns(rawColumns);
         const tableRows = rows.map((r, i) => {
           const row = { _rownum: i + 1 };
-          columns.forEach(c => { row[c] = r[c] != null ? String(r[c]) : ''; });
+          rawColumns.forEach((raw, j) => { row[columns[j]] = r[raw] != null ? String(r[raw]) : ''; });
           return row;
         });
         tables[uniqueName] = { columns, rows: tableRows, filename: null, modified: true, fileHandle: null };
@@ -1247,12 +1284,13 @@ const app = (() => {
       if (!alaTable) return;
       const data = alaTable.data || [];
       const colDefs = alaTable.columns || [];
-      const columns = data.length > 0
+      const rawColumns = data.length > 0
         ? Object.keys(data[0])
         : colDefs.map(c => c.columnid);
+      const columns = sanitizeColumns(rawColumns);
       const rows = data.map((r, i) => {
         const row = { _rownum: i + 1 };
-        columns.forEach(c => { row[c] = r[c] != null ? String(r[c]) : ''; });
+        rawColumns.forEach((raw, j) => { row[columns[j]] = r[raw] != null ? String(r[raw]) : ''; });
         return row;
       });
       tables[name] = { columns, rows, filename: null, modified: true, fileHandle: null };
@@ -1263,11 +1301,16 @@ const app = (() => {
   }
 
   function showQueryResult(sql, resultRows) {
-    const columns = Object.keys(resultRows[0]);
+    const rawColumns = Object.keys(resultRows[0]);
+    const columns = sanitizeColumns(rawColumns);
     const tableName = '_query_' + nextWinId;
 
     // Store as a table so it can be saved
-    const rows = resultRows.map((r, i) => ({ _rownum: i + 1, ...r }));
+    const rows = resultRows.map((r, i) => {
+      const row = { _rownum: i + 1 };
+      rawColumns.forEach((raw, j) => { row[columns[j]] = r[raw] != null ? String(r[raw]) : ''; });
+      return row;
+    });
     tables[tableName] = { columns, rows, filename: null, modified: false };
 
     createSubwindow(tableName, (win, body) => {
