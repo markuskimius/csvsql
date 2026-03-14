@@ -9,6 +9,16 @@ const app = (() => {
   let activeWinId = null;
   let tables = {};  // tableName -> { columns, rows, filename, modified }
 
+  // Virtual scrolling constants
+  const ROW_HEIGHT = 26;
+  const OVERSCAN = 10;
+
+  // Debounced sync timers
+  const syncTimers = {};
+
+  // Sort optimization
+  const collator = new Intl.Collator(undefined, { sensitivity: 'base' });
+
   // ---- Init ----
   function init() {
     setupConsoleResize();
@@ -188,6 +198,7 @@ const app = (() => {
   }
 
   async function saveActiveTable() {
+    flushAllSyncs();
     const win = getActiveDataWindow();
     if (!win) return;
     const t = tables[win.tableName];
@@ -201,6 +212,7 @@ const app = (() => {
   }
 
   async function saveActiveTableAs() {
+    flushAllSyncs();
     const win = getActiveDataWindow();
     if (!win) return;
     const t = tables[win.tableName];
@@ -241,6 +253,7 @@ const app = (() => {
   }
 
   function downloadCSV(tableName, filename) {
+    flushAllSyncs();
     const t = tables[tableName];
     if (!t) return;
     const csv = serializeCSV(tableName);
@@ -719,6 +732,9 @@ const app = (() => {
     toolbar.querySelector('.btn-add-row').addEventListener('click', () => {
       addRow(win.tableName);
       rebuildTable(win);
+      // Scroll to bottom to show new row
+      const container = win.el.querySelector('.table-container');
+      if (container) container.scrollTop = container.scrollHeight;
     });
 
     toolbar.querySelector('.btn-add-col').addEventListener('click', () => {
@@ -757,9 +773,14 @@ const app = (() => {
         const va = a[col] ?? '', vb = b[col] ?? '';
         const na = Number(va), nb = Number(vb);
         if (!isNaN(na) && !isNaN(nb) && va !== '' && vb !== '') return (na - nb) * dir;
-        return String(va).localeCompare(String(vb)) * dir;
+        return collator.compare(String(va), String(vb)) * dir;
       });
     }
+
+    // Store display rows for virtual scrolling
+    win._displayRows = displayRows;
+    win._columns = columns;
+    win._container = container;
 
     const table = document.createElement('table');
     table.className = 'data-table';
@@ -795,64 +816,100 @@ const app = (() => {
     thead.appendChild(headerRow);
     table.appendChild(thead);
 
-    // Body
+    // Body — virtual scrolling renders only visible rows
     const tbody = document.createElement('tbody');
-    displayRows.forEach(row => {
-      const tr = document.createElement('tr');
-      const numTd = document.createElement('td');
-      numTd.className = 'row-num';
-      numTd.textContent = row._rownum;
-      tr.appendChild(numTd);
-
-      // Right-click context menu on row number
-      numTd.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        showRowContextMenu(e.clientX, e.clientY, win.tableName, row._rownum, win);
-      });
-
-      columns.forEach(col => {
-        const td = document.createElement('td');
-        td.textContent = row[col] ?? '';
-        td.setAttribute('contenteditable', 'true');
-        td.addEventListener('blur', () => {
-          const newVal = td.textContent;
-          if (newVal !== (row[col] ?? '')) {
-            row[col] = newVal;
-            td.classList.add('modified');
-            markModified(win.tableName);
-            syncToAlaSQL(win.tableName);
-          }
-        });
-        td.addEventListener('keydown', (e) => {
-          if (e.key === 'Tab') {
-            e.preventDefault();
-            const cells = [...tr.querySelectorAll('td[contenteditable]')];
-            const idx = cells.indexOf(td);
-            const next = e.shiftKey ? cells[idx - 1] : cells[idx + 1];
-            if (next) next.focus();
-          } else if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            td.blur();
-            // Move to next row same column
-            const nextTr = tr.nextElementSibling;
-            if (nextTr) {
-              const colIdx = [...tr.children].indexOf(td);
-              const nextTd = nextTr.children[colIdx];
-              if (nextTd && nextTd.getAttribute('contenteditable')) nextTd.focus();
-            }
-          } else if (e.key === 'Escape') {
-            td.textContent = row[col] ?? '';
-            td.blur();
-          }
-        });
-        tr.appendChild(td);
-      });
-      tbody.appendChild(tr);
-    });
     table.appendChild(tbody);
+    win._tbody = tbody;
+    win._table = table;
+
+    // Event delegation on table — replaces per-cell listeners
+    table.addEventListener('blur', (e) => {
+      const td = e.target;
+      if (td.tagName !== 'TD' || !td.getAttribute('contenteditable')) return;
+      const tr = td.parentElement;
+      const displayIdx = parseInt(tr.dataset.displayIdx, 10);
+      const colIdx = parseInt(td.dataset.colIdx, 10);
+      if (isNaN(displayIdx) || isNaN(colIdx)) return;
+      const row = win._displayRows[displayIdx];
+      const col = win._columns[colIdx];
+      if (!row || col == null) return;
+      const newVal = td.textContent;
+      if (newVal !== String(row[col] ?? '')) {
+        row[col] = newVal;
+        td.classList.add('modified');
+        markModified(win.tableName);
+        debouncedSyncToAlaSQL(win.tableName);
+      }
+    }, true); // capture phase for blur
+
+    table.addEventListener('keydown', (e) => {
+      const td = e.target;
+      if (td.tagName !== 'TD' || !td.getAttribute('contenteditable')) return;
+      const tr = td.parentElement;
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        const cells = [...tr.querySelectorAll('td[contenteditable]')];
+        const idx = cells.indexOf(td);
+        const next = e.shiftKey ? cells[idx - 1] : cells[idx + 1];
+        if (next) next.focus();
+      } else if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        td.blur();
+        const nextTr = tr.nextElementSibling;
+        if (nextTr && !nextTr.classList.contains('virtual-pad')) {
+          const colIdx = [...tr.children].indexOf(td);
+          const nextTd = nextTr.children[colIdx];
+          if (nextTd && nextTd.getAttribute('contenteditable')) nextTd.focus();
+        }
+      } else if (e.key === 'Escape') {
+        const displayIdx = parseInt(tr.dataset.displayIdx, 10);
+        const colIdx = parseInt(td.dataset.colIdx, 10);
+        if (!isNaN(displayIdx) && !isNaN(colIdx)) {
+          const row = win._displayRows[displayIdx];
+          const col = win._columns[colIdx];
+          if (row && col != null) td.textContent = row[col] ?? '';
+        }
+        td.blur();
+      }
+    });
+
+    table.addEventListener('contextmenu', (e) => {
+      const td = e.target.closest('td.row-num');
+      if (!td) return;
+      e.preventDefault();
+      const tr = td.parentElement;
+      const displayIdx = parseInt(tr.dataset.displayIdx, 10);
+      if (isNaN(displayIdx)) return;
+      const row = win._displayRows[displayIdx];
+      if (row) showRowContextMenu(e.clientX, e.clientY, win.tableName, row._rownum, win);
+    });
 
     container.innerHTML = '';
     container.appendChild(table);
+
+    // Reset render range tracking
+    win._renderStart = -1;
+    win._renderEnd = -1;
+
+    // Initial render of visible rows
+    renderVisibleRows(win);
+
+    // Scroll listener for virtual scrolling
+    let scrollRaf = 0;
+    container.addEventListener('scroll', () => {
+      if (scrollRaf) return;
+      scrollRaf = requestAnimationFrame(() => {
+        scrollRaf = 0;
+        renderVisibleRows(win);
+      });
+    });
+
+    // ResizeObserver to re-render when window resizes
+    if (win._resizeObserver) win._resizeObserver.disconnect();
+    win._resizeObserver = new ResizeObserver(() => {
+      renderVisibleRows(win);
+    });
+    win._resizeObserver.observe(container);
 
     // Update statusbar
     const statusLeft = win.el.querySelector('.status-left');
@@ -861,11 +918,103 @@ const app = (() => {
     statusRight.textContent = `${columns.length} columns`;
   }
 
+  function renderVisibleRows(win) {
+    const container = win._container;
+    const tbody = win._tbody;
+    const displayRows = win._displayRows;
+    const columns = win._columns;
+    if (!container || !tbody || !displayRows) return;
+
+    const totalRows = displayRows.length;
+    const scrollTop = container.scrollTop;
+    const clientHeight = container.clientHeight;
+
+    // Account for thead height
+    const theadHeight = win._table.querySelector('thead')?.offsetHeight || 0;
+    const adjustedScrollTop = Math.max(0, scrollTop - theadHeight);
+
+    let startIdx = Math.floor(adjustedScrollTop / ROW_HEIGHT) - OVERSCAN;
+    let endIdx = Math.ceil((adjustedScrollTop + clientHeight) / ROW_HEIGHT) + OVERSCAN;
+    startIdx = Math.max(0, startIdx);
+    endIdx = Math.min(totalRows, endIdx);
+
+    // Early return if range unchanged
+    if (startIdx === win._renderStart && endIdx === win._renderEnd) return;
+
+    // Blur active cell if it's inside this tbody
+    const active = document.activeElement;
+    if (active && tbody.contains(active)) active.blur();
+
+    win._renderStart = startIdx;
+    win._renderEnd = endIdx;
+
+    const colCount = columns.length + 1; // +1 for row number column
+
+    // Build new tbody content
+    const fragment = document.createDocumentFragment();
+
+    // Top padding row
+    if (startIdx > 0) {
+      const padTr = document.createElement('tr');
+      padTr.className = 'virtual-pad';
+      const padTd = document.createElement('td');
+      padTd.setAttribute('colspan', colCount);
+      padTd.style.height = (startIdx * ROW_HEIGHT) + 'px';
+      padTr.appendChild(padTd);
+      fragment.appendChild(padTr);
+    }
+
+    // Visible rows
+    for (let i = startIdx; i < endIdx; i++) {
+      const row = displayRows[i];
+      const tr = document.createElement('tr');
+      tr.dataset.displayIdx = i;
+
+      const numTd = document.createElement('td');
+      numTd.className = 'row-num';
+      numTd.textContent = row._rownum;
+      tr.appendChild(numTd);
+
+      for (let c = 0; c < columns.length; c++) {
+        const td = document.createElement('td');
+        td.textContent = row[columns[c]] ?? '';
+        td.setAttribute('contenteditable', 'true');
+        td.dataset.colIdx = c;
+        tr.appendChild(td);
+      }
+      fragment.appendChild(tr);
+    }
+
+    // Bottom padding row
+    if (endIdx < totalRows) {
+      const padTr = document.createElement('tr');
+      padTr.className = 'virtual-pad';
+      const padTd = document.createElement('td');
+      padTd.setAttribute('colspan', colCount);
+      padTd.style.height = ((totalRows - endIdx) * ROW_HEIGHT) + 'px';
+      padTr.appendChild(padTd);
+      fragment.appendChild(padTr);
+    }
+
+    tbody.innerHTML = '';
+    tbody.appendChild(fragment);
+  }
+
   function rebuildTable(win) {
     const t = tables[win.tableName];
     if (!t) return;
     const container = win.el.querySelector('.table-container');
-    if (container) buildTableHTML(win, container, t);
+    if (!container) return;
+
+    const oldFilter = win._lastFilterText;
+    const filterChanged = oldFilter !== undefined && oldFilter !== win.filterText;
+    win._lastFilterText = win.filterText;
+
+    buildTableHTML(win, container, t);
+
+    if (filterChanged) {
+      container.scrollTop = 0;
+    }
   }
 
   function addRow(tableName) {
@@ -874,7 +1023,7 @@ const app = (() => {
     t.columns.forEach(c => { newRow[c] = ''; });
     t.rows.push(newRow);
     markModified(tableName);
-    syncToAlaSQL(tableName);
+    debouncedSyncToAlaSQL(tableName);
   }
 
   function deleteRow(tableName, rownum, win) {
@@ -883,7 +1032,7 @@ const app = (() => {
     // Renumber
     t.rows.forEach((r, i) => { r._rownum = i + 1; });
     markModified(tableName);
-    syncToAlaSQL(tableName);
+    debouncedSyncToAlaSQL(tableName);
     rebuildTable(win);
   }
 
@@ -913,6 +1062,22 @@ const app = (() => {
       });
       alasql.tables[tableName].data = data;
     } catch (e) {}
+  }
+
+  function debouncedSyncToAlaSQL(tableName, delay = 500) {
+    clearTimeout(syncTimers[tableName]);
+    syncTimers[tableName] = setTimeout(() => {
+      delete syncTimers[tableName];
+      syncToAlaSQL(tableName);
+    }, delay);
+  }
+
+  function flushAllSyncs() {
+    for (const name of Object.keys(syncTimers)) {
+      clearTimeout(syncTimers[name]);
+      delete syncTimers[name];
+      syncToAlaSQL(name);
+    }
   }
 
   // ---- Row Context Menu ----
@@ -1004,6 +1169,7 @@ const app = (() => {
   }
 
   function executeQuery() {
+    flushAllSyncs();
     const input = document.getElementById('sql-input');
     const sql = input.value.trim();
     if (!sql) return;

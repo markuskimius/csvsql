@@ -373,6 +373,15 @@ body {
   outline-offset: -2px;
 }
 
+.data-table tbody tr {
+  height: 26px;
+}
+
+.data-table .virtual-pad td {
+  padding: 0;
+  border: none;
+}
+
 .data-table tr:hover td:not(.row-num) {
   background: rgba(124,111,247,0.06);
 }
