@@ -588,9 +588,8 @@ const app = (() => {
       tables[uniqueName] = t;
       delete tables[oldName];
 
-      // Re-register in SQL under new name
-      try { db.run(`DROP TABLE IF EXISTS [${oldName}]`); } catch (_) {}
-      registerTable(uniqueName);
+      // Rename in SQL (instant, no data re-insertion)
+      try { db.run(`ALTER TABLE [${oldName}] RENAME TO [${uniqueName}]`); } catch (_) {}
 
       // Update all windows referencing this table
       windows.filter(w => w.tableName === oldName).forEach(w => {
