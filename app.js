@@ -940,8 +940,10 @@ const app = (() => {
 
     document.addEventListener('mousemove', (e) => {
       if (!dragging) return;
-      win.el.style.left = (origX + e.clientX - startX) + 'px';
-      win.el.style.top = (origY + e.clientY - startY) + 'px';
+      const dx = e.clientX - startX, dy = e.clientY - startY;
+      if (Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
+      win.el.style.left = (origX + dx) + 'px';
+      win.el.style.top = (origY + dy) + 'px';
       if (win.maximized) win.maximized = false;
     });
 
@@ -1011,7 +1013,7 @@ const app = (() => {
       }
     });
     win.el.querySelector('.win-titlebar').addEventListener('dblclick', (e) => {
-      if (e.target.tagName !== 'BUTTON' && !e.target.classList.contains('win-title')) {
+      if (e.target.tagName !== 'BUTTON') {
         toggleMaximize(win.id);
       }
     });
