@@ -97,8 +97,9 @@ const app = (() => {
         const handles = await showOpenFilePicker({
           multiple: true,
           types: [
-            { description: 'CSV files', accept: { 'text/csv': ['.csv', '.tsv', '.txt'] } },
+            { description: 'Data files', accept: { 'text/csv': ['.csv', '.tsv', '.psv', '.txt'] } },
             { description: 'Excel files', accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'], 'application/vnd.ms-excel': ['.xls'] } },
+            { description: 'Compressed files', accept: { 'application/gzip': ['.gz'], 'application/zip': ['.zip'] } },
           ],
         });
         for (const handle of handles) {
@@ -113,23 +114,116 @@ const app = (() => {
     }
   }
 
+  function openURL() {
+    showPrompt('Open URL', 'Enter URL (http or https):', '', async (url) => {
+      if (!url) return;
+      url = url.trim();
+      if (/^(ftp|sftp):\/\//i.test(url)) {
+        setStatus('FTP/SFTP not supported in browser — use http or https', 'error');
+        return;
+      }
+      if (!/^https?:\/\//i.test(url)) {
+        url = 'https://' + url;
+      }
+      const filename = decodeURIComponent(url.split('/').pop().split('?')[0]) || 'download.csv';
+      setStatus(`Fetching ${filename}...`, 'working');
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
+        const blob = await resp.blob();
+        const file = new File([blob], filename, { type: blob.type });
+        openFileByType(file, null);
+      } catch (e) {
+        setStatus(`Error fetching URL: ${e.message}`, 'error');
+      }
+    });
+  }
+
+  // Compression extensions and the data file extensions they may wrap
+  const COMPRESSION_EXTS = new Set(['gz', 'zip', 'bz2', 'xz', 'rar', '7z', 'zst']);
+  const DATA_EXTS = new Set(['csv', 'tsv', 'psv', 'txt', 'xlsx', 'xls']);
+
   function openFileByType(file, fileHandle) {
     const ext = file.name.split('.').pop().toLowerCase();
-    if (ext === 'xlsx' || ext === 'xls') {
+    if (COMPRESSION_EXTS.has(ext)) {
+      decompressAndOpen(file);
+    } else if (ext === 'xlsx' || ext === 'xls') {
       loadExcelFile(file);
     } else {
-      loadCSVFile(file, fileHandle);
+      loadDelimitedFile(file, fileHandle);
     }
   }
 
-  function loadCSVFile(file, fileHandle) {
+  async function decompressAndOpen(file) {
+    const ext = file.name.split('.').pop().toLowerCase();
+    setStatus(`Decompressing ${file.name}...`, 'working');
+    try {
+      if (ext === 'gz') {
+        await decompressGzip(file);
+      } else if (ext === 'zip') {
+        await decompressZip(file);
+      } else {
+        setStatus(`Unsupported compression format: .${ext} — please decompress the file first and open the decompressed file`, 'error');
+      }
+    } catch (e) {
+      setStatus(`Error decompressing ${file.name}: ${e.message}`, 'error');
+    }
+  }
+
+  async function decompressGzip(file) {
+    const ds = new DecompressionStream('gzip');
+    const decompressed = file.stream().pipeThrough(ds);
+    const blob = await new Response(decompressed).blob();
+    // Inner filename: strip .gz
+    const innerName = file.name.replace(/\.gz$/i, '') || 'decompressed.csv';
+    const innerFile = new File([blob], innerName, { type: 'application/octet-stream' });
+    openFileByType(innerFile, null);
+  }
+
+  async function decompressZip(file) {
+    const zip = await JSZip.loadAsync(file);
+    let found = 0;
+    for (const [name, entry] of Object.entries(zip.files)) {
+      if (entry.dir) continue;
+      const innerExt = name.split('.').pop().toLowerCase();
+      if (DATA_EXTS.has(innerExt) || COMPRESSION_EXTS.has(innerExt)) {
+        const blob = await entry.async('blob');
+        const innerFile = new File([blob], name, { type: 'application/octet-stream' });
+        openFileByType(innerFile, null);
+        found++;
+      }
+    }
+    if (found === 0) {
+      // No recognized files — try to open the first file as CSV
+      const firstEntry = Object.values(zip.files).find(e => !e.dir);
+      if (firstEntry) {
+        const blob = await firstEntry.async('blob');
+        const innerFile = new File([blob], firstEntry.name || 'data.csv', { type: 'text/csv' });
+        openFileByType(innerFile, null);
+      } else {
+        setStatus('ZIP archive is empty', 'error');
+      }
+    }
+  }
+
+  function delimiterForExt(filename) {
+    const ext = filename.split('.').pop().toLowerCase();
+    if (ext === 'tsv') return '\t';
+    if (ext === 'psv') return '|';
+    return undefined; // let Papa auto-detect (handles csv, txt)
+  }
+
+  function loadDelimitedFile(file, fileHandle) {
     setStatus(`Loading ${file.name}...`, 'working');
     const t0 = performance.now();
+    const delimiter = delimiterForExt(file.name);
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
       dynamicTyping: false,
+      delimiter,
       complete(results) {
+        const detectedDelimiter = delimiter || results.meta.delimiter || ',';
         const name = sanitizeTableName(file.name.replace(/\.[^.]+$/, ''));
         const uniqueName = getUniqueTableName(name);
         const rawColumns = results.meta.fields || [];
@@ -139,7 +233,7 @@ const app = (() => {
           rawColumns.forEach((raw, j) => { r[columns[j]] = row[raw] ?? ''; });
           return r;
         });
-        tables[uniqueName] = { columns, rows, filename: file.name, modified: false, fileHandle: fileHandle || null };
+        tables[uniqueName] = { columns, rows, filename: file.name, modified: false, fileHandle: fileHandle || null, delimiter: detectedDelimiter };
         registerTable(uniqueName);
         createTableWindow(uniqueName);
         const elapsed = performance.now() - t0;
@@ -194,11 +288,11 @@ const app = (() => {
     return name.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^[0-9]/, '_$&');
   }
 
-  // Sanitize column names and dedup collisions (e.g. "First Name" & "First-Name" both → "First_Name")
+  // Dedup duplicate column names (e.g. two columns both named "Name" → "Name", "Name_2")
   function sanitizeColumns(rawColumns) {
     const seen = {};
     return rawColumns.map(raw => {
-      let col = sanitizeColumnName(raw);
+      let col = raw;
       if (seen[col]) {
         let n = seen[col] + 1;
         while (seen[col + '_' + n]) n++;
@@ -265,6 +359,8 @@ const app = (() => {
           suggestedName: filename,
           types: [
             { description: 'CSV files', accept: { 'text/csv': ['.csv'] } },
+            { description: 'TSV files', accept: { 'text/tab-separated-values': ['.tsv'] } },
+            { description: 'PSV files', accept: { 'text/plain': ['.psv'] } },
           ],
         });
         await writeToHandle(win.tableName, handle);
@@ -282,23 +378,39 @@ const app = (() => {
   async function writeToHandle(tableName, handle) {
     const t = tables[tableName];
     if (!t) return;
-    const csv = serializeCSV(tableName);
+    setStatus(`Saving ${t.filename || tableName}...`, 'working');
+    const t0 = performance.now();
     const writable = await handle.createWritable();
-    await writable.write(csv);
+    await writable.write(serializeHeader(t));
+    const CHUNK = 50000;
+    for (let i = 0; i < t.rows.length; i += CHUNK) {
+      const chunk = serializeChunk(t, i, Math.min(i + CHUNK, t.rows.length));
+      await writable.write(chunk);
+    }
     await writable.close();
     const filename = handle.name;
+    t.delimiter = delimiterForExt(filename) || t.delimiter || ',';
     t.modified = false;
     t.filename = filename;
     updateWindowTitle(tableName);
-    setStatus(`Saved ${filename}`, 'success');
+    const elapsed = performance.now() - t0;
+    setStatus(`Saved ${filename} (${t.rows.length.toLocaleString()} rows) in ${formatElapsed(elapsed)}`, 'success');
   }
 
-  function downloadCSV(tableName, filename) {
+  async function downloadCSV(tableName, filename) {
     flushAllSyncs();
     const t = tables[tableName];
     if (!t) return;
-    const csv = serializeCSV(tableName);
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    setStatus(`Saving ${filename}...`, 'working');
+    // Defer so "Saving..." can paint
+    await new Promise(r => setTimeout(r, 0));
+    const t0 = performance.now();
+    const parts = [serializeHeader(t)];
+    const CHUNK = 50000;
+    for (let i = 0; i < t.rows.length; i += CHUNK) {
+      parts.push(serializeChunk(t, i, Math.min(i + CHUNK, t.rows.length)));
+    }
+    const blob = new Blob(parts, { type: 'text/csv;charset=utf-8;' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = filename;
@@ -307,17 +419,36 @@ const app = (() => {
     t.modified = false;
     t.filename = filename;
     updateWindowTitle(tableName);
-    setStatus(`Saved ${filename}`, 'success');
+    const elapsed = performance.now() - t0;
+    setStatus(`Saved ${filename} (${t.rows.length.toLocaleString()} rows) in ${formatElapsed(elapsed)}`, 'success');
   }
 
-  function serializeCSV(tableName) {
-    const t = tables[tableName];
-    const data = t.rows.map(r => {
-      const obj = {};
-      t.columns.forEach(c => { obj[c] = r[c]; });
-      return obj;
-    });
-    return Papa.unparse(data, { columns: t.columns });
+  function escapeField(val, delim) {
+    const s = String(val ?? '');
+    if (s.includes(delim) || s.includes('"') || s.includes('\n') || s.includes('\r')) {
+      return '"' + s.replace(/"/g, '""') + '"';
+    }
+    return s;
+  }
+
+  function serializeHeader(t) {
+    const d = t.delimiter || ',';
+    return t.columns.map(c => escapeField(c, d)).join(d) + '\r\n';
+  }
+
+  function serializeChunk(t, start, end) {
+    const cols = t.columns;
+    const d = t.delimiter || ',';
+    let out = '';
+    for (let i = start; i < end; i++) {
+      const row = t.rows[i];
+      for (let c = 0; c < cols.length; c++) {
+        if (c > 0) out += d;
+        out += escapeField(row[cols[c]], d);
+      }
+      out += '\r\n';
+    }
+    return out;
   }
 
   function newTable() {
@@ -384,8 +515,7 @@ const app = (() => {
       isQuery: opts.isQuery || false,
       maximized: false,
       prevBounds: null,
-      sortCol: null,
-      sortDir: 'asc',
+      sortCols: [],   // [{col, dir:'asc'|'desc'}, ...]
       filterText: '',
     };
     windows.push(winObj);
@@ -753,7 +883,7 @@ const app = (() => {
     toolbar.className = 'win-toolbar';
     toolbar.innerHTML = `
       <label>Filter:</label>
-      <input type="text" class="filter-input" placeholder="Search all columns..." value="${escHtml(win.filterText)}">
+      <input type="text" class="filter-input" placeholder="Filter: text  col>5  col~regex  col=val" value="${escHtml(win.filterText)}">
       <button class="btn-add-row">+ Row</button>
       <button class="btn-add-col">+ Col</button>
     `;
@@ -793,27 +923,87 @@ const app = (() => {
     buildTableHTML(win, container, tableData);
   }
 
+  // Parse filter text into predicates: "col>5 col2~regex col3=foo bar"
+  // Tokens: "col op value" for column filters, bare words for global search
+  function parseFilters(filterText, columns) {
+    if (!filterText) return null;
+    const predicates = [];
+    const colSet = new Set(columns);
+    // Match: colName operator value (operator is >=, <=, !=, >, <, =, ~)
+    const tokenRe = /(\S+?)(>=|<=|!=|>|<|=|~)(\S+)|(\S+)/g;
+    let m;
+    while ((m = tokenRe.exec(filterText)) !== null) {
+      if (m[1] && colSet.has(m[1])) {
+        const col = m[1], op = m[2], val = m[3];
+        if (op === '~') {
+          try {
+            const re = new RegExp(val, 'i');
+            predicates.push(row => re.test(String(row[col] ?? '')));
+          } catch (_) {
+            // Invalid regex — treat as literal
+            const lower = val.toLowerCase();
+            predicates.push(row => String(row[col] ?? '').toLowerCase().includes(lower));
+          }
+        } else {
+          const numVal = Number(val);
+          const isNum = !isNaN(numVal) && val !== '';
+          predicates.push(row => {
+            const cell = row[col] ?? '';
+            const cellNum = Number(cell);
+            const useNum = isNum && !isNaN(cellNum) && cell !== '';
+            if (useNum) {
+              if (op === '>') return cellNum > numVal;
+              if (op === '<') return cellNum < numVal;
+              if (op === '>=') return cellNum >= numVal;
+              if (op === '<=') return cellNum <= numVal;
+              if (op === '=') return cellNum === numVal;
+              if (op === '!=') return cellNum !== numVal;
+            }
+            const sv = String(cell), sv2 = val;
+            if (op === '=') return sv === sv2;
+            if (op === '!=') return sv !== sv2;
+            const cmp = collator.compare(sv, sv2);
+            if (op === '>') return cmp > 0;
+            if (op === '<') return cmp < 0;
+            if (op === '>=') return cmp >= 0;
+            if (op === '<=') return cmp <= 0;
+            return false;
+          });
+        }
+      } else {
+        // Global search token
+        const q = (m[4] || m[0]).toLowerCase();
+        predicates.push(row => columns.some(c => String(row[c] ?? '').toLowerCase().includes(q)));
+      }
+    }
+    return predicates.length > 0 ? predicates : null;
+  }
+
   function buildTableHTML(win, container, tableData) {
     const { columns, rows } = tableData;
     let displayRows = [...rows];
 
     // Filter
-    if (win.filterText) {
-      const q = win.filterText.toLowerCase();
-      displayRows = displayRows.filter(row =>
-        columns.some(c => String(row[c] ?? '').toLowerCase().includes(q))
-      );
+    const predicates = parseFilters(win.filterText, columns);
+    if (predicates) {
+      displayRows = displayRows.filter(row => predicates.every(p => p(row)));
     }
 
-    // Sort
-    if (win.sortCol) {
-      const col = win.sortCol;
-      const dir = win.sortDir === 'asc' ? 1 : -1;
+    // Multi-column sort
+    if (win.sortCols.length > 0) {
       displayRows.sort((a, b) => {
-        const va = a[col] ?? '', vb = b[col] ?? '';
-        const na = Number(va), nb = Number(vb);
-        if (!isNaN(na) && !isNaN(nb) && va !== '' && vb !== '') return (na - nb) * dir;
-        return collator.compare(String(va), String(vb)) * dir;
+        for (const { col, dir } of win.sortCols) {
+          const m = dir === 'asc' ? 1 : -1;
+          const va = a[col] ?? '', vb = b[col] ?? '';
+          const na = Number(va), nb = Number(vb);
+          if (!isNaN(na) && !isNaN(nb) && va !== '' && vb !== '') {
+            if (na !== nb) return (na - nb) * m;
+          } else {
+            const cmp = collator.compare(String(va), String(vb));
+            if (cmp !== 0) return cmp * m;
+          }
+        }
+        return 0;
       });
     }
 
@@ -836,20 +1026,49 @@ const app = (() => {
     columns.forEach(col => {
       const th = document.createElement('th');
       th.textContent = col;
-      if (win.sortCol === col) {
+      const sortIdx = win.sortCols.findIndex(s => s.col === col);
+      if (sortIdx !== -1) {
         const arrow = document.createElement('span');
         arrow.className = 'sort-arrow';
-        arrow.textContent = win.sortDir === 'asc' ? '\u25B2' : '\u25BC';
+        const dir = win.sortCols[sortIdx].dir;
+        arrow.textContent = dir === 'asc' ? '\u25B2' : '\u25BC';
+        if (win.sortCols.length > 1) arrow.textContent += (sortIdx + 1);
         th.appendChild(arrow);
       }
-      th.addEventListener('click', () => {
-        if (win.sortCol === col) {
-          win.sortDir = win.sortDir === 'asc' ? 'desc' : 'asc';
-        } else {
-          win.sortCol = col;
-          win.sortDir = 'asc';
-        }
-        rebuildTable(win);
+      // Single click: sort; double-click: rename — use timer to distinguish
+      let clickTimer = null;
+      th.addEventListener('click', (e) => {
+        if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; return; }
+        clickTimer = setTimeout(() => {
+          clickTimer = null;
+          const existing = win.sortCols.findIndex(s => s.col === col);
+          if (e.shiftKey) {
+            if (existing !== -1) {
+              if (win.sortCols[existing].dir === 'asc') {
+                win.sortCols[existing].dir = 'desc';
+              } else {
+                win.sortCols.splice(existing, 1);
+              }
+            } else {
+              win.sortCols.push({ col, dir: 'asc' });
+            }
+          } else {
+            if (existing !== -1 && win.sortCols.length === 1) {
+              if (win.sortCols[0].dir === 'asc') {
+                win.sortCols[0].dir = 'desc';
+              } else {
+                win.sortCols = [];
+              }
+            } else {
+              win.sortCols = [{ col, dir: 'asc' }];
+            }
+          }
+          rebuildTable(win);
+        }, 250);
+      });
+      th.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        startColumnRename(win, th, col);
       });
       headerRow.appendChild(th);
     });
@@ -1088,6 +1307,54 @@ const app = (() => {
     t.rows.forEach(r => { r[colName] = ''; });
     markModified(tableName);
     registerTable(tableName);
+  }
+
+  function renameColumn(tableName, oldCol, newCol, win) {
+    const t = tables[tableName];
+    if (!t || oldCol === newCol) return;
+    if (t.columns.includes(newCol)) return; // duplicate
+    const idx = t.columns.indexOf(oldCol);
+    if (idx === -1) return;
+    t.columns[idx] = newCol;
+    for (const row of t.rows) {
+      row[newCol] = row[oldCol];
+      delete row[oldCol];
+    }
+    // Update sort references
+    for (const s of win.sortCols) {
+      if (s.col === oldCol) s.col = newCol;
+    }
+    markModified(tableName);
+    try { db.run(`ALTER TABLE [${tableName}] RENAME COLUMN [${oldCol}] TO [${newCol}]`); } catch (_) {}
+    rebuildTable(win);
+  }
+
+  function startColumnRename(win, th, oldCol) {
+    const input = document.createElement('input');
+    input.className = 'inline-rename';
+    input.value = oldCol;
+    th.textContent = '';
+    th.appendChild(input);
+    input.focus();
+    input.select();
+
+    let done = false;
+    function commit() {
+      if (done) return;
+      done = true;
+      const raw = input.value.trim();
+      if (input.parentNode) input.remove();
+      if (!raw || raw === oldCol) {
+        rebuildTable(win);
+        return;
+      }
+      renameColumn(win.tableName, oldCol, raw, win);
+    }
+    input.addEventListener('blur', commit);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); commit(); }
+      if (e.key === 'Escape') { done = true; input.remove(); rebuildTable(win); }
+    });
   }
 
   function markModified(tableName) {
@@ -1561,6 +1828,7 @@ const app = (() => {
   return {
     init,
     openFile,
+    openURL,
     saveActiveTable,
     saveActiveTableAs,
     newTable,

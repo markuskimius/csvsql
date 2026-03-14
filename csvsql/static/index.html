@@ -8,6 +8,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
 <body>
   <div id="menubar">
@@ -15,6 +16,7 @@
       <span class="menu-label">File</span>
       <div class="menu-dropdown">
         <button onclick="app.openFile()">Open...<span class="shortcut">Ctrl+O</span></button>
+        <button onclick="app.openURL()">Open URL...</button>
         <button onclick="app.saveActiveTable()">Save Table<span class="shortcut">Ctrl+S</span></button>
         <button onclick="app.saveActiveTableAs()">Save Table As...<span class="shortcut">Ctrl+Shift+S</span></button>
         <hr>
@@ -60,7 +62,7 @@
     </div>
   </div>
 
-  <input type="file" id="file-input" accept=".csv,.tsv,.txt,.xlsx,.xls" multiple style="display:none">
+  <input type="file" id="file-input" accept=".csv,.tsv,.psv,.txt,.xlsx,.xls,.gz,.zip,.bz2,.xz,.rar,.7z,.zst" multiple style="display:none">
   <div id="drop-overlay">Drop files here</div>
   <script src="app.js"></script>
 </body>

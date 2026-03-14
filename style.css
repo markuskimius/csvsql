@@ -335,6 +335,19 @@ body {
   background: var(--accent);
 }
 
+.data-table th .inline-rename {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  padding: 0 4px;
+  border-radius: 3px;
+  outline: none;
+}
+
 .data-table th .sort-arrow {
   margin-left: 4px;
   font-size: 10px;
