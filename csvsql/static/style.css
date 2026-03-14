@@ -516,6 +516,13 @@ body {
   background: var(--accent-hover);
 }
 
+#btn-interrupt {
+  background: #c33 !important;
+}
+#btn-interrupt:hover {
+  background: #e44 !important;
+}
+
 #console-body {
   flex: 1;
   display: flex;
