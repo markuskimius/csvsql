@@ -20,6 +20,12 @@ const app = (() => {
   // Sort optimization
   const collator = new Intl.Collator(undefined, { sensitivity: 'base' });
 
+  // Zip group counter — tables from the same zip share a zipGroupId
+  let nextZipGroupId = 1;
+
+  // Excel group counter — tables from the same workbook share an excelGroupId
+  let nextExcelGroupId = 1;
+
   // ---- Init ----
   async function init() {
     const SQL = await initSqlJs({
@@ -148,7 +154,7 @@ const app = (() => {
     if (COMPRESSION_EXTS.has(ext)) {
       decompressAndOpen(file, fileHandle);
     } else if (ext === 'xlsx' || ext === 'xls') {
-      loadExcelFile(file, compression);
+      loadExcelFile(file, fileHandle, compression);
     } else {
       loadDelimitedFile(file, compression ? compression.fileHandle : fileHandle, compression);
     }
@@ -182,27 +188,33 @@ const app = (() => {
 
   async function decompressZip(file, fileHandle) {
     const zip = await JSZip.loadAsync(file);
-    let found = 0;
+    const zipGroupId = nextZipGroupId++;
+
+    // Collect recognized data files
+    const dataFiles = [];
     for (const [name, entry] of Object.entries(zip.files)) {
       if (entry.dir) continue;
       const innerExt = name.split('.').pop().toLowerCase();
       if (DATA_EXTS.has(innerExt) || COMPRESSION_EXTS.has(innerExt)) {
-        const blob = await entry.async('blob');
-        const innerFile = new File([blob], name, { type: 'application/octet-stream' });
-        openFileByType(innerFile, null, { type: 'zip', compressedFilename: file.name, fileHandle: fileHandle || null });
-        found++;
+        dataFiles.push({ name, entry });
       }
     }
-    if (found === 0) {
-      // No recognized files — try to open the first file as CSV
+
+    if (dataFiles.length === 0) {
       const firstEntry = Object.values(zip.files).find(e => !e.dir);
       if (firstEntry) {
-        const blob = await firstEntry.async('blob');
-        const innerFile = new File([blob], firstEntry.name || 'data.csv', { type: 'text/csv' });
-        openFileByType(innerFile, null, { type: 'zip', compressedFilename: file.name, fileHandle: fileHandle || null });
+        dataFiles.push({ name: firstEntry.name || 'data.csv', entry: firstEntry });
       } else {
         setStatus('ZIP archive is empty', 'error');
+        return;
       }
+    }
+
+    const zipOriginalCount = dataFiles.length;
+    for (const { name, entry } of dataFiles) {
+      const blob = await entry.async('blob');
+      const innerFile = new File([blob], name, { type: 'application/octet-stream' });
+      openFileByType(innerFile, null, { type: 'zip', compressedFilename: file.name, fileHandle: fileHandle || null, zipGroupId, innerName: name, zipOriginalCount });
     }
   }
 
@@ -260,20 +272,23 @@ const app = (() => {
     });
   }
 
-  function loadExcelFile(file, compression) {
+  function loadExcelFile(file, fileHandle, compression) {
     setStatus(`Loading ${file.name}...`, 'working');
     const t0 = performance.now();
     const reader = new FileReader();
     reader.onload = async (e) => {
       try {
         const workbook = XLSX.read(e.target.result, { type: 'array' });
-        for (const sheetName of workbook.SheetNames) {
+        const excelGroupId = nextExcelGroupId++;
+        const nonEmptySheets = workbook.SheetNames.filter(sn => {
+          const s = workbook.Sheets[sn];
+          return XLSX.utils.sheet_to_json(s, { defval: '' }).length > 0;
+        });
+        const excelOriginalCount = nonEmptySheets.length;
+        for (const sheetName of nonEmptySheets) {
           const sheet = workbook.Sheets[sheetName];
           const jsonData = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-          if (jsonData.length === 0) continue;
-          const baseName = file.name.replace(/\.[^.]+$/, '');
-          const label = workbook.SheetNames.length > 1 ? baseName + '_' + sheetName : baseName;
-          const name = sanitizeTableName(label);
+          const name = sanitizeTableName(sheetName);
           const uniqueName = getUniqueTableName(name);
           const rawColumns = Object.keys(jsonData[0]);
           const columns = sanitizeColumns(rawColumns);
@@ -282,7 +297,8 @@ const app = (() => {
             rawColumns.forEach((raw, j) => { r[columns[j]] = row[raw] != null ? String(row[raw]) : ''; });
             return r;
           });
-          tables[uniqueName] = { columns, rows, filename: file.name, modified: false, compression: compression || null };
+          const excelInfo = { excelGroupId, sheetName, excelOriginalCount, excelFilename: file.name, fileHandle: fileHandle || null };
+          tables[uniqueName] = { columns, rows, filename: file.name, modified: false, compression: compression || null, excel: excelInfo };
           await registerTable(uniqueName);
           createTableWindow(uniqueName);
         }
@@ -362,6 +378,19 @@ const app = (() => {
     if (!win) return;
     const t = tables[win.tableName];
     if (!t) return;
+
+    // Zip group save: re-pack all tables from the same zip
+    if (t.compression && t.compression.type === 'zip' && t.compression.zipGroupId) {
+      await saveZipGroup(t.compression);
+      return;
+    }
+
+    // Excel group save: re-pack all sheets from the same workbook
+    if (t.excel && t.excel.excelGroupId) {
+      await saveExcelGroup(t.excel);
+      return;
+    }
+
     const handle = t.fileHandle || (t.compression && t.compression.fileHandle);
     if (handle) {
       await writeToHandle(win.tableName, handle);
@@ -370,6 +399,163 @@ const app = (() => {
     } else {
       await saveActiveTableAs();
     }
+  }
+
+  function getZipGroupTables(zipGroupId) {
+    const result = [];
+    for (const [name, t] of Object.entries(tables)) {
+      if (t.compression && t.compression.zipGroupId === zipGroupId) {
+        result.push({ tableName: name, table: t });
+      }
+    }
+    return result;
+  }
+
+  async function saveZipGroup(compression) {
+    const { zipGroupId, compressedFilename } = compression;
+    const groupTables = getZipGroupTables(zipGroupId);
+
+    // Check if any tables from the group have been closed
+    // We detect this by comparing against the original inner names
+    const allInnerNames = new Set();
+    const presentInnerNames = new Set();
+    for (const { table: tbl } of groupTables) {
+      if (tbl.compression && tbl.compression.innerName) {
+        presentInnerNames.add(tbl.compression.innerName);
+      }
+    }
+
+    // If no tables remain, fall through to Save As
+    if (groupTables.length === 0) {
+      await saveActiveTableAs();
+      return;
+    }
+
+    // Check if any table was closed by comparing with original group
+    // We track original count: if any table had a peer that's now gone
+    // we can detect by checking if modified tables exist without the full set
+    // Simpler: store original count on the compression object
+    const originalCount = compression.zipOriginalCount;
+    if (originalCount && groupTables.length < originalCount) {
+      const missing = originalCount - groupTables.length;
+      setStatus(`Warning: ${missing} table(s) from ${compressedFilename} no longer open — using Save As to avoid overwriting`, 'error');
+      await saveActiveTableAs();
+      return;
+    }
+
+    const handle = compression.fileHandle;
+    const t0 = performance.now();
+    setStatus(`Saving ${compressedFilename}...`, 'working');
+    await new Promise(r => setTimeout(r, 0));
+
+    const zip = new JSZip();
+    for (const { tableName, table: tbl } of groupTables) {
+      const innerName = tbl.compression.innerName || (tableName + '.csv');
+      let blob;
+      if (isExcelFilename(innerName)) {
+        blob = serializeExcel(tbl);
+      } else {
+        const parts = [serializeHeader(tbl)];
+        const CHUNK = 50000;
+        for (let i = 0; i < tbl.rows.length; i += CHUNK) {
+          parts.push(serializeChunk(tbl, i, Math.min(i + CHUNK, tbl.rows.length)));
+        }
+        blob = new Blob(parts, { type: 'text/csv;charset=utf-8;' });
+      }
+      zip.file(innerName, blob);
+      setStatus(`Saving ${compressedFilename}... packed ${innerName}`, 'working');
+    }
+
+    const zipBlob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+
+    if (handle) {
+      const writable = await handle.createWritable();
+      await writable.write(zipBlob);
+      await writable.close();
+    } else {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(zipBlob);
+      a.download = compressedFilename;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+
+    // Mark all tables as saved
+    for (const { tableName, table: tbl } of groupTables) {
+      tbl.modified = false;
+      updateWindowTitle(tableName);
+    }
+
+    const totalRows = groupTables.reduce((sum, { table: tbl }) => sum + tbl.rows.length, 0);
+    const elapsed = performance.now() - t0;
+    setStatus(`Saved ${compressedFilename} (${groupTables.length} file(s), ${totalRows.toLocaleString()} rows) in ${formatElapsed(elapsed)}`, 'success');
+  }
+
+  function getExcelGroupTables(excelGroupId) {
+    const result = [];
+    for (const [name, t] of Object.entries(tables)) {
+      if (t.excel && t.excel.excelGroupId === excelGroupId) {
+        result.push({ tableName: name, table: t });
+      }
+    }
+    return result;
+  }
+
+  async function saveExcelGroup(excelInfo) {
+    const { excelGroupId, excelFilename, excelOriginalCount } = excelInfo;
+    const groupTables = getExcelGroupTables(excelGroupId);
+
+    if (groupTables.length === 0) {
+      await saveActiveTableAs();
+      return;
+    }
+
+    if (excelOriginalCount && groupTables.length < excelOriginalCount) {
+      const missing = excelOriginalCount - groupTables.length;
+      setStatus(`Warning: ${missing} sheet(s) from ${excelFilename} no longer open — using Save As to avoid overwriting`, 'error');
+      await saveActiveTableAs();
+      return;
+    }
+
+    const handle = excelInfo.fileHandle;
+    const t0 = performance.now();
+    setStatus(`Saving ${excelFilename}...`, 'working');
+    await new Promise(r => setTimeout(r, 0));
+
+    const wb = XLSX.utils.book_new();
+    for (const { table: tbl } of groupTables) {
+      const sheetName = tbl.excel.sheetName || 'Sheet1';
+      const data = tbl.rows.map(row => {
+        const obj = {};
+        tbl.columns.forEach(c => { obj[c] = row[c] ?? ''; });
+        return obj;
+      });
+      const ws = XLSX.utils.json_to_sheet(data, { header: tbl.columns });
+      XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    }
+    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+
+    if (handle) {
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+    } else {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = excelFilename;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+
+    for (const { tableName, table: tbl } of groupTables) {
+      tbl.modified = false;
+      updateWindowTitle(tableName);
+    }
+
+    const totalRows = groupTables.reduce((sum, { table: tbl }) => sum + tbl.rows.length, 0);
+    const elapsed = performance.now() - t0;
+    setStatus(`Saved ${excelFilename} (${groupTables.length} sheet(s), ${totalRows.toLocaleString()} rows) in ${formatElapsed(elapsed)}`, 'success');
   }
 
   async function saveActiveTableAs() {
@@ -386,6 +572,7 @@ const app = (() => {
           { description: 'CSV files', accept: { 'text/csv': ['.csv'] } },
           { description: 'TSV files', accept: { 'text/tab-separated-values': ['.tsv'] } },
           { description: 'PSV files', accept: { 'text/plain': ['.psv'] } },
+          { description: 'Excel files', accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] } },
           { description: 'Gzip compressed', accept: { 'application/gzip': ['.gz'] } },
           { description: 'ZIP compressed', accept: { 'application/zip': ['.zip'] } },
         ];
@@ -428,9 +615,12 @@ const app = (() => {
     setStatus(`Saving ${saveName}... 0 / ${total.toLocaleString()} rows`, 'working');
     const t0 = performance.now();
     const writable = await handle.createWritable();
-    const CHUNK = 50000;
-    if (t.compression) {
+    if (isExcelFilename(saveName)) {
+      const blob = serializeExcel(t);
+      await writable.write(blob);
+    } else if (t.compression) {
       const parts = [serializeHeader(t)];
+      const CHUNK = 50000;
       for (let i = 0; i < total; i += CHUNK) {
         const end = Math.min(i + CHUNK, total);
         parts.push(serializeChunk(t, i, end));
@@ -445,6 +635,7 @@ const app = (() => {
       await writable.write(blob);
     } else {
       await writable.write(serializeHeader(t));
+      const CHUNK = 50000;
       for (let i = 0; i < total; i += CHUNK) {
         const end = Math.min(i + CHUNK, total);
         const chunk = serializeChunk(t, i, end);
@@ -471,20 +662,25 @@ const app = (() => {
     setStatus(`Saving ${saveName}... 0 / ${total.toLocaleString()} rows`, 'working');
     await new Promise(r => setTimeout(r, 0));
     const t0 = performance.now();
-    const parts = [serializeHeader(t)];
-    const CHUNK = 50000;
-    for (let i = 0; i < total; i += CHUNK) {
-      const end = Math.min(i + CHUNK, total);
-      parts.push(serializeChunk(t, i, end));
-      if (end < total) {
-        setStatus(`Saving ${saveName}... ${end.toLocaleString()} / ${total.toLocaleString()} rows`, 'working');
-        await new Promise(r => setTimeout(r, 0));
+    let blob;
+    if (isExcelFilename(filename)) {
+      blob = serializeExcel(t);
+    } else {
+      const parts = [serializeHeader(t)];
+      const CHUNK = 50000;
+      for (let i = 0; i < total; i += CHUNK) {
+        const end = Math.min(i + CHUNK, total);
+        parts.push(serializeChunk(t, i, end));
+        if (end < total) {
+          setStatus(`Saving ${saveName}... ${end.toLocaleString()} / ${total.toLocaleString()} rows`, 'working');
+          await new Promise(r => setTimeout(r, 0));
+        }
       }
-    }
-    let blob = new Blob(parts, { type: 'text/csv;charset=utf-8;' });
-    if (t.compression) {
-      setStatus(`Compressing ${saveName}...`, 'working');
-      blob = await compressBlob(blob, t.compression);
+      blob = new Blob(parts, { type: 'text/csv;charset=utf-8;' });
+      if (t.compression) {
+        setStatus(`Compressing ${saveName}...`, 'working');
+        blob = await compressBlob(blob, t.compression);
+      }
     }
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -524,6 +720,23 @@ const app = (() => {
       out += '\r\n';
     }
     return out;
+  }
+
+  function isExcelFilename(filename) {
+    return /\.xlsx?$/i.test(filename);
+  }
+
+  function serializeExcel(t) {
+    const data = t.rows.map(row => {
+      const obj = {};
+      t.columns.forEach(c => { obj[c] = row[c] ?? ''; });
+      return obj;
+    });
+    const ws = XLSX.utils.json_to_sheet(data, { header: t.columns });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    return new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   }
 
   async function compressBlob(blob, compression) {
@@ -661,6 +874,11 @@ const app = (() => {
     updateWindowsList();
   }
 
+  function closeAllWindows() {
+    const ids = windows.map(w => w.id);
+    for (const id of ids) closeWindow(id);
+  }
+
   function minimizeWindow(id) {
     const win = windows.find(w => w.id === id);
     if (win) {
@@ -780,7 +998,9 @@ const app = (() => {
   }
 
   function setupWindowButtons(win) {
-    win.el.querySelector('.btn-close').addEventListener('click', () => closeWindow(win.id));
+    win.el.querySelector('.btn-close').addEventListener('click', (e) => {
+      if (e.ctrlKey || e.metaKey) { closeAllWindows(); } else { closeWindow(win.id); }
+    });
     win.el.querySelector('.btn-min').addEventListener('click', () => minimizeWindow(win.id));
     win.el.querySelector('.btn-max').addEventListener('click', () => toggleMaximize(win.id));
     // Double-click title text to rename, double-click elsewhere on titlebar to maximize
@@ -860,11 +1080,24 @@ const app = (() => {
     return windows.find(w => w.id === activeWinId) || null;
   }
 
+  function getDisplayFilename(t) {
+    if (!t) return '';
+    if (t.excel && t.excel.excelFilename) {
+      return t.excel.excelFilename + ' [' + (t.excel.sheetName || 'Sheet1') + ']';
+    }
+    if (!t.filename) return '';
+    if (t.compression && t.compression.type === 'zip' && t.compression.compressedFilename) {
+      return t.compression.compressedFilename + '/' + (t.compression.innerName || t.filename);
+    }
+    return compressedFilename(t.filename, t.compression);
+  }
+
   function updateWindowTitle(tableName) {
     windows.filter(w => w.tableName === tableName).forEach(w => {
       const t = tables[tableName];
       const mod = t && t.modified ? ' *' : '';
-      const fname = t && t.filename ? ' — ' + compressedFilename(t.filename, t.compression) : '';
+      const displayName = getDisplayFilename(t);
+      const fname = displayName ? ' — ' + displayName : '';
       w.el.querySelector('.win-title').textContent = tableName + fname + mod;
     });
   }
@@ -970,7 +1203,8 @@ const app = (() => {
   // ---- Table Window ----
   function createTableWindow(tableName) {
     const t = tables[tableName];
-    const fname = t && t.filename ? ' — ' + compressedFilename(t.filename, t.compression) : '';
+    const displayName = getDisplayFilename(t);
+    const fname = displayName ? ' — ' + displayName : '';
     const mod = t && t.modified ? ' *' : '';
     createSubwindow(tableName + fname + mod, (win, body) => {
       win.tableName = tableName;
