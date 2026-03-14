@@ -29,7 +29,7 @@ pip install csvsql
 csvsql
 ```
 
-This starts a local server and opens CSVSQL in your browser.
+This starts a local server and opens CSVSQL in your browser. If `csvsql` conflicts with another command on your system, use `csvsqlw` instead — it's an identical alias.
 
 ```
 csvsql --port 9000          # custom port (default: 8000)
