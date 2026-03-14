@@ -1570,7 +1570,7 @@ const app = (() => {
     document.addEventListener('keydown', (e) => {
       if (!(e.ctrlKey || e.metaKey)) return;
       switch (e.key) {
-        case 'S': e.preventDefault(); saveActiveTableAs(); break;
+        case 'a': e.preventDefault(); saveActiveTableAs(); break;
         case 's': e.preventDefault(); saveActiveTable(); break;
         case 'o': e.preventDefault(); openFile(); break;
         case 'n': e.preventDefault(); newTable(); break;
