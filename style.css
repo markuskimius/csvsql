@@ -329,10 +329,20 @@ body {
   cursor: pointer;
   user-select: none;
   font-weight: 600;
+  transition: background 0.1s;
 }
 
 .data-table th:hover {
-  background: var(--accent);
+  background: #3d3d5c;
+}
+
+.data-table th.sorted {
+  background: #2e2e4a;
+  border-bottom: 2px solid var(--accent);
+}
+
+.data-table th.sorted:hover {
+  background: #3d3d5c;
 }
 
 .data-table th .inline-rename {
@@ -351,7 +361,7 @@ body {
 .data-table th .sort-arrow {
   margin-left: 4px;
   font-size: 10px;
-  color: var(--accent);
+  color: var(--accent-hover);
 }
 
 .data-table th.row-num-header {

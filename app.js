@@ -1367,6 +1367,7 @@ const app = (() => {
       th.textContent = col;
       const sortIdx = win.sortCols.findIndex(s => s.col === col);
       if (sortIdx !== -1) {
+        th.classList.add('sorted');
         const arrow = document.createElement('span');
         arrow.className = 'sort-arrow';
         const dir = win.sortCols[sortIdx].dir;
