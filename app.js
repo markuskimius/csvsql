@@ -2145,24 +2145,49 @@ const app = (() => {
   }
 
   function refreshAllTableWindows() {
+    const dbTables = new Set(getDBTables());
+    // Collect windows to close (dropped tables) — iterate in reverse to avoid index shift
+    const toClose = [];
     windows.forEach(w => {
-      if (w.tableName && tables[w.tableName] && !w.isQuery) {
-        // Re-sync from SQL database
-        try {
-          const t = tables[w.tableName];
-          const result = db.exec(`SELECT * FROM [${w.tableName}]`);
-          if (result.length > 0) {
-            const rows = sqlResultToRows(result);
-            t.rows = rows.map((r, i) => {
-              const row = { _rownum: i + 1 };
-              t.columns.forEach(c => { row[c] = r[c] != null ? String(r[c]) : ''; });
-              return row;
-            });
-          }
-        } catch (e) {}
-        rebuildTable(w);
+      if (!w.tableName || !tables[w.tableName] || w.isQuery) return;
+      if (!dbTables.has(w.tableName)) {
+        toClose.push(w.id);
+        return;
       }
+      // Re-sync from SQL database
+      try {
+        const t = tables[w.tableName];
+        const result = db.exec(`SELECT * FROM [${w.tableName}]`);
+        if (result.length > 0) {
+          const columns = sanitizeColumns(result[0].columns);
+          const rows = sqlResultToRows(result);
+          t.columns = columns;
+          t.rows = rows.map((r, i) => {
+            const row = { _rownum: i + 1 };
+            columns.forEach(c => { row[c] = r[c] != null ? String(r[c]) : ''; });
+            return row;
+          });
+        } else {
+          t.columns = [];
+          t.rows = [];
+        }
+      } catch (e) {}
+      rebuildTable(w);
     });
+    // Close windows for dropped tables (skip unsaved-changes prompt since SQL already dropped them)
+    for (const id of toClose) {
+      const win = windows.find(w => w.id === id);
+      if (win) {
+        delete tables[win.tableName];
+        win.el.remove();
+        windows.splice(windows.indexOf(win), 1);
+        if (activeWinId === id) {
+          activeWinId = windows.length ? windows[windows.length - 1].id : null;
+          if (activeWinId) focusWindow(activeWinId);
+        }
+      }
+    }
+    if (toClose.length) updateWindowsList();
   }
 
   function clearConsole() {
@@ -2364,7 +2389,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.7.5 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.7.6 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
