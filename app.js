@@ -1224,7 +1224,7 @@ const app = (() => {
     toolbar.className = 'win-toolbar';
     toolbar.innerHTML = `
       <label>Filter:</label>
-      <input type="text" class="filter-input" placeholder="Filter: text  col>5  col~regex  col=val" value="${escHtml(win.filterText)}">
+      <input type="text" class="filter-input" placeholder="WHERE clause, e.g. age > 30 AND name LIKE '%Smith%'" value="${escHtml(win.filterText)}">
       <button class="btn-add-row">+ Row</button>
       <button class="btn-add-col">+ Col</button>
     `;
@@ -1236,7 +1236,19 @@ const app = (() => {
       clearTimeout(filterTimeout);
       filterTimeout = setTimeout(() => {
         win.filterText = filterInput.value;
+        if (syncTimers[win.tableName]) {
+          clearTimeout(syncTimers[win.tableName]);
+          delete syncTimers[win.tableName];
+          syncToSQL(win.tableName);
+        }
         rebuildTable(win);
+        if (win._filterError) {
+          filterInput.classList.add('filter-error');
+          filterInput.title = win._filterError;
+        } else {
+          filterInput.classList.remove('filter-error');
+          filterInput.title = '';
+        }
       }, 200);
     });
 
@@ -1264,70 +1276,28 @@ const app = (() => {
     buildTableHTML(win, container, tableData);
   }
 
-  // Parse filter text into predicates: "col>5 col2~regex col3=foo bar"
-  // Tokens: "col op value" for column filters, bare words for global search
-  function parseFilters(filterText, columns) {
-    if (!filterText) return null;
-    const predicates = [];
-    const colSet = new Set(columns);
-    // Match: colName operator value (operator is >=, <=, !=, >, <, =, ~)
-    const tokenRe = /(\S+?)(>=|<=|!=|>|<|=|~)(\S+)|(\S+)/g;
-    let m;
-    while ((m = tokenRe.exec(filterText)) !== null) {
-      if (m[1] && colSet.has(m[1])) {
-        const col = m[1], op = m[2], val = m[3];
-        if (op === '~') {
-          try {
-            const re = new RegExp(val, 'i');
-            predicates.push(row => re.test(String(row[col] ?? '')));
-          } catch (_) {
-            // Invalid regex — treat as literal
-            const lower = val.toLowerCase();
-            predicates.push(row => String(row[col] ?? '').toLowerCase().includes(lower));
-          }
-        } else {
-          const numVal = Number(val);
-          const isNum = !isNaN(numVal) && val !== '';
-          predicates.push(row => {
-            const cell = row[col] ?? '';
-            const cellNum = Number(cell);
-            const useNum = isNum && !isNaN(cellNum) && cell !== '';
-            if (useNum) {
-              if (op === '>') return cellNum > numVal;
-              if (op === '<') return cellNum < numVal;
-              if (op === '>=') return cellNum >= numVal;
-              if (op === '<=') return cellNum <= numVal;
-              if (op === '=') return cellNum === numVal;
-              if (op === '!=') return cellNum !== numVal;
-            }
-            const sv = String(cell), sv2 = val;
-            if (op === '=') return sv === sv2;
-            if (op === '!=') return sv !== sv2;
-            const cmp = collator.compare(sv, sv2);
-            if (op === '>') return cmp > 0;
-            if (op === '<') return cmp < 0;
-            if (op === '>=') return cmp >= 0;
-            if (op === '<=') return cmp <= 0;
-            return false;
-          });
-        }
-      } else {
-        // Global search token
-        const q = (m[4] || m[0]).toLowerCase();
-        predicates.push(row => columns.some(c => String(row[c] ?? '').toLowerCase().includes(q)));
-      }
-    }
-    return predicates.length > 0 ? predicates : null;
-  }
 
   function buildTableHTML(win, container, tableData) {
     const { columns, rows } = tableData;
     let displayRows = [...rows];
 
-    // Filter
-    const predicates = parseFilters(win.filterText, columns);
-    if (predicates) {
-      displayRows = displayRows.filter(row => predicates.every(p => p(row)));
+    // SQL WHERE filter
+    if (win.filterText && win.tableName && db) {
+      try {
+        const sql = `SELECT rowid FROM [${win.tableName}] WHERE ${win.filterText}`;
+        const result = db.exec(sql);
+        if (result.length > 0) {
+          const matchIds = new Set(result[0].values.map(r => r[0]));
+          displayRows = displayRows.filter(row => matchIds.has(row._rownum));
+        } else {
+          displayRows = [];
+        }
+        win._filterError = null;
+      } catch (e) {
+        win._filterError = e.message;
+      }
+    } else {
+      win._filterError = null;
     }
 
     // Multi-column sort

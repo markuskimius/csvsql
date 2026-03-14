@@ -251,6 +251,11 @@ body {
   border-color: var(--accent);
 }
 
+.win-toolbar input.filter-error {
+  border-color: #c33;
+  color: #f99;
+}
+
 .win-toolbar label {
   font-size: 11px;
   color: var(--text-dim);
