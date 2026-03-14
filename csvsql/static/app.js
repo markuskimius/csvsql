@@ -217,27 +217,42 @@ const app = (() => {
     setStatus(`Loading ${file.name}...`, 'working');
     const t0 = performance.now();
     const delimiter = delimiterForExt(file.name);
+    const allRows = [];
+    let detectedDelimiter = delimiter || ',';
+    let rawColumns = null;
+    let columns = null;
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
       dynamicTyping: false,
       delimiter,
-      complete(results) {
-        const detectedDelimiter = delimiter || results.meta.delimiter || ',';
+      chunk(results) {
+        if (!rawColumns) {
+          rawColumns = results.meta.fields || [];
+          columns = sanitizeColumns(rawColumns);
+          detectedDelimiter = delimiter || results.meta.delimiter || ',';
+        }
+        for (const row of results.data) {
+          const r = { _rownum: allRows.length + 1 };
+          rawColumns.forEach((raw, j) => { r[columns[j]] = row[raw] ?? ''; });
+          allRows.push(r);
+        }
+        setStatus(`Loading ${file.name}... ${allRows.length.toLocaleString()} rows`, 'working');
+      },
+      async complete() {
+        if (!columns) {
+          columns = [];
+          rawColumns = [];
+        }
         const name = sanitizeTableName(file.name.replace(/\.[^.]+$/, ''));
         const uniqueName = getUniqueTableName(name);
-        const rawColumns = results.meta.fields || [];
-        const columns = sanitizeColumns(rawColumns);
-        const rows = results.data.map((row, i) => {
-          const r = { _rownum: i + 1 };
-          rawColumns.forEach((raw, j) => { r[columns[j]] = row[raw] ?? ''; });
-          return r;
-        });
-        tables[uniqueName] = { columns, rows, filename: file.name, modified: false, fileHandle: fileHandle || null, delimiter: detectedDelimiter, compression: compression || null };
-        registerTable(uniqueName);
+        tables[uniqueName] = { columns, rows: allRows, filename: file.name, modified: false, fileHandle: fileHandle || null, delimiter: detectedDelimiter, compression: compression || null };
+        setStatus(`Indexing ${file.name}... 0 / ${allRows.length.toLocaleString()} rows`, 'working');
+        await new Promise(r => setTimeout(r, 0));
+        await registerTable(uniqueName);
         createTableWindow(uniqueName);
         const elapsed = performance.now() - t0;
-        setStatus(`Opened ${file.name} (${rows.length} rows) in ${formatElapsed(elapsed)}`, 'success');
+        setStatus(`Opened ${file.name} (${allRows.length.toLocaleString()} rows) in ${formatElapsed(elapsed)}`, 'success');
       },
       error(err) {
         setStatus(`Error parsing ${file.name}: ${err.message}`, 'error');
@@ -249,13 +264,13 @@ const app = (() => {
     setStatus(`Loading ${file.name}...`, 'working');
     const t0 = performance.now();
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       try {
         const workbook = XLSX.read(e.target.result, { type: 'array' });
-        workbook.SheetNames.forEach(sheetName => {
+        for (const sheetName of workbook.SheetNames) {
           const sheet = workbook.Sheets[sheetName];
           const jsonData = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-          if (jsonData.length === 0) return;
+          if (jsonData.length === 0) continue;
           const baseName = file.name.replace(/\.[^.]+$/, '');
           const label = workbook.SheetNames.length > 1 ? baseName + '_' + sheetName : baseName;
           const name = sanitizeTableName(label);
@@ -268,9 +283,9 @@ const app = (() => {
             return r;
           });
           tables[uniqueName] = { columns, rows, filename: file.name, modified: false, compression: compression || null };
-          registerTable(uniqueName);
+          await registerTable(uniqueName);
           createTableWindow(uniqueName);
-        });
+        }
         const elapsed = performance.now() - t0;
         setStatus(`Opened ${file.name} (${workbook.SheetNames.length} sheet(s)) in ${formatElapsed(elapsed)}`, 'success');
       } catch (err) {
@@ -311,7 +326,7 @@ const app = (() => {
     return name;
   }
 
-  function registerTable(tableName) {
+  async function registerTable(tableName) {
     const t = tables[tableName];
     if (!db) return;
     try { db.run(`DROP TABLE IF EXISTS [${tableName}]`); } catch (e) {}
@@ -323,13 +338,22 @@ const app = (() => {
     }
     if (t.rows.length === 0 || t.columns.length === 0) return;
     const placeholders = t.columns.map(() => '?').join(', ');
-    db.run('BEGIN TRANSACTION');
-    const stmt = db.prepare(`INSERT INTO [${tableName}] VALUES (${placeholders})`);
-    for (const row of t.rows) {
-      stmt.run(t.columns.map(c => row[c] ?? ''));
+    const total = t.rows.length;
+    const BATCH = 50000;
+    for (let i = 0; i < total; i += BATCH) {
+      db.run('BEGIN TRANSACTION');
+      const stmt = db.prepare(`INSERT INTO [${tableName}] VALUES (${placeholders})`);
+      const end = Math.min(i + BATCH, total);
+      for (let j = i; j < end; j++) {
+        stmt.run(t.columns.map(c => t.rows[j][c] ?? ''));
+      }
+      stmt.free();
+      db.run('COMMIT');
+      if (end < total) {
+        setStatus(`Indexing ${t.filename || tableName}... ${end.toLocaleString()} / ${total.toLocaleString()} rows`, 'working');
+        await new Promise(r => setTimeout(r, 0));
+      }
     }
-    stmt.free();
-    db.run('COMMIT');
   }
 
   async function saveActiveTable() {
@@ -399,15 +423,20 @@ const app = (() => {
     const t = tables[tableName];
     if (!t) return;
     const saveName = handle.name || t.filename || tableName;
-    setStatus(`Saving ${saveName}...`, 'working');
+    const total = t.rows.length;
+    setStatus(`Saving ${saveName}... 0 / ${total.toLocaleString()} rows`, 'working');
     const t0 = performance.now();
     const writable = await handle.createWritable();
+    const CHUNK = 50000;
     if (t.compression) {
-      // Build full blob, compress, write at once
       const parts = [serializeHeader(t)];
-      const CHUNK = 50000;
-      for (let i = 0; i < t.rows.length; i += CHUNK) {
-        parts.push(serializeChunk(t, i, Math.min(i + CHUNK, t.rows.length)));
+      for (let i = 0; i < total; i += CHUNK) {
+        const end = Math.min(i + CHUNK, total);
+        parts.push(serializeChunk(t, i, end));
+        if (end < total) {
+          setStatus(`Saving ${saveName}... ${end.toLocaleString()} / ${total.toLocaleString()} rows`, 'working');
+          await new Promise(r => setTimeout(r, 0));
+        }
       }
       let blob = new Blob(parts, { type: 'text/csv;charset=utf-8;' });
       setStatus(`Compressing ${saveName}...`, 'working');
@@ -415,10 +444,11 @@ const app = (() => {
       await writable.write(blob);
     } else {
       await writable.write(serializeHeader(t));
-      const CHUNK = 50000;
-      for (let i = 0; i < t.rows.length; i += CHUNK) {
-        const chunk = serializeChunk(t, i, Math.min(i + CHUNK, t.rows.length));
+      for (let i = 0; i < total; i += CHUNK) {
+        const end = Math.min(i + CHUNK, total);
+        const chunk = serializeChunk(t, i, end);
         await writable.write(chunk);
+        setStatus(`Saving ${saveName}... ${end.toLocaleString()} / ${total.toLocaleString()} rows`, 'working');
       }
     }
     await writable.close();
@@ -428,7 +458,7 @@ const app = (() => {
     t.filename = filename;
     updateWindowTitle(tableName);
     const elapsed = performance.now() - t0;
-    setStatus(`Saved ${saveName} (${t.rows.length.toLocaleString()} rows) in ${formatElapsed(elapsed)}`, 'success');
+    setStatus(`Saved ${saveName} (${total.toLocaleString()} rows) in ${formatElapsed(elapsed)}`, 'success');
   }
 
   async function downloadCSV(tableName, filename) {
@@ -436,14 +466,19 @@ const app = (() => {
     const t = tables[tableName];
     if (!t) return;
     const saveName = compressedFilename(filename, t.compression);
-    setStatus(`Saving ${saveName}...`, 'working');
-    // Defer so "Saving..." can paint
+    const total = t.rows.length;
+    setStatus(`Saving ${saveName}... 0 / ${total.toLocaleString()} rows`, 'working');
     await new Promise(r => setTimeout(r, 0));
     const t0 = performance.now();
     const parts = [serializeHeader(t)];
     const CHUNK = 50000;
-    for (let i = 0; i < t.rows.length; i += CHUNK) {
-      parts.push(serializeChunk(t, i, Math.min(i + CHUNK, t.rows.length)));
+    for (let i = 0; i < total; i += CHUNK) {
+      const end = Math.min(i + CHUNK, total);
+      parts.push(serializeChunk(t, i, end));
+      if (end < total) {
+        setStatus(`Saving ${saveName}... ${end.toLocaleString()} / ${total.toLocaleString()} rows`, 'working');
+        await new Promise(r => setTimeout(r, 0));
+      }
     }
     let blob = new Blob(parts, { type: 'text/csv;charset=utf-8;' });
     if (t.compression) {
@@ -459,7 +494,7 @@ const app = (() => {
     t.filename = filename;
     updateWindowTitle(tableName);
     const elapsed = performance.now() - t0;
-    setStatus(`Saved ${saveName} (${t.rows.length.toLocaleString()} rows) in ${formatElapsed(elapsed)}`, 'success');
+    setStatus(`Saved ${saveName} (${total.toLocaleString()} rows) in ${formatElapsed(elapsed)}`, 'success');
   }
 
   function escapeField(val, delim) {
@@ -520,11 +555,11 @@ const app = (() => {
       if (!name) return;
       const safeName = sanitizeTableName(name);
       const uniqueName = getUniqueTableName(safeName);
-      showPrompt('Columns', 'Column names (comma-separated):', 'id, name, value', (colStr) => {
+      showPrompt('Columns', 'Column names (comma-separated):', 'id, name, value', async (colStr) => {
         if (!colStr) return;
         const columns = colStr.split(',').map(c => c.trim()).filter(Boolean);
         tables[uniqueName] = { columns, rows: [], filename: null, modified: true };
-        registerTable(uniqueName);
+        await registerTable(uniqueName);
         createTableWindow(uniqueName);
       });
     });
@@ -1364,13 +1399,13 @@ const app = (() => {
     rebuildTable(win);
   }
 
-  function addColumn(tableName, colName) {
+  async function addColumn(tableName, colName) {
     const t = tables[tableName];
     if (t.columns.includes(colName)) return;
     t.columns.push(colName);
     t.rows.forEach(r => { r[colName] = ''; });
     markModified(tableName);
-    registerTable(tableName);
+    await registerTable(tableName);
   }
 
   function renameColumn(tableName, oldCol, newCol, win) {
@@ -1605,7 +1640,7 @@ const app = (() => {
     setStatus('Running query...', 'working');
 
     // Defer execution so browser can paint the "working" status
-    setTimeout(() => {
+    setTimeout(async () => {
       try {
         flushAllSyncs();
         const t0 = performance.now();
@@ -1630,7 +1665,7 @@ const app = (() => {
             return row;
           });
           tables[uniqueName] = { columns, rows: tableRows, filename: null, modified: true, fileHandle: null };
-          registerTable(uniqueName);
+          await registerTable(uniqueName);
           createTableWindow(uniqueName);
           setStatus(`Created table "${uniqueName}" with ${tableRows.length} row(s) in ${formatElapsed(elapsed)}`, 'success');
           return;
@@ -1655,7 +1690,7 @@ const app = (() => {
         }
 
         if (newTables.length > 0) {
-          importNewDBTables(newTables);
+          await importNewDBTables(newTables);
           setStatus(`Created table(s): ${newTables.join(', ')} in ${formatElapsed(elapsed)}`, 'success');
         } else if (result.length > 0 && result[0].columns && result[0].values.length > 0) {
           const totalRows = result[0].values.length;
@@ -1678,8 +1713,8 @@ const app = (() => {
     }, 0);
   }
 
-  function importNewDBTables(tableNames) {
-    tableNames.forEach(name => {
+  async function importNewDBTables(tableNames) {
+    for (const name of tableNames) {
       try {
         const result = db.exec(`SELECT * FROM [${name}]`);
         const rows = sqlResultToRows(result);
@@ -1691,10 +1726,10 @@ const app = (() => {
           return row;
         });
         tables[name] = { columns, rows: tableRows, filename: null, modified: true, fileHandle: null };
-        registerTable(name);
+        await registerTable(name);
         createTableWindow(name);
       } catch (e) {}
-    });
+    }
   }
 
   function showQueryResult(sql, resultRows) {
