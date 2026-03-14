@@ -1003,10 +1003,12 @@ const app = (() => {
     });
     win.el.querySelector('.btn-min').addEventListener('click', () => minimizeWindow(win.id));
     win.el.querySelector('.btn-max').addEventListener('click', () => toggleMaximize(win.id));
-    // Double-click title text to rename, double-click elsewhere on titlebar to maximize
-    win.el.querySelector('.win-title').addEventListener('dblclick', (e) => {
-      e.stopPropagation();
-      if (win.tableName) startInlineRename(win);
+    // Ctrl/Cmd-click title text to rename, double-click titlebar to maximize
+    win.el.querySelector('.win-title').addEventListener('click', (e) => {
+      if ((e.ctrlKey || e.metaKey) && win.tableName) {
+        e.stopPropagation();
+        startInlineRename(win);
+      }
     });
     win.el.querySelector('.win-titlebar').addEventListener('dblclick', (e) => {
       if (e.target.tagName !== 'BUTTON' && !e.target.classList.contains('win-title')) {
@@ -1372,40 +1374,36 @@ const app = (() => {
         if (win.sortCols.length > 1) arrow.textContent += (sortIdx + 1);
         th.appendChild(arrow);
       }
-      // Single click: sort; double-click: rename — use timer to distinguish
-      let clickTimer = null;
       th.addEventListener('click', (e) => {
-        if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; return; }
-        clickTimer = setTimeout(() => {
-          clickTimer = null;
-          const existing = win.sortCols.findIndex(s => s.col === col);
-          if (e.shiftKey) {
-            if (existing !== -1) {
-              if (win.sortCols[existing].dir === 'asc') {
-                win.sortCols[existing].dir = 'desc';
-              } else {
-                win.sortCols.splice(existing, 1);
-              }
+        if (th._renaming) return;
+        if (e.ctrlKey || e.metaKey) {
+          e.stopPropagation();
+          startColumnRename(win, th, col);
+          return;
+        }
+        const existing = win.sortCols.findIndex(s => s.col === col);
+        if (e.shiftKey) {
+          if (existing !== -1) {
+            if (win.sortCols[existing].dir === 'asc') {
+              win.sortCols[existing].dir = 'desc';
             } else {
-              win.sortCols.push({ col, dir: 'asc' });
+              win.sortCols.splice(existing, 1);
             }
           } else {
-            if (existing !== -1 && win.sortCols.length === 1) {
-              if (win.sortCols[0].dir === 'asc') {
-                win.sortCols[0].dir = 'desc';
-              } else {
-                win.sortCols = [];
-              }
-            } else {
-              win.sortCols = [{ col, dir: 'asc' }];
-            }
+            win.sortCols.push({ col, dir: 'asc' });
           }
-          rebuildTable(win);
-        }, 250);
-      });
-      th.addEventListener('dblclick', (e) => {
-        e.stopPropagation();
-        startColumnRename(win, th, col);
+        } else {
+          if (existing !== -1 && win.sortCols.length === 1) {
+            if (win.sortCols[0].dir === 'asc') {
+              win.sortCols[0].dir = 'desc';
+            } else {
+              win.sortCols = [];
+            }
+          } else {
+            win.sortCols = [{ col, dir: 'asc' }];
+          }
+        }
+        rebuildTable(win);
       });
       headerRow.appendChild(th);
     });
@@ -1667,18 +1665,23 @@ const app = (() => {
   }
 
   function startColumnRename(win, th, oldCol) {
+    const currentWidth = th.offsetWidth;
     const input = document.createElement('input');
     input.className = 'inline-rename';
     input.value = oldCol;
+    input.style.width = currentWidth + 'px';
+    input.style.boxSizing = 'border-box';
     th.textContent = '';
     th.appendChild(input);
+    th._renaming = true;
     input.focus();
     input.select();
 
     let done = false;
-    function commit() {
+    function finish() {
       if (done) return;
       done = true;
+      th._renaming = false;
       const raw = input.value.trim();
       if (input.parentNode) input.remove();
       if (!raw || raw === oldCol) {
@@ -1687,11 +1690,13 @@ const app = (() => {
       }
       renameColumn(win.tableName, oldCol, raw, win);
     }
-    input.addEventListener('blur', commit);
+    input.addEventListener('blur', finish);
     input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); commit(); }
-      if (e.key === 'Escape') { done = true; input.remove(); rebuildTable(win); }
+      if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+      if (e.key === 'Escape') { done = true; th._renaming = false; input.remove(); rebuildTable(win); }
+      e.stopPropagation();
     });
+    input.addEventListener('click', (e) => e.stopPropagation());
   }
 
   function markModified(tableName) {
