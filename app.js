@@ -1174,11 +1174,14 @@ const app = (() => {
     const sql = input.value.trim();
     if (!sql) return;
 
+    const t0 = performance.now();
+
     // Handle SELECT ... INTO ... by running the SELECT and creating the table from results
     const intoInfo = extractIntoClause(sql);
     if (intoInfo) {
       try {
         const rows = alasql(intoInfo.selectSQL);
+        const elapsed = performance.now() - t0;
         if (!Array.isArray(rows) || rows.length === 0 || typeof rows[0] !== 'object') {
           setStatus('INTO query returned no rows', 'error');
           return;
@@ -1194,7 +1197,7 @@ const app = (() => {
         tables[uniqueName] = { columns, rows: tableRows, filename: null, modified: true, fileHandle: null };
         registerAlaSQL(uniqueName);
         createTableWindow(uniqueName);
-        setStatus(`Created table "${uniqueName}" with ${rows.length} row(s)`, 'success');
+        setStatus(`Created table "${uniqueName}" with ${rows.length} row(s) in ${formatElapsed(elapsed)}`, 'success');
       } catch (e) {
         setStatus(`Error: ${e.message}`, 'error');
       }
@@ -1206,6 +1209,7 @@ const app = (() => {
 
     try {
       const result = alasql(sql);
+      const elapsed = performance.now() - t0;
 
       // Detect new tables created by CREATE TABLE etc.
       const newAlaTables = Object.keys(alasql.tables).filter(n => !tablesBefore.has(n));
@@ -1220,19 +1224,20 @@ const app = (() => {
 
       if (newAlaTables.length > 0) {
         importNewAlaTables(newAlaTables);
-        setStatus(`Created table(s): ${newAlaTables.join(', ')}`, 'success');
+        setStatus(`Created table(s): ${newAlaTables.join(', ')} in ${formatElapsed(elapsed)}`, 'success');
       } else if (Array.isArray(result) && result.length > 0 && typeof result[0] === 'object') {
         showQueryResult(sql, result);
-        setStatus(`Query returned ${result.length} row(s)`, 'success');
+        setStatus(`Query returned ${result.length} row(s) in ${formatElapsed(elapsed)}`, 'success');
       } else if (Array.isArray(result)) {
-        setStatus(`Query returned: ${JSON.stringify(result)}`, 'success');
+        setStatus(`Query returned: ${JSON.stringify(result)} in ${formatElapsed(elapsed)}`, 'success');
         refreshAllTableWindows();
       } else {
-        setStatus(`Result: ${JSON.stringify(result)}`, 'success');
+        setStatus(`Result: ${JSON.stringify(result)} in ${formatElapsed(elapsed)}`, 'success');
         refreshAllTableWindows();
       }
     } catch (e) {
-      setStatus(`Error: ${e.message}`, 'error');
+      const elapsed = performance.now() - t0;
+      setStatus(`Error: ${e.message} (${formatElapsed(elapsed)})`, 'error');
     }
   }
 
@@ -1295,6 +1300,12 @@ const app = (() => {
     const el = document.getElementById('console-status');
     el.textContent = msg;
     el.className = type;
+  }
+
+  function formatElapsed(ms) {
+    if (ms < 1) return '<1ms';
+    if (ms < 1000) return Math.round(ms) + 'ms';
+    return (ms / 1000).toFixed(2) + 's';
   }
 
   // ---- Console Resize ----
