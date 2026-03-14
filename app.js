@@ -2218,9 +2218,35 @@ const app = (() => {
     const menubar = document.getElementById('menubar');
     const allItems = document.querySelectorAll('.menu-item');
 
+    // Wire up menu buttons that require window state
+    document.getElementById('btn-save').addEventListener('click', () => saveActiveTable());
+    document.getElementById('btn-save-as').addEventListener('click', () => saveActiveTableAs());
+    document.getElementById('btn-close-window').addEventListener('click', () => closeActiveWindow());
+    document.getElementById('btn-tile-h').addEventListener('click', () => layoutTileH());
+    document.getElementById('btn-tile-v').addEventListener('click', () => layoutTileV());
+    document.getElementById('btn-grid').addEventListener('click', () => layoutGrid());
+    document.getElementById('btn-cascade').addEventListener('click', () => layoutCascade());
+    document.getElementById('btn-minimize-all').addEventListener('click', () => minimizeAll());
+    document.getElementById('btn-restore-all').addEventListener('click', () => restoreAll());
+
+    function updateMenuState() {
+      const hasActive = !!activeWinId;
+      const hasAny = windows.length > 0;
+      document.getElementById('btn-save').disabled = !hasActive;
+      document.getElementById('btn-save-as').disabled = !hasActive;
+      document.getElementById('btn-close-window').disabled = !hasActive;
+      document.getElementById('btn-tile-h').disabled = !hasAny;
+      document.getElementById('btn-tile-v').disabled = !hasAny;
+      document.getElementById('btn-grid').disabled = !hasAny;
+      document.getElementById('btn-cascade').disabled = !hasAny;
+      document.getElementById('btn-minimize-all').disabled = !hasAny;
+      document.getElementById('btn-restore-all').disabled = !hasAny;
+    }
+
     function openItem(item) {
       allItems.forEach(m => m.classList.remove('open'));
       item.classList.add('open');
+      updateMenuState();
     }
 
     allItems.forEach(item => {
@@ -2248,7 +2274,7 @@ const app = (() => {
     // On mouseup over a dropdown button during drag, activate it
     menubar.addEventListener('mouseup', (e) => {
       const btn = e.target.closest('.menu-dropdown button');
-      if (_menuDragging && btn) {
+      if (_menuDragging && btn && !btn.disabled) {
         btn.click();
         closeMenus();
       }
@@ -2338,7 +2364,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.7.4 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.7.5 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);

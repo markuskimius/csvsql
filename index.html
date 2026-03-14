@@ -17,23 +17,23 @@
       <div class="menu-dropdown">
         <button onclick="app.openFile()">Open...<span class="shortcut">Ctrl+O</span></button>
         <button onclick="app.openURL()">Open URL...</button>
-        <button onclick="app.saveActiveTable()">Save Table<span class="shortcut">Ctrl+S</span></button>
-        <button onclick="app.saveActiveTableAs()">Save Table As...</button>
+        <button id="btn-save" disabled>Save Table<span class="shortcut">Ctrl+S</span></button>
+        <button id="btn-save-as" disabled>Save Table As...</button>
         <hr>
         <button onclick="app.newTable()">New Table<span class="shortcut">Ctrl+N</span></button>
-        <button onclick="app.closeActiveWindow()">Close Window<span class="shortcut">Ctrl+W</span></button>
+        <button id="btn-close-window" disabled>Close Window<span class="shortcut">Ctrl+W</span></button>
       </div>
     </div>
     <div class="menu-item" id="menu-view">
       <span class="menu-label">View</span>
       <div class="menu-dropdown">
-        <button onclick="app.layoutTileH()">Tile Horizontally</button>
-        <button onclick="app.layoutTileV()">Tile Vertically</button>
-        <button onclick="app.layoutGrid()">Grid</button>
-        <button onclick="app.layoutCascade()">Cascade</button>
+        <button id="btn-tile-h" disabled>Tile Horizontally</button>
+        <button id="btn-tile-v" disabled>Tile Vertically</button>
+        <button id="btn-grid" disabled>Grid</button>
+        <button id="btn-cascade" disabled>Cascade</button>
         <hr>
-        <button onclick="app.minimizeAll()">Minimize All</button>
-        <button onclick="app.restoreAll()">Restore All</button>
+        <button id="btn-minimize-all" disabled>Minimize All</button>
+        <button id="btn-restore-all" disabled>Restore All</button>
       </div>
     </div>
     <div class="menu-item" id="menu-windows">

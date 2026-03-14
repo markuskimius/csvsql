@@ -93,12 +93,17 @@ html, body {
   margin-left: 24px;
 }
 
-.menu-dropdown button:hover {
+.menu-dropdown button:disabled {
+  color: var(--text-dim);
+  cursor: default;
+}
+
+.menu-dropdown button:hover:not(:disabled) {
   background: var(--accent);
   color: #fff;
 }
 
-.menu-dropdown button:hover .shortcut {
+.menu-dropdown button:hover:not(:disabled) .shortcut {
   color: rgba(255,255,255,0.7);
 }
 
