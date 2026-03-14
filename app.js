@@ -8,6 +8,7 @@ const app = (() => {
   let nextZIndex = 100;
   let activeWinId = null;
   let tables = {};  // tableName -> { columns, rows, filename, modified }
+  let db = null;    // sql.js Database instance
 
   // Virtual scrolling constants
   const ROW_HEIGHT = 26;
@@ -20,7 +21,11 @@ const app = (() => {
   const collator = new Intl.Collator(undefined, { sensitivity: 'base' });
 
   // ---- Init ----
-  function init() {
+  async function init() {
+    const SQL = await initSqlJs({
+      locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${file}`
+    });
+    db = new SQL.Database();
     setupConsoleResize();
     setupFileInput();
     setupDragAndDrop();
@@ -133,7 +138,7 @@ const app = (() => {
           return r;
         });
         tables[uniqueName] = { columns, rows, filename: file.name, modified: false, fileHandle: fileHandle || null };
-        registerAlaSQL(uniqueName);
+        registerTable(uniqueName);
         createTableWindow(uniqueName);
       },
       error(err) {
@@ -163,7 +168,7 @@ const app = (() => {
             return r;
           });
           tables[uniqueName] = { columns, rows, filename: file.name, modified: false };
-          registerAlaSQL(uniqueName);
+          registerTable(uniqueName);
           createTableWindow(uniqueName);
         });
         setStatus(`Opened ${file.name} (${workbook.SheetNames.length} sheet(s))`, 'success');
@@ -205,22 +210,23 @@ const app = (() => {
     return name;
   }
 
-  function registerAlaSQL(tableName) {
+  function registerTable(tableName) {
     const t = tables[tableName];
-    try { alasql(`DROP TABLE IF EXISTS [${tableName}]`); } catch (e) {}
+    if (!db) return;
+    try { db.run(`DROP TABLE IF EXISTS [${tableName}]`); } catch (e) {}
     if (t.columns.length === 0) {
-      alasql(`CREATE TABLE [${tableName}]`);
+      db.run(`CREATE TABLE [${tableName}] (_empty TEXT)`);
     } else {
-      const colDefs = t.columns.map(c => `[${c}] STRING`).join(', ');
-      alasql(`CREATE TABLE [${tableName}] (${colDefs})`);
+      const colDefs = t.columns.map(c => `[${c}] TEXT`).join(', ');
+      db.run(`CREATE TABLE [${tableName}] (${colDefs})`);
     }
-    if (!alasql.tables[tableName]) return;
-    const insertRows = t.rows.map(r => {
-      const obj = {};
-      t.columns.forEach(c => { obj[c] = r[c] ?? ''; });
-      return obj;
-    });
-    alasql.tables[tableName].data = insertRows;
+    if (t.rows.length === 0 || t.columns.length === 0) return;
+    const placeholders = t.columns.map(() => '?').join(', ');
+    const stmt = db.prepare(`INSERT INTO [${tableName}] VALUES (${placeholders})`);
+    for (const row of t.rows) {
+      stmt.run(t.columns.map(c => row[c] ?? ''));
+    }
+    stmt.free();
   }
 
   async function saveActiveTable() {
@@ -314,7 +320,7 @@ const app = (() => {
         if (!colStr) return;
         const columns = colStr.split(',').map(c => c.trim()).filter(Boolean);
         tables[uniqueName] = { columns, rows: [], filename: null, modified: true };
-        registerAlaSQL(uniqueName);
+        registerTable(uniqueName);
         createTableWindow(uniqueName);
       });
     });
@@ -404,7 +410,7 @@ const app = (() => {
       if (t.modified) {
         if (!confirm(`Table "${win.tableName}" has unsaved changes. Close anyway?`)) return;
       }
-      try { alasql(`DROP TABLE IF EXISTS [${win.tableName}]`); } catch (e) {}
+      try { db.run(`DROP TABLE IF EXISTS [${win.tableName}]`); } catch (e) {}
       delete tables[win.tableName];
     }
     win.el.remove();
@@ -582,9 +588,9 @@ const app = (() => {
       tables[uniqueName] = t;
       delete tables[oldName];
 
-      // Re-register in AlaSQL under new name
-      try { alasql(`DROP TABLE IF EXISTS [${oldName}]`); } catch (_) {}
-      registerAlaSQL(uniqueName);
+      // Re-register in SQL under new name
+      try { db.run(`DROP TABLE IF EXISTS [${oldName}]`); } catch (_) {}
+      registerTable(uniqueName);
 
       // Update all windows referencing this table
       windows.filter(w => w.tableName === oldName).forEach(w => {
@@ -864,7 +870,7 @@ const app = (() => {
         row[col] = newVal;
         td.classList.add('modified');
         markModified(win.tableName);
-        debouncedSyncToAlaSQL(win.tableName);
+        debouncedSync(win.tableName);
       }
     }, true); // capture phase for blur
 
@@ -1049,7 +1055,7 @@ const app = (() => {
     t.columns.forEach(c => { newRow[c] = ''; });
     t.rows.push(newRow);
     markModified(tableName);
-    debouncedSyncToAlaSQL(tableName);
+    debouncedSync(tableName);
   }
 
   function deleteRow(tableName, rownum, win) {
@@ -1058,7 +1064,7 @@ const app = (() => {
     // Renumber
     t.rows.forEach((r, i) => { r._rownum = i + 1; });
     markModified(tableName);
-    debouncedSyncToAlaSQL(tableName);
+    debouncedSync(tableName);
     rebuildTable(win);
   }
 
@@ -1068,7 +1074,7 @@ const app = (() => {
     t.columns.push(colName);
     t.rows.forEach(r => { r[colName] = ''; });
     markModified(tableName);
-    registerAlaSQL(tableName);
+    registerTable(tableName);
   }
 
   function markModified(tableName) {
@@ -1077,24 +1083,25 @@ const app = (() => {
     updateWindowTitle(tableName);
   }
 
-  function syncToAlaSQL(tableName) {
+  function syncToSQL(tableName) {
     const t = tables[tableName];
-    if (!t) return;
+    if (!t || !db || t.columns.length === 0) return;
     try {
-      const data = t.rows.map(r => {
-        const obj = {};
-        t.columns.forEach(c => { obj[c] = r[c] ?? ''; });
-        return obj;
-      });
-      alasql.tables[tableName].data = data;
+      db.run(`DELETE FROM [${tableName}]`);
+      const placeholders = t.columns.map(() => '?').join(', ');
+      const stmt = db.prepare(`INSERT INTO [${tableName}] VALUES (${placeholders})`);
+      for (const row of t.rows) {
+        stmt.run(t.columns.map(c => row[c] ?? ''));
+      }
+      stmt.free();
     } catch (e) {}
   }
 
-  function debouncedSyncToAlaSQL(tableName, delay = 500) {
+  function debouncedSync(tableName, delay = 300) {
     clearTimeout(syncTimers[tableName]);
     syncTimers[tableName] = setTimeout(() => {
       delete syncTimers[tableName];
-      syncToAlaSQL(tableName);
+      syncToSQL(tableName);
     }, delay);
   }
 
@@ -1102,7 +1109,7 @@ const app = (() => {
     for (const name of Object.keys(syncTimers)) {
       clearTimeout(syncTimers[name]);
       delete syncTimers[name];
-      syncToAlaSQL(name);
+      syncToSQL(name);
     }
   }
 
@@ -1124,7 +1131,7 @@ const app = (() => {
       t.rows.splice(idx, 0, newRow);
       t.rows.forEach((r, i) => { r._rownum = i + 1; });
       markModified(tableName);
-      syncToAlaSQL(tableName);
+      syncToSQL(tableName);
       rebuildTable(win);
       removeContextMenu();
     });
@@ -1204,6 +1211,24 @@ const app = (() => {
     return null;
   }
 
+  // Convert sql.js exec result [{columns, values}] to array of row objects
+  function sqlResultToRows(result) {
+    if (!result || result.length === 0) return [];
+    const { columns, values } = result[0];
+    return values.map(row => {
+      const obj = {};
+      columns.forEach((col, i) => { obj[col] = row[i]; });
+      return obj;
+    });
+  }
+
+  // List tables currently in the SQLite database
+  function getDBTables() {
+    const result = db.exec("SELECT name FROM sqlite_master WHERE type='table'");
+    if (!result.length) return [];
+    return result[0].values.map(r => r[0]);
+  }
+
   function executeQuery() {
     flushAllSyncs();
     const input = document.getElementById('sql-input');
@@ -1216,9 +1241,10 @@ const app = (() => {
     const intoInfo = extractIntoClause(sql);
     if (intoInfo) {
       try {
-        const rows = alasql(intoInfo.selectSQL);
+        const result = db.exec(intoInfo.selectSQL);
         const elapsed = performance.now() - t0;
-        if (!Array.isArray(rows) || rows.length === 0 || typeof rows[0] !== 'object') {
+        const rows = sqlResultToRows(result);
+        if (rows.length === 0) {
           setStatus('INTO query returned no rows', 'error');
           return;
         }
@@ -1232,44 +1258,44 @@ const app = (() => {
           return row;
         });
         tables[uniqueName] = { columns, rows: tableRows, filename: null, modified: true, fileHandle: null };
-        registerAlaSQL(uniqueName);
+        registerTable(uniqueName);
         createTableWindow(uniqueName);
-        setStatus(`Created table "${uniqueName}" with ${rows.length} row(s) in ${formatElapsed(elapsed)}`, 'success');
+        setStatus(`Created table "${uniqueName}" with ${tableRows.length} row(s) in ${formatElapsed(elapsed)}`, 'success');
       } catch (e) {
         setStatus(`Error: ${e.message}`, 'error');
       }
       return;
     }
 
-    // Snapshot existing AlaSQL tables before query
-    const tablesBefore = new Set(Object.keys(alasql.tables));
+    // Snapshot existing DB tables before query
+    const tablesBefore = new Set(getDBTables());
 
     try {
-      const result = alasql(sql);
+      const result = db.exec(sql);
       const elapsed = performance.now() - t0;
 
       // Detect new tables created by CREATE TABLE etc.
-      const newAlaTables = Object.keys(alasql.tables).filter(n => !tablesBefore.has(n));
+      const newTables = getDBTables().filter(n => !tablesBefore.has(n));
 
       const createMatch = sql.match(/\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?\[?([^\]\s,(;]+)\]?/i);
       if (createMatch) {
         const createName = createMatch[1];
-        if (!newAlaTables.includes(createName) && alasql.tables[createName] && !tables[createName]) {
-          newAlaTables.push(createName);
+        if (!newTables.includes(createName) && !tables[createName]) {
+          const dbTables = getDBTables();
+          if (dbTables.includes(createName)) newTables.push(createName);
         }
       }
 
-      if (newAlaTables.length > 0) {
-        importNewAlaTables(newAlaTables);
-        setStatus(`Created table(s): ${newAlaTables.join(', ')} in ${formatElapsed(elapsed)}`, 'success');
-      } else if (Array.isArray(result) && result.length > 0 && typeof result[0] === 'object') {
-        showQueryResult(sql, result);
-        setStatus(`Query returned ${result.length} row(s) in ${formatElapsed(elapsed)}`, 'success');
-      } else if (Array.isArray(result)) {
-        setStatus(`Query returned: ${JSON.stringify(result)} in ${formatElapsed(elapsed)}`, 'success');
-        refreshAllTableWindows();
+      if (newTables.length > 0) {
+        importNewDBTables(newTables);
+        setStatus(`Created table(s): ${newTables.join(', ')} in ${formatElapsed(elapsed)}`, 'success');
+      } else if (result.length > 0 && result[0].columns && result[0].values.length > 0) {
+        const rows = sqlResultToRows(result);
+        showQueryResult(sql, rows);
+        setStatus(`Query returned ${rows.length} row(s) in ${formatElapsed(elapsed)}`, 'success');
       } else {
-        setStatus(`Result: ${JSON.stringify(result)} in ${formatElapsed(elapsed)}`, 'success');
+        const msg = result.length > 0 ? `${result[0].values.length} row(s) affected` : 'OK';
+        setStatus(`${msg} in ${formatElapsed(elapsed)}`, 'success');
         refreshAllTableWindows();
       }
     } catch (e) {
@@ -1278,25 +1304,22 @@ const app = (() => {
     }
   }
 
-  function importNewAlaTables(tableNames) {
+  function importNewDBTables(tableNames) {
     tableNames.forEach(name => {
-      const alaTable = alasql.tables[name];
-      if (!alaTable) return;
-      const data = alaTable.data || [];
-      const colDefs = alaTable.columns || [];
-      const rawColumns = data.length > 0
-        ? Object.keys(data[0])
-        : colDefs.map(c => c.columnid);
-      const columns = sanitizeColumns(rawColumns);
-      const rows = data.map((r, i) => {
-        const row = { _rownum: i + 1 };
-        rawColumns.forEach((raw, j) => { row[columns[j]] = r[raw] != null ? String(r[raw]) : ''; });
-        return row;
-      });
-      tables[name] = { columns, rows, filename: null, modified: true, fileHandle: null };
-      // Keep AlaSQL in sync with string values
-      registerAlaSQL(name);
-      createTableWindow(name);
+      try {
+        const result = db.exec(`SELECT * FROM [${name}]`);
+        const rows = sqlResultToRows(result);
+        const rawColumns = result.length > 0 ? result[0].columns : [];
+        const columns = sanitizeColumns(rawColumns);
+        const tableRows = rows.map((r, i) => {
+          const row = { _rownum: i + 1 };
+          rawColumns.forEach((raw, j) => { row[columns[j]] = r[raw] != null ? String(r[raw]) : ''; });
+          return row;
+        });
+        tables[name] = { columns, rows: tableRows, filename: null, modified: true, fileHandle: null };
+        registerTable(name);
+        createTableWindow(name);
+      } catch (e) {}
     });
   }
 
@@ -1323,12 +1346,19 @@ const app = (() => {
   function refreshAllTableWindows() {
     windows.forEach(w => {
       if (w.tableName && tables[w.tableName] && !w.isQuery) {
-        // Re-sync from alasql data
-        const alaData = alasql.tables[w.tableName]?.data;
-        if (alaData) {
+        // Re-sync from SQL database
+        try {
           const t = tables[w.tableName];
-          t.rows = alaData.map((r, i) => ({ _rownum: i + 1, ...r }));
-        }
+          const result = db.exec(`SELECT * FROM [${w.tableName}]`);
+          if (result.length > 0) {
+            const rows = sqlResultToRows(result);
+            t.rows = rows.map((r, i) => {
+              const row = { _rownum: i + 1 };
+              t.columns.forEach(c => { row[c] = r[c] != null ? String(r[c]) : ''; });
+              return row;
+            });
+          }
+        } catch (e) {}
         rebuildTable(w);
       }
     });

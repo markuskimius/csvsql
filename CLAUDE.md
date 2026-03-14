@@ -17,14 +17,14 @@ Single-page app with three files:
 ### Key dependencies (loaded via CDN)
 
 - **Papa Parse** — CSV parsing/unparsing
-- **AlaSQL** — In-browser SQL engine; each opened CSV is registered as an AlaSQL table
+- **sql.js** — SQLite compiled to WebAssembly; each opened CSV is registered as a SQLite table
 
 ### Data flow
 
 1. CSV opened via File menu → Papa Parse parses → stored in `tables[name]` object (columns, rows, filename, modified flag)
-2. Table registered in AlaSQL with `CREATE TABLE` + data injected into `alasql.tables[name].data`
-3. Edits to cells update `tables[name].rows` and sync back to AlaSQL via `syncToAlaSQL()`
-4. SQL queries run against AlaSQL; results become new entries in `tables` and open in new subwindows
+2. Table registered in SQLite via `CREATE TABLE` + batch `INSERT` with prepared statements
+3. Edits to cells update `tables[name].rows` and sync back to SQLite via `syncToSQL()`
+4. SQL queries run against SQLite; results become new entries in `tables` and open in new subwindows
 5. Save serializes `tables[name]` back to CSV via Papa.unparse and triggers browser download
 
 ### Window management
@@ -51,5 +51,5 @@ Or just open `index.html` directly — the only external resources are CDN scrip
 
 - All state lives in the `app` IIFE's closure (`windows`, `tables`, `nextWinId`, etc.)
 - Public methods are returned from the IIFE and called from HTML onclick handlers or internally
-- Table names are sanitized to `[a-zA-Z0-9_]` for AlaSQL compatibility
-- AlaSQL table names use bracket-quoting (`[tableName]`) to handle edge cases
+- Table and column names are sanitized to `[a-zA-Z0-9_]` for SQL compatibility
+- SQL identifiers use bracket-quoting (`[tableName]`) to handle edge cases
