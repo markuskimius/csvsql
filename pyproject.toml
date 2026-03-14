@@ -29,6 +29,7 @@ Repository = "https://github.com/markuskimius/csvsql"
 
 [project.scripts]
 csvsql = "csvsql.cli:main"
+csvsqlw = "csvsql.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["csvsql*"]

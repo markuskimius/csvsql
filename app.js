@@ -143,25 +143,25 @@ const app = (() => {
   const COMPRESSION_EXTS = new Set(['gz', 'zip', 'bz2', 'xz', 'rar', '7z', 'zst']);
   const DATA_EXTS = new Set(['csv', 'tsv', 'psv', 'txt', 'xlsx', 'xls']);
 
-  function openFileByType(file, fileHandle) {
+  function openFileByType(file, fileHandle, compression) {
     const ext = file.name.split('.').pop().toLowerCase();
     if (COMPRESSION_EXTS.has(ext)) {
-      decompressAndOpen(file);
+      decompressAndOpen(file, fileHandle);
     } else if (ext === 'xlsx' || ext === 'xls') {
-      loadExcelFile(file);
+      loadExcelFile(file, compression);
     } else {
-      loadDelimitedFile(file, fileHandle);
+      loadDelimitedFile(file, compression ? compression.fileHandle : fileHandle, compression);
     }
   }
 
-  async function decompressAndOpen(file) {
+  async function decompressAndOpen(file, fileHandle) {
     const ext = file.name.split('.').pop().toLowerCase();
     setStatus(`Decompressing ${file.name}...`, 'working');
     try {
       if (ext === 'gz') {
-        await decompressGzip(file);
+        await decompressGzip(file, fileHandle);
       } else if (ext === 'zip') {
-        await decompressZip(file);
+        await decompressZip(file, fileHandle);
       } else {
         setStatus(`Unsupported compression format: .${ext} — please decompress the file first and open the decompressed file`, 'error');
       }
@@ -170,17 +170,17 @@ const app = (() => {
     }
   }
 
-  async function decompressGzip(file) {
+  async function decompressGzip(file, fileHandle) {
     const ds = new DecompressionStream('gzip');
     const decompressed = file.stream().pipeThrough(ds);
     const blob = await new Response(decompressed).blob();
     // Inner filename: strip .gz
     const innerName = file.name.replace(/\.gz$/i, '') || 'decompressed.csv';
     const innerFile = new File([blob], innerName, { type: 'application/octet-stream' });
-    openFileByType(innerFile, null);
+    openFileByType(innerFile, null, { type: 'gz', compressedFilename: file.name, fileHandle: fileHandle || null });
   }
 
-  async function decompressZip(file) {
+  async function decompressZip(file, fileHandle) {
     const zip = await JSZip.loadAsync(file);
     let found = 0;
     for (const [name, entry] of Object.entries(zip.files)) {
@@ -189,7 +189,7 @@ const app = (() => {
       if (DATA_EXTS.has(innerExt) || COMPRESSION_EXTS.has(innerExt)) {
         const blob = await entry.async('blob');
         const innerFile = new File([blob], name, { type: 'application/octet-stream' });
-        openFileByType(innerFile, null);
+        openFileByType(innerFile, null, { type: 'zip', compressedFilename: file.name, fileHandle: fileHandle || null });
         found++;
       }
     }
@@ -199,7 +199,7 @@ const app = (() => {
       if (firstEntry) {
         const blob = await firstEntry.async('blob');
         const innerFile = new File([blob], firstEntry.name || 'data.csv', { type: 'text/csv' });
-        openFileByType(innerFile, null);
+        openFileByType(innerFile, null, { type: 'zip', compressedFilename: file.name, fileHandle: fileHandle || null });
       } else {
         setStatus('ZIP archive is empty', 'error');
       }
@@ -213,7 +213,7 @@ const app = (() => {
     return undefined; // let Papa auto-detect (handles csv, txt)
   }
 
-  function loadDelimitedFile(file, fileHandle) {
+  function loadDelimitedFile(file, fileHandle, compression) {
     setStatus(`Loading ${file.name}...`, 'working');
     const t0 = performance.now();
     const delimiter = delimiterForExt(file.name);
@@ -233,7 +233,7 @@ const app = (() => {
           rawColumns.forEach((raw, j) => { r[columns[j]] = row[raw] ?? ''; });
           return r;
         });
-        tables[uniqueName] = { columns, rows, filename: file.name, modified: false, fileHandle: fileHandle || null, delimiter: detectedDelimiter };
+        tables[uniqueName] = { columns, rows, filename: file.name, modified: false, fileHandle: fileHandle || null, delimiter: detectedDelimiter, compression: compression || null };
         registerTable(uniqueName);
         createTableWindow(uniqueName);
         const elapsed = performance.now() - t0;
@@ -245,7 +245,7 @@ const app = (() => {
     });
   }
 
-  function loadExcelFile(file) {
+  function loadExcelFile(file, compression) {
     setStatus(`Loading ${file.name}...`, 'working');
     const t0 = performance.now();
     const reader = new FileReader();
@@ -267,7 +267,7 @@ const app = (() => {
             rawColumns.forEach((raw, j) => { r[columns[j]] = row[raw] != null ? String(row[raw]) : ''; });
             return r;
           });
-          tables[uniqueName] = { columns, rows, filename: file.name, modified: false };
+          tables[uniqueName] = { columns, rows, filename: file.name, modified: false, compression: compression || null };
           registerTable(uniqueName);
           createTableWindow(uniqueName);
         });
@@ -338,8 +338,9 @@ const app = (() => {
     if (!win) return;
     const t = tables[win.tableName];
     if (!t) return;
-    if (t.fileHandle) {
-      await writeToHandle(win.tableName, t.fileHandle);
+    const handle = t.fileHandle || (t.compression && t.compression.fileHandle);
+    if (handle) {
+      await writeToHandle(win.tableName, handle);
     } else {
       const filename = t.filename || win.tableName + '.csv';
       downloadCSV(win.tableName, filename);
@@ -352,25 +353,44 @@ const app = (() => {
     if (!win) return;
     const t = tables[win.tableName];
     if (!t) return;
-    const filename = t.filename || win.tableName + '.csv';
+    const baseFilename = t.filename || win.tableName + '.csv';
+    const suggestedName = compressedFilename(baseFilename, t.compression);
     if (window.showSaveFilePicker) {
       try {
-        const handle = await showSaveFilePicker({
-          suggestedName: filename,
-          types: [
-            { description: 'CSV files', accept: { 'text/csv': ['.csv'] } },
-            { description: 'TSV files', accept: { 'text/tab-separated-values': ['.tsv'] } },
-            { description: 'PSV files', accept: { 'text/plain': ['.psv'] } },
-          ],
-        });
+        const types = [
+          { description: 'CSV files', accept: { 'text/csv': ['.csv'] } },
+          { description: 'TSV files', accept: { 'text/tab-separated-values': ['.tsv'] } },
+          { description: 'PSV files', accept: { 'text/plain': ['.psv'] } },
+          { description: 'Gzip compressed', accept: { 'application/gzip': ['.gz'] } },
+          { description: 'ZIP compressed', accept: { 'application/zip': ['.zip'] } },
+        ];
+        const handle = await showSaveFilePicker({ suggestedName, types });
+        // Detect compression from chosen filename
+        const chosenName = handle.name;
+        if (chosenName.endsWith('.gz')) {
+          t.compression = { type: 'gz', compressedFilename: chosenName };
+        } else if (chosenName.endsWith('.zip')) {
+          t.compression = { type: 'zip', compressedFilename: chosenName };
+        } else {
+          t.compression = null;
+        }
         await writeToHandle(win.tableName, handle);
         t.fileHandle = handle;
       } catch (e) {
         if (e.name !== 'AbortError') setStatus(`Error saving: ${e.message}`, 'error');
       }
     } else {
-      showPrompt('Save As', 'Filename:', filename, (newName) => {
-        if (newName) downloadCSV(win.tableName, newName);
+      showPrompt('Save As', 'Filename:', suggestedName, (newName) => {
+        if (!newName) return;
+        // Detect compression from typed filename
+        if (newName.endsWith('.gz')) {
+          t.compression = { type: 'gz', compressedFilename: newName };
+        } else if (newName.endsWith('.zip')) {
+          t.compression = { type: 'zip', compressedFilename: newName };
+        } else {
+          t.compression = null;
+        }
+        downloadCSV(win.tableName, newName.replace(/\.(gz|zip)$/i, '') || newName);
       });
     }
   }
@@ -378,14 +398,28 @@ const app = (() => {
   async function writeToHandle(tableName, handle) {
     const t = tables[tableName];
     if (!t) return;
-    setStatus(`Saving ${t.filename || tableName}...`, 'working');
+    const saveName = handle.name || t.filename || tableName;
+    setStatus(`Saving ${saveName}...`, 'working');
     const t0 = performance.now();
     const writable = await handle.createWritable();
-    await writable.write(serializeHeader(t));
-    const CHUNK = 50000;
-    for (let i = 0; i < t.rows.length; i += CHUNK) {
-      const chunk = serializeChunk(t, i, Math.min(i + CHUNK, t.rows.length));
-      await writable.write(chunk);
+    if (t.compression) {
+      // Build full blob, compress, write at once
+      const parts = [serializeHeader(t)];
+      const CHUNK = 50000;
+      for (let i = 0; i < t.rows.length; i += CHUNK) {
+        parts.push(serializeChunk(t, i, Math.min(i + CHUNK, t.rows.length)));
+      }
+      let blob = new Blob(parts, { type: 'text/csv;charset=utf-8;' });
+      setStatus(`Compressing ${saveName}...`, 'working');
+      blob = await compressBlob(blob, t.compression);
+      await writable.write(blob);
+    } else {
+      await writable.write(serializeHeader(t));
+      const CHUNK = 50000;
+      for (let i = 0; i < t.rows.length; i += CHUNK) {
+        const chunk = serializeChunk(t, i, Math.min(i + CHUNK, t.rows.length));
+        await writable.write(chunk);
+      }
     }
     await writable.close();
     const filename = handle.name;
@@ -394,14 +428,15 @@ const app = (() => {
     t.filename = filename;
     updateWindowTitle(tableName);
     const elapsed = performance.now() - t0;
-    setStatus(`Saved ${filename} (${t.rows.length.toLocaleString()} rows) in ${formatElapsed(elapsed)}`, 'success');
+    setStatus(`Saved ${saveName} (${t.rows.length.toLocaleString()} rows) in ${formatElapsed(elapsed)}`, 'success');
   }
 
   async function downloadCSV(tableName, filename) {
     flushAllSyncs();
     const t = tables[tableName];
     if (!t) return;
-    setStatus(`Saving ${filename}...`, 'working');
+    const saveName = compressedFilename(filename, t.compression);
+    setStatus(`Saving ${saveName}...`, 'working');
     // Defer so "Saving..." can paint
     await new Promise(r => setTimeout(r, 0));
     const t0 = performance.now();
@@ -410,17 +445,21 @@ const app = (() => {
     for (let i = 0; i < t.rows.length; i += CHUNK) {
       parts.push(serializeChunk(t, i, Math.min(i + CHUNK, t.rows.length)));
     }
-    const blob = new Blob(parts, { type: 'text/csv;charset=utf-8;' });
+    let blob = new Blob(parts, { type: 'text/csv;charset=utf-8;' });
+    if (t.compression) {
+      setStatus(`Compressing ${saveName}...`, 'working');
+      blob = await compressBlob(blob, t.compression);
+    }
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = filename;
+    a.download = saveName;
     a.click();
     URL.revokeObjectURL(a.href);
     t.modified = false;
     t.filename = filename;
     updateWindowTitle(tableName);
     const elapsed = performance.now() - t0;
-    setStatus(`Saved ${filename} (${t.rows.length.toLocaleString()} rows) in ${formatElapsed(elapsed)}`, 'success');
+    setStatus(`Saved ${saveName} (${t.rows.length.toLocaleString()} rows) in ${formatElapsed(elapsed)}`, 'success');
   }
 
   function escapeField(val, delim) {
@@ -449,6 +488,31 @@ const app = (() => {
       out += '\r\n';
     }
     return out;
+  }
+
+  async function compressBlob(blob, compression) {
+    if (!compression) return blob;
+    if (compression.type === 'gz') {
+      const cs = new CompressionStream('gzip');
+      const compressed = blob.stream().pipeThrough(cs);
+      return await new Response(compressed).blob();
+    }
+    if (compression.type === 'zip') {
+      const zip = new JSZip();
+      const innerName = compression.compressedFilename
+        ? compression.compressedFilename.replace(/\.zip$/i, '')
+        : 'data.csv';
+      zip.file(innerName, blob);
+      return await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+    }
+    return blob;
+  }
+
+  function compressedFilename(filename, compression) {
+    if (!compression) return filename;
+    if (compression.type === 'gz' && !filename.endsWith('.gz')) return filename + '.gz';
+    if (compression.type === 'zip' && !filename.endsWith('.zip')) return filename + '.zip';
+    return filename;
   }
 
   function newTable() {
