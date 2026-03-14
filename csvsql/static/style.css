@@ -364,6 +364,34 @@ body {
   color: var(--accent-hover);
 }
 
+.data-table th.col-dragging {
+  opacity: 0.35;
+}
+
+.data-table th.col-drop-left {
+  border-left: 2px solid var(--accent-hover);
+}
+
+.data-table th.col-drop-right {
+  border-right: 2px solid var(--accent-hover);
+}
+
+.col-drag-ghost {
+  position: fixed;
+  transform: translateX(-50%) translateY(-50%);
+  background: var(--accent);
+  color: var(--text);
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 100000;
+  opacity: 0.9;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}
+
 .data-table th.row-num-header {
   background: var(--surface);
   cursor: default;

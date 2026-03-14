@@ -1362,9 +1362,10 @@ const app = (() => {
     rowNumTh.textContent = '#';
     headerRow.appendChild(rowNumTh);
 
-    columns.forEach(col => {
+    columns.forEach((col, colIdx) => {
       const th = document.createElement('th');
       th.textContent = col;
+      th.dataset.colIdx = colIdx;
       const sortIdx = win.sortCols.findIndex(s => s.col === col);
       if (sortIdx !== -1) {
         th.classList.add('sorted');
@@ -1375,10 +1376,72 @@ const app = (() => {
         if (win.sortCols.length > 1) arrow.textContent += (sortIdx + 1);
         th.appendChild(arrow);
       }
+      // Ctrl/Cmd+drag to reorder columns, Ctrl/Cmd+click to rename
+      th.addEventListener('mousedown', (e) => {
+        if (!(e.ctrlKey || e.metaKey) || e.button !== 0) return;
+        e.preventDefault();
+        const startX = e.clientX;
+        const startY = e.clientY;
+        let dragging = false;
+        let ghost = null;
+        th._didDrag = false;
+        const onMove = (me) => {
+          if (!dragging && Math.abs(me.clientX - startX) > 5) {
+            dragging = true;
+            th._didDrag = true;
+            th.classList.add('col-dragging');
+            ghost = document.createElement('div');
+            ghost.className = 'col-drag-ghost';
+            ghost.textContent = col;
+            ghost.style.left = me.clientX + 'px';
+            ghost.style.top = startY + 'px';
+            document.body.appendChild(ghost);
+          }
+          if (dragging) {
+            ghost.style.left = me.clientX + 'px';
+            const ths = headerRow.querySelectorAll('th:not(.row-num-header)');
+            ths.forEach(h => h.classList.remove('col-drop-left', 'col-drop-right'));
+            for (const h of ths) {
+              const rect = h.getBoundingClientRect();
+              const mid = rect.left + rect.width / 2;
+              if (me.clientX >= rect.left && me.clientX <= rect.right) {
+                h.classList.add(me.clientX < mid ? 'col-drop-left' : 'col-drop-right');
+                break;
+              }
+            }
+          }
+        };
+        const onUp = (ue) => {
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+          th.classList.remove('col-dragging');
+          if (ghost) ghost.remove();
+          const ths = headerRow.querySelectorAll('th:not(.row-num-header)');
+          ths.forEach(h => h.classList.remove('col-drop-left', 'col-drop-right'));
+          if (dragging) {
+            let dropIdx = colIdx;
+            for (const h of ths) {
+              const rect = h.getBoundingClientRect();
+              if (ue.clientX >= rect.left && ue.clientX <= rect.right) {
+                const mid = rect.left + rect.width / 2;
+                dropIdx = parseInt(h.dataset.colIdx);
+                if (ue.clientX >= mid && dropIdx < columns.length - 1) dropIdx++;
+                break;
+              }
+            }
+            if (dropIdx !== colIdx) {
+              reorderColumn(win, colIdx, dropIdx);
+            }
+          }
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
       th.addEventListener('click', (e) => {
         if (th._renaming) return;
         if (e.ctrlKey || e.metaKey) {
           e.stopPropagation();
+          if (th._didDrag) { th._didDrag = false; return; }
           startColumnRename(win, th, col);
           return;
         }
@@ -1610,8 +1673,10 @@ const app = (() => {
     const filterChanged = oldFilter !== undefined && oldFilter !== win.filterText;
     win._lastFilterText = win.filterText;
 
+    const savedScrollLeft = container.scrollLeft;
     buildTableHTML(win, container, t);
 
+    container.scrollLeft = savedScrollLeft;
     if (filterChanged) {
       container.scrollTop = 0;
     }
@@ -1662,6 +1727,17 @@ const app = (() => {
     }
     markModified(tableName);
     try { db.run(`ALTER TABLE [${tableName}] RENAME COLUMN [${oldCol}] TO [${newCol}]`); } catch (_) {}
+    rebuildTable(win);
+  }
+
+  async function reorderColumn(win, fromIdx, toIdx) {
+    const t = tables[win.tableName];
+    if (!t) return;
+    const col = t.columns.splice(fromIdx, 1)[0];
+    if (toIdx > fromIdx) toIdx--;
+    t.columns.splice(toIdx, 0, col);
+    markModified(win.tableName);
+    await registerTable(win.tableName);
     rebuildTable(win);
   }
 
