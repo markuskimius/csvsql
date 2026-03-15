@@ -41,6 +41,7 @@ const app = (() => {
     setupKeyboard();
     setupMenuClose();
     fixShortcutLabels();
+    window._appReady = true;
   }
 
   function fixShortcutLabels() {
@@ -2529,6 +2530,15 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
     restoreAll,
     showAbout,
     showManual,
+    ...(new URLSearchParams(location.search).has('test') ? {
+      _test: {
+        sanitizeTableName, sanitizeColumnName, sanitizeColumns,
+        getUniqueTableName, extractIntoClause,
+        get tables() { return tables; },
+        get windows() { return windows; },
+        get db() { return db; },
+      }
+    } : {}),
   };
 })();
 
