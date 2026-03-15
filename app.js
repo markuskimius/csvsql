@@ -1212,56 +1212,54 @@ const app = (() => {
     updateWindowsList();
   }
 
-  function setupBrowserResize() {
-    let prevWidth = 0;
-    let prevHeight = 0;
+  let _prevAreaWidth = 0;
+  let _prevAreaHeight = 0;
+
+  function scaleWindowsToArea() {
     const area = document.getElementById('window-area');
-
-    function getAreaSize() {
-      const rect = area.getBoundingClientRect();
-      return { w: rect.width, h: rect.height };
+    const rect = area.getBoundingClientRect();
+    const w = rect.width;
+    const h = rect.height;
+    if (_prevAreaWidth === 0 || _prevAreaHeight === 0) {
+      _prevAreaWidth = w;
+      _prevAreaHeight = h;
+      return;
     }
-
-    const size = getAreaSize();
-    prevWidth = size.w;
-    prevHeight = size.h;
-
-    window.addEventListener('resize', () => {
-      const { w, h } = getAreaSize();
-      if (prevWidth === 0 || prevHeight === 0) {
-        prevWidth = w;
-        prevHeight = h;
+    const scaleX = w / _prevAreaWidth;
+    const scaleY = h / _prevAreaHeight;
+    if (scaleX === 1 && scaleY === 1) return;
+    windows.forEach(win => {
+      if (win.el.classList.contains('minimized')) return;
+      if (win.maximized) {
+        win.el.style.width = w + 'px';
+        win.el.style.height = h + 'px';
+        if (win.prevBounds) {
+          win.prevBounds.left = Math.round(win.prevBounds.left * scaleX);
+          win.prevBounds.top = Math.round(win.prevBounds.top * scaleY);
+          win.prevBounds.width = Math.round(win.prevBounds.width * scaleX);
+          win.prevBounds.height = Math.round(win.prevBounds.height * scaleY);
+        }
         return;
       }
-      const scaleX = w / prevWidth;
-      const scaleY = h / prevHeight;
-      windows.forEach(win => {
-        if (win.el.classList.contains('minimized')) return;
-        if (win.maximized) {
-          // Keep maximized windows filling the area
-          win.el.style.width = w + 'px';
-          win.el.style.height = h + 'px';
-          // Scale prevBounds so unmaximize still works proportionally
-          if (win.prevBounds) {
-            win.prevBounds.left = Math.round(win.prevBounds.left * scaleX);
-            win.prevBounds.top = Math.round(win.prevBounds.top * scaleY);
-            win.prevBounds.width = Math.round(win.prevBounds.width * scaleX);
-            win.prevBounds.height = Math.round(win.prevBounds.height * scaleY);
-          }
-          return;
-        }
-        const left = parseFloat(win.el.style.left) || 0;
-        const top = parseFloat(win.el.style.top) || 0;
-        const width = parseFloat(win.el.style.width) || 0;
-        const height = parseFloat(win.el.style.height) || 0;
-        win.el.style.left = Math.round(left * scaleX) + 'px';
-        win.el.style.top = Math.round(top * scaleY) + 'px';
-        win.el.style.width = Math.round(width * scaleX) + 'px';
-        win.el.style.height = Math.round(height * scaleY) + 'px';
-      });
-      prevWidth = w;
-      prevHeight = h;
+      const left = parseFloat(win.el.style.left) || 0;
+      const top = parseFloat(win.el.style.top) || 0;
+      const width = parseFloat(win.el.style.width) || 0;
+      const height = parseFloat(win.el.style.height) || 0;
+      win.el.style.left = Math.round(left * scaleX) + 'px';
+      win.el.style.top = Math.round(top * scaleY) + 'px';
+      win.el.style.width = Math.round(width * scaleX) + 'px';
+      win.el.style.height = Math.round(height * scaleY) + 'px';
     });
+    _prevAreaWidth = w;
+    _prevAreaHeight = h;
+  }
+
+  function setupBrowserResize() {
+    const area = document.getElementById('window-area');
+    const rect = area.getBoundingClientRect();
+    _prevAreaWidth = rect.width;
+    _prevAreaHeight = rect.height;
+    window.addEventListener('resize', scaleWindowsToArea);
   }
 
   // ---- Table Window ----
@@ -2297,6 +2295,7 @@ const app = (() => {
       if (!resizing) return;
       const newH = origH - (e.clientY - startY);
       panel.style.height = Math.max(60, Math.min(window.innerHeight * 0.5, newH)) + 'px';
+      scaleWindowsToArea();
     });
 
     document.addEventListener('mouseup', () => { resizing = false; });
