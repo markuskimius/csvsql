@@ -2657,52 +2657,68 @@ Smaller models, runs entirely in the browser — no install needed.<br>
   }
 
   // Build data context for the AI prompt
+  // Budget varies by provider: Ollama models typically have large contexts,
+  // WebLLM models have ~4K token contexts (~2K chars for data after system prompt)
+  function getDataCharBudget() {
+    if (_aiProvider === 'webllm') return 6000;
+    return 100000;
+  }
+
   function buildDataContext(tableNames) {
     const parts = [];
+    const budgetPerTable = Math.floor(getDataCharBudget() / tableNames.length);
+
     for (const name of tableNames) {
       const t = tables[name];
-      if (!t) continue;
+      if (!t || t.columns.length === 0) continue;
+
       let info = `Table: ${name}\nColumns: ${t.columns.join(', ')}\nTotal rows: ${t.rows.length}\n`;
 
-      // Column stats via SQL
-      for (const col of t.columns) {
-        try {
-          const r = db.exec(`SELECT COUNT(DISTINCT [${col}]) as dist, MIN([${col}]) as mn, MAX([${col}]) as mx FROM [${name}]`);
-          if (r.length > 0) {
-            const [distinct, mn, mx] = r[0].values[0];
-            info += `  ${col}: ${distinct} distinct`;
-            // Check if numeric
-            try {
-              const nr = db.exec(`SELECT AVG(CAST([${col}] AS REAL)), MIN(CAST([${col}] AS REAL)), MAX(CAST([${col}] AS REAL)) FROM [${name}] WHERE [${col}] GLOB '*[0-9]*'`);
-              if (nr.length > 0 && nr[0].values[0][0] != null) {
-                const [avg, nmin, nmax] = nr[0].values[0];
-                info += ` (numeric: min=${nmin}, max=${nmax}, avg=${Number(avg).toFixed(2)})`;
-              } else {
-                if (distinct <= 20) {
-                  const dr = db.exec(`SELECT DISTINCT [${col}] FROM [${name}] ORDER BY [${col}] LIMIT 20`);
-                  if (dr.length > 0) {
-                    const vals = dr[0].values.map(v => v[0]).filter(v => v != null && v !== '');
-                    if (vals.length > 0) info += ` values: ${vals.join(', ')}`;
-                  }
-                } else {
-                  info += ` range: ${mn} .. ${mx}`;
-                }
-              }
-            } catch {}
-            info += '\n';
-          }
-        } catch {}
+      // Try to include all rows as compact pipe-delimited data
+      const header = t.columns.join(' | ');
+      const rowLines = [];
+      let dataSize = header.length + 1;
+      const maxCellLen = 100;
+      let truncated = false;
+
+      for (let i = 0; i < t.rows.length; i++) {
+        const line = t.columns.map(c => {
+          const v = String(t.rows[i][c] ?? '');
+          return v.length > maxCellLen ? v.substring(0, maxCellLen) + '...' : v;
+        }).join(' | ');
+        if (dataSize + line.length + 1 > budgetPerTable && rowLines.length >= 20) {
+          truncated = true;
+          break;
+        }
+        rowLines.push(line);
+        dataSize += line.length + 1;
       }
 
-      // Sample rows (up to 5)
-      const sampleCount = Math.min(5, t.rows.length);
-      if (sampleCount > 0) {
-        info += '\nSample rows:\n';
-        info += t.columns.join(' | ') + '\n';
-        for (let i = 0; i < sampleCount; i++) {
-          info += t.columns.map(c => String(t.rows[i][c] ?? '').substring(0, 50)).join(' | ') + '\n';
+      if (truncated) {
+        // For truncated tables, add column stats to help the AI
+        info += `(showing ${rowLines.length} of ${t.rows.length} rows)\n`;
+        info += '\nColumn stats:\n';
+        for (const col of t.columns) {
+          try {
+            const r = db.exec(`SELECT COUNT(DISTINCT [${col}]), MIN([${col}]), MAX([${col}]) FROM [${name}]`);
+            if (r.length > 0) {
+              const [distinct, mn, mx] = r[0].values[0];
+              let stat = `  ${col}: ${distinct} distinct`;
+              try {
+                const nr = db.exec(`SELECT AVG(CAST([${col}] AS REAL)) FROM [${name}] WHERE [${col}] GLOB '*[0-9]*' AND CAST([${col}] AS REAL) IS NOT NULL`);
+                if (nr.length > 0 && nr[0].values[0][0] != null) {
+                  stat += ` (numeric: min=${mn}, max=${mx}, avg=${Number(nr[0].values[0][0]).toFixed(2)})`;
+                } else {
+                  stat += `, range: ${mn} .. ${mx}`;
+                }
+              } catch {}
+              info += stat + '\n';
+            }
+          } catch {}
         }
       }
+
+      info += '\nData:\n' + header + '\n' + rowLines.join('\n') + '\n';
       parts.push(info);
     }
     return parts.join('\n---\n');

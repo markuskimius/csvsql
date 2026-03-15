@@ -512,7 +512,7 @@ body {
 
 /* ---- Console ---- */
 #console-panel {
-  height: 160px;
+  height: 260px;
   min-height: 60px;
   max-height: 50vh;
   background: var(--surface);
