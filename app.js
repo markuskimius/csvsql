@@ -42,6 +42,7 @@ const app = (() => {
     setupKeyboard();
     setupMenuClose();
     setupAI();
+    setupBrowserResize();
     fixShortcutLabels();
     window._appReady = true;
   }
@@ -1209,6 +1210,58 @@ const app = (() => {
   function restoreAll() {
     windows.forEach(w => w.el.classList.remove('minimized'));
     updateWindowsList();
+  }
+
+  function setupBrowserResize() {
+    let prevWidth = 0;
+    let prevHeight = 0;
+    const area = document.getElementById('window-area');
+
+    function getAreaSize() {
+      const rect = area.getBoundingClientRect();
+      return { w: rect.width, h: rect.height };
+    }
+
+    const size = getAreaSize();
+    prevWidth = size.w;
+    prevHeight = size.h;
+
+    window.addEventListener('resize', () => {
+      const { w, h } = getAreaSize();
+      if (prevWidth === 0 || prevHeight === 0) {
+        prevWidth = w;
+        prevHeight = h;
+        return;
+      }
+      const scaleX = w / prevWidth;
+      const scaleY = h / prevHeight;
+      windows.forEach(win => {
+        if (win.el.classList.contains('minimized')) return;
+        if (win.maximized) {
+          // Keep maximized windows filling the area
+          win.el.style.width = w + 'px';
+          win.el.style.height = h + 'px';
+          // Scale prevBounds so unmaximize still works proportionally
+          if (win.prevBounds) {
+            win.prevBounds.left = Math.round(win.prevBounds.left * scaleX);
+            win.prevBounds.top = Math.round(win.prevBounds.top * scaleY);
+            win.prevBounds.width = Math.round(win.prevBounds.width * scaleX);
+            win.prevBounds.height = Math.round(win.prevBounds.height * scaleY);
+          }
+          return;
+        }
+        const left = parseFloat(win.el.style.left) || 0;
+        const top = parseFloat(win.el.style.top) || 0;
+        const width = parseFloat(win.el.style.width) || 0;
+        const height = parseFloat(win.el.style.height) || 0;
+        win.el.style.left = Math.round(left * scaleX) + 'px';
+        win.el.style.top = Math.round(top * scaleY) + 'px';
+        win.el.style.width = Math.round(width * scaleX) + 'px';
+        win.el.style.height = Math.round(height * scaleY) + 'px';
+      });
+      prevWidth = w;
+      prevHeight = h;
+    });
   }
 
   // ---- Table Window ----
