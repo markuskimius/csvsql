@@ -1931,6 +1931,9 @@ const app = (() => {
         if (e.data.type === 'load') {
           try {
             const newDb = new SQL.Database(e.data.data);
+            newDb.create_function('regexp', (pattern, value) => {
+              try { return new RegExp(pattern, 'i').test(value) ? 1 : 0; } catch (_) { return 0; }
+            });
             if (db) db.close();
             db = newDb;
             postMessage({ type: 'loaded' });

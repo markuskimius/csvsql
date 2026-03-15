@@ -61,6 +61,22 @@ test.describe('Table Editing', () => {
     }
   });
 
+  test('filter with REGEXP narrows visible rows', async ({ page }) => {
+    // Type a REGEXP filter in the filter input
+    const filterInput = page.locator('.subwindow .filter-input');
+    await filterInput.fill("[name] REGEXP '^A'");
+    await page.waitForTimeout(500);
+
+    // Check that the filter input does NOT have an error class
+    const hasError = await filterInput.evaluate(el => el.classList.contains('filter-error'));
+    expect(hasError).toBe(false);
+
+    // Should show fewer rows than the full table (only names starting with A)
+    const visibleRows = await page.locator('.subwindow table tbody tr').count();
+    expect(visibleRows).toBeGreaterThan(0);
+    expect(visibleRows).toBeLessThan(10); // sample1 has 10 rows
+  });
+
   test('row numbers are sequential after delete via SQL', async ({ page }) => {
     const before = await getTableData(page, 'sample1');
     const col = before.columns[0];

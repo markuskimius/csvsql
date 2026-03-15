@@ -74,6 +74,12 @@ test.describe('SQL Queries', () => {
     // Empty table may have no columns detected via SELECT *
   });
 
+  test('SELECT with REGEXP filter', async ({ page }) => {
+    const result = await executeSQL(page, "SELECT * FROM [sample1] WHERE [name] REGEXP '^A'");
+    const status = await page.locator('#console-status').textContent();
+    expect(status).not.toContain('Error');
+  });
+
   test('SQL syntax error shows error message', async ({ page }) => {
     const status = await executeSQL(page, 'SELECTT * FROMM nowhere');
     expect(status.toLowerCase()).toMatch(/error/);
