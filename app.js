@@ -878,6 +878,7 @@ const app = (() => {
       if (activeWinId) focusWindow(activeWinId);
     }
     updateWindowsList();
+    if (_activeConsoleTab === 'ai') populateTableSelect();
   }
 
   function closeAllWindows() {
@@ -1220,6 +1221,7 @@ const app = (() => {
       win.tableName = tableName;
       renderTableView(win, body, t);
     }, { tableName });
+    if (_activeConsoleTab === 'ai') populateTableSelect();
   }
 
   function renderTableView(win, body, tableData) {
@@ -2205,8 +2207,8 @@ const app = (() => {
 
   function clearConsole() {
     if (_activeConsoleTab === 'ai') {
-      document.getElementById('ai-input').value = '';
       document.getElementById('ai-response').innerHTML = '';
+      document.getElementById('ai-input').value = '';
     } else {
       document.getElementById('sql-input').value = '';
     }
@@ -2588,12 +2590,14 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
     const sel = document.getElementById('ai-table-select');
     if (!sel) return;
     const prev = new Set([...sel.selectedOptions].map(o => o.value));
+    const hadPrev = prev.size > 0;
     sel.innerHTML = '';
     for (const name of Object.keys(tables)) {
       const opt = document.createElement('option');
       opt.value = name;
       opt.textContent = `${name} (${tables[name].rows.length} rows, ${tables[name].columns.length} cols)`;
-      if (prev.has(name) || (prev.size === 0 && Object.keys(tables).length === 1)) opt.selected = true;
+      // Select all by default; preserve previous selection if user had one
+      opt.selected = hadPrev ? prev.has(name) : true;
       sel.appendChild(opt);
     }
   }
@@ -2727,15 +2731,13 @@ Smaller models, runs entirely in the browser — no install needed.<br>
     const respDiv = document.getElementById('ai-response');
     if (!sel || !input || !respDiv) return;
 
-    const selectedTables = [...sel.selectedOptions].map(o => o.value);
+    let selectedTables = [...sel.selectedOptions].map(o => o.value);
     const prompt = input.value.trim();
 
+    // Default to all open tables if none selected
+    if (selectedTables.length === 0) selectedTables = Object.keys(tables);
     if (selectedTables.length === 0) {
-      if (Object.keys(tables).length === 0) {
-        setAIStatus('Open a CSV file first to analyze data.', 'error');
-      } else {
-        setAIStatus('Select at least one table to analyze.', 'error');
-      }
+      setAIStatus('Open a CSV file first to analyze data.', 'error');
       return;
     }
     if (!prompt) {
@@ -2758,7 +2760,24 @@ Smaller models, runs entirely in the browser — no install needed.<br>
       { role: 'user', content: prompt }
     ];
 
-    respDiv.innerHTML = '';
+    // Append user message bubble
+    const userMsg = document.createElement('div');
+    userMsg.className = 'ai-msg ai-msg-user';
+    userMsg.innerHTML = '<div class="ai-msg-bubble">' + escHtml(prompt) + '</div>';
+    respDiv.appendChild(userMsg);
+
+    // Create AI response bubble
+    const aiMsg = document.createElement('div');
+    aiMsg.className = 'ai-msg ai-msg-ai';
+    const aiBubble = document.createElement('div');
+    aiBubble.className = 'ai-msg-bubble';
+    aiMsg.appendChild(aiBubble);
+    respDiv.appendChild(aiMsg);
+    respDiv.scrollTop = respDiv.scrollHeight;
+
+    // Clear input
+    input.value = '';
+
     let fullText = '';
     const t0 = performance.now();
     setAIStatus('Generating response... 0s', 'working');
@@ -2774,19 +2793,17 @@ Smaller models, runs entirely in the browser — no install needed.<br>
       setAIStatus(`Generating response... ${elapsed}s`, 'working');
     }, 100);
 
+    const onChunk = (chunk) => {
+      fullText += chunk;
+      aiBubble.innerHTML = formatAIResponse(fullText);
+      respDiv.scrollTop = respDiv.scrollHeight;
+    };
+
     try {
       if (_aiProvider === 'ollama') {
-        await generateOllama(messages, (chunk) => {
-          fullText += chunk;
-          respDiv.innerHTML = formatAIResponse(fullText);
-          respDiv.scrollTop = respDiv.scrollHeight;
-        }, signal);
+        await generateOllama(messages, onChunk, signal);
       } else if (_aiProvider === 'webllm') {
-        await generateWebLLM(messages, (chunk) => {
-          fullText += chunk;
-          respDiv.innerHTML = formatAIResponse(fullText);
-          respDiv.scrollTop = respDiv.scrollHeight;
-        }, signal);
+        await generateWebLLM(messages, onChunk, signal);
       }
       clearInterval(aiTimer);
       const elapsed = performance.now() - t0;
@@ -2795,8 +2812,10 @@ Smaller models, runs entirely in the browser — no install needed.<br>
       clearInterval(aiTimer);
       if (e.name === 'AbortError') {
         setAIStatus('Cancelled', '');
+        if (!fullText) aiMsg.remove();
       } else {
         setAIStatus(`Error: ${e.message}`, 'error');
+        aiBubble.innerHTML = '<span style="color:var(--danger)">' + escHtml(e.message) + '</span>';
       }
     }
     _aiAbort = null;

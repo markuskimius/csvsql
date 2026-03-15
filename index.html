@@ -72,12 +72,16 @@
     </div>
     <div id="ai-body" style="display:none">
       <div id="ai-controls">
-        <select id="ai-table-select" multiple title="Select tables to analyze (Ctrl/Cmd+click for multiple)"></select>
+        <label for="ai-table-select" id="ai-table-label">Tables:</label>
+        <select id="ai-table-select" multiple title="Select tables to include in analysis (all included by default)"></select>
         <button id="ai-settings-btn" title="AI Settings">&#9881;</button>
         <span id="ai-provider-badge"></span>
       </div>
-      <textarea id="ai-input" placeholder="Ask about your data... e.g. 'summarize this data' or 'what trends do you see?'" spellcheck="false"></textarea>
       <div id="ai-response"></div>
+      <div id="ai-input-row">
+        <textarea id="ai-input" placeholder="Ask about your data..." spellcheck="false" rows="2"></textarea>
+        <button id="ai-send-btn" onclick="app.runConsole()" title="Send (Ctrl+Enter)">&#9654;</button>
+      </div>
     </div>
     <div id="console-status"></div>
   </div>
