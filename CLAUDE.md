@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-CSVSQL is a browser-based CSV database application. It treats CSV files as database tables with SQL query support, editable cells, and a multi-window interface. No build step or server required — open `index.html` directly in a browser.
+CSVSQL is a browser-based CSV database application. It treats CSV files as database tables with SQL query support, editable cells, and a multi-window interface. No build step or server required — open `index.html` directly in a browser. Also distributed via PyPI (`pip install csvsql`).
 
 ## Architecture
 
-Single-page app with three files:
+Single-page app with three core files:
 
-- **index.html** — Shell: menubar, workspace area, SQL console panel, hidden file input
+- **index.html** — Shell: menubar, workspace area, SQL console panel, hidden file input, CDN script tags
 - **style.css** — Dark theme styling, window management visuals, table layout
 - **app.js** — All application logic in a single IIFE (`app` module), exposing methods on the global `app` object
 
@@ -18,6 +18,9 @@ Single-page app with three files:
 
 - **Papa Parse** — CSV parsing/unparsing
 - **sql.js** — SQLite compiled to WebAssembly; each opened CSV is registered as a SQLite table
+- **SheetJS (XLSX)** — Excel file reading/writing
+- **JSZip** — ZIP archive support
+- **pako** — Gzip compression/decompression
 
 ### Data flow
 
@@ -40,16 +43,51 @@ Each row's primary key is its `_rownum` property (1-based index). Renumbered on 
 No build tools. To develop:
 
 ```
-# Serve locally (any static server works)
 python3 -m http.server 8000
 # Then open http://localhost:8000
 ```
 
 Or just open `index.html` directly — the only external resources are CDN scripts.
 
+## Testing
+
+Playwright-based test suite (Chromium only). Tests are organized into `test/unit/`, `test/integration/`, and `test/e2e/`.
+
+```bash
+# Run all tests (installs deps + browser if needed)
+./run-tests.sh
+
+# Run all tests via npm
+npm test
+
+# Run a single test file
+npx playwright test --config test/playwright.config.js test/integration/sql-queries.spec.js
+
+# Run tests matching a grep pattern
+npx playwright test --config test/playwright.config.js -g "filter"
+```
+
+The test server runs on port 8274 (auto-started by Playwright config). Tests use `?test=1` query param which sets `window._appReady` after init. Test helpers are in `test/helpers.js` — notably `openApp()`, `uploadFile()`, `executeSQL()`, `waitForWindow()`, and `getTableData()`.
+
+Test fixtures live in `test/` (e.g., `sample1.csv`, `sample.xlsx`, `sample.zip`).
+
+## PyPI Packaging
+
+Published as `csvsql` on PyPI. The Python package in `csvsql/` serves static files via `cli.py`.
+
+```bash
+# IMPORTANT: Copy root static files to csvsql/static/ before building
+rm -rf dist build *.egg-info && python3 -m build
+python3 -m twine upload dist/*
+```
+
+Version is in `pyproject.toml`.
+
 ## Conventions
 
 - All state lives in the `app` IIFE's closure (`windows`, `tables`, `nextWinId`, etc.)
 - Public methods are returned from the IIFE and called from HTML onclick handlers or internally
+- Test internals are exposed via `app._test` (only used by Playwright tests)
 - Table and column names are sanitized to `[a-zA-Z0-9_]` for SQL compatibility
 - SQL identifiers use bracket-quoting (`[tableName]`) to handle edge cases
+- SELECT INTO is intercepted and handled manually (SQLite doesn't support it natively)

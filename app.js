@@ -2421,7 +2421,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 <h4>Saving Files</h4>
 <p><strong>Save</strong> (<code>Ctrl+S</code> / <code>&#8984;S</code>) writes directly back to the original file if the browser supports the File System Access API (Chrome, Edge). On browsers without this API (Firefox), Save triggers a download.</p>
-<p><strong>Save As</strong> (<code>Ctrl+Shift+S</code>) always prompts for a new filename and location. You can choose CSV, TSV, PSV, Excel (.xlsx), Gzip, or ZIP format.</p>
+<p><strong>Save As</strong> always prompts for a new filename and location. You can choose CSV, TSV, PSV, Excel (.xlsx), Gzip, or ZIP format.</p>
 <p><strong>When Save acts as Save As:</strong> Save falls back to Save As when the table has no associated file handle &mdash; for example, tables created via <code>New Table</code>, SQL query results, or tables created with <code>SELECT INTO</code>.</p>
 
 <p><strong>Multi-file save behavior:</strong></p>
