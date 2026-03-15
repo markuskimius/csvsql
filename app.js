@@ -9,6 +9,7 @@ const app = (() => {
   let activeWinId = null;
   let tables = {};  // tableName -> { columns, rows, filename, modified }
   let db = null;    // sql.js Database instance
+  let _activeConsoleTab = 'sql';
 
   // Virtual scrolling constants
   const ROW_HEIGHT = 26;
@@ -40,6 +41,7 @@ const app = (() => {
     setupDragAndDrop();
     setupKeyboard();
     setupMenuClose();
+    setupAI();
     fixShortcutLabels();
     window._appReady = true;
   }
@@ -1860,6 +1862,13 @@ const app = (() => {
       }
     });
 
+    document.getElementById('ai-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        runAI();
+      }
+    });
+
     document.addEventListener('keydown', (e) => {
       if (!(e.ctrlKey || e.metaKey)) return;
       switch (e.key) {
@@ -2195,7 +2204,12 @@ const app = (() => {
   }
 
   function clearConsole() {
-    document.getElementById('sql-input').value = '';
+    if (_activeConsoleTab === 'ai') {
+      document.getElementById('ai-input').value = '';
+      document.getElementById('ai-response').innerHTML = '';
+    } else {
+      document.getElementById('sql-input').value = '';
+    }
     setStatus('');
   }
 
@@ -2508,9 +2522,439 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <tr><td><code>Ctrl+S</code> / <code>&#8984;S</code></td><td>Save table</td></tr>
 <tr><td><code>Ctrl+N</code> / <code>&#8984;N</code></td><td>New table</td></tr>
 <tr><td><code>Ctrl+W</code> / <code>&#8984;W</code></td><td>Close window</td></tr>
-<tr><td><code>Ctrl+Enter</code></td><td>Execute SQL query</td></tr>
+<tr><td><code>Ctrl+Enter</code></td><td>Execute SQL / AI query</td></tr>
 </table>
+
+<h4>AI Analysis</h4>
+<p>The AI tab in the console panel lets you analyze your data using natural language. All processing stays local &mdash; no data is sent to cloud services.</p>
+<p><strong>Two provider options:</strong></p>
+<ul>
+<li><strong>Ollama (recommended):</strong> Install from <a href="https://ollama.com">ollama.com</a>, then run <code>ollama pull llama3.2</code>. Supports large, high-quality models.</li>
+<li><strong>WebLLM (in-browser):</strong> Runs entirely in the browser via WebGPU. Requires Chrome 113+. Smaller models but zero install needed.</li>
+</ul>
+<p><strong>Usage:</strong> Switch to the AI tab, select one or more tables, type your question, and press <code>Ctrl+Enter</code> or click Run. The AI receives column statistics and sample rows (not raw data), so it works within small context windows.</p>
+<p>Click the gear icon &#9881; to configure the provider, model, and Ollama URL.</p>
     `);
+  }
+
+  // ---- AI Analysis ----
+  let _aiProvider = null;
+  let _aiAbort = null;
+  let _webllmEngine = null;
+
+  let aiSettings = JSON.parse(localStorage.getItem('csvsql_ai_settings') || 'null') || {
+    provider: 'auto',
+    model: '',
+    ollamaUrl: 'http://localhost:11434',
+  };
+
+  function saveAISettings() {
+    localStorage.setItem('csvsql_ai_settings', JSON.stringify(aiSettings));
+  }
+
+  function setAIStatus(msg, type = '') {
+    setStatus(msg, type);
+  }
+
+  // Tab switching
+  function setupConsoleTabs() {
+    const tabs = document.querySelectorAll('.console-tab');
+    tabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        switchConsoleTab(tab.dataset.tab);
+      });
+    });
+  }
+
+  function switchConsoleTab(tab) {
+    _activeConsoleTab = tab;
+    document.querySelectorAll('.console-tab').forEach(t => {
+      t.classList.toggle('active', t.dataset.tab === tab);
+    });
+    document.getElementById('console-body').style.display = tab === 'sql' ? '' : 'none';
+    document.getElementById('ai-body').style.display = tab === 'ai' ? '' : 'none';
+    if (tab === 'ai') {
+      populateTableSelect();
+      detectAIProvider();
+    }
+  }
+
+  function runConsole() {
+    if (_activeConsoleTab === 'ai') runAI();
+    else executeQuery();
+  }
+
+  function populateTableSelect() {
+    const sel = document.getElementById('ai-table-select');
+    if (!sel) return;
+    const prev = new Set([...sel.selectedOptions].map(o => o.value));
+    sel.innerHTML = '';
+    for (const name of Object.keys(tables)) {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = `${name} (${tables[name].rows.length} rows, ${tables[name].columns.length} cols)`;
+      if (prev.has(name) || (prev.size === 0 && Object.keys(tables).length === 1)) opt.selected = true;
+      sel.appendChild(opt);
+    }
+  }
+
+  // Provider detection
+  async function detectAIProvider() {
+    const badge = document.getElementById('ai-provider-badge');
+    if (!badge) return;
+
+    if (aiSettings.provider === 'ollama' || aiSettings.provider === 'auto') {
+      try {
+        const r = await fetch(aiSettings.ollamaUrl + '/api/tags', { signal: AbortSignal.timeout(2000) });
+        if (r.ok) {
+          const data = await r.json();
+          const models = (data.models || []).map(m => m.name);
+          _aiProvider = 'ollama';
+          if (!aiSettings.model || !models.includes(aiSettings.model)) {
+            aiSettings.model = models[0] || '';
+            saveAISettings();
+          }
+          badge.textContent = 'Ollama: ' + (aiSettings.model || 'no models');
+          return;
+        }
+      } catch {}
+    }
+
+    if (aiSettings.provider === 'webllm' || aiSettings.provider === 'auto') {
+      if (navigator.gpu) {
+        _aiProvider = 'webllm';
+        badge.textContent = 'WebLLM (WebGPU)';
+        if (!aiSettings.model) {
+          aiSettings.model = 'SmolLM2-1.7B-Instruct-q4f16_1-MLC';
+          saveAISettings();
+        }
+        return;
+      }
+    }
+
+    _aiProvider = null;
+    badge.textContent = 'No AI provider';
+    showSetupHelp();
+  }
+
+  function showSetupHelp() {
+    const resp = document.getElementById('ai-response');
+    if (!resp || resp.innerHTML.includes('ai-setup-help')) return;
+    resp.innerHTML = `<div class="ai-setup-help">
+<strong>No AI provider detected.</strong> Two options:<br><br>
+<strong>Option 1: Ollama (recommended)</strong><br>
+1. Install from <a href="https://ollama.com" target="_blank">ollama.com</a><br>
+2. Run: <code>ollama pull llama3.2</code><br>
+3. Ollama runs on localhost:11434 by default<br><br>
+<strong>Option 2: WebLLM (in-browser)</strong><br>
+Requires Chrome 113+ with WebGPU enabled.<br>
+Smaller models, runs entirely in the browser — no install needed.<br>
+</div>`;
+  }
+
+  // Build data context for the AI prompt
+  function buildDataContext(tableNames) {
+    const parts = [];
+    for (const name of tableNames) {
+      const t = tables[name];
+      if (!t) continue;
+      let info = `Table: ${name}\nColumns: ${t.columns.join(', ')}\nTotal rows: ${t.rows.length}\n`;
+
+      // Column stats via SQL
+      for (const col of t.columns) {
+        try {
+          const r = db.exec(`SELECT COUNT(DISTINCT [${col}]) as dist, MIN([${col}]) as mn, MAX([${col}]) as mx FROM [${name}]`);
+          if (r.length > 0) {
+            const [distinct, mn, mx] = r[0].values[0];
+            info += `  ${col}: ${distinct} distinct`;
+            // Check if numeric
+            try {
+              const nr = db.exec(`SELECT AVG(CAST([${col}] AS REAL)), MIN(CAST([${col}] AS REAL)), MAX(CAST([${col}] AS REAL)) FROM [${name}] WHERE [${col}] GLOB '*[0-9]*'`);
+              if (nr.length > 0 && nr[0].values[0][0] != null) {
+                const [avg, nmin, nmax] = nr[0].values[0];
+                info += ` (numeric: min=${nmin}, max=${nmax}, avg=${Number(avg).toFixed(2)})`;
+              } else {
+                if (distinct <= 20) {
+                  const dr = db.exec(`SELECT DISTINCT [${col}] FROM [${name}] ORDER BY [${col}] LIMIT 20`);
+                  if (dr.length > 0) {
+                    const vals = dr[0].values.map(v => v[0]).filter(v => v != null && v !== '');
+                    if (vals.length > 0) info += ` values: ${vals.join(', ')}`;
+                  }
+                } else {
+                  info += ` range: ${mn} .. ${mx}`;
+                }
+              }
+            } catch {}
+            info += '\n';
+          }
+        } catch {}
+      }
+
+      // Sample rows (up to 5)
+      const sampleCount = Math.min(5, t.rows.length);
+      if (sampleCount > 0) {
+        info += '\nSample rows:\n';
+        info += t.columns.join(' | ') + '\n';
+        for (let i = 0; i < sampleCount; i++) {
+          info += t.columns.map(c => String(t.rows[i][c] ?? '').substring(0, 50)).join(' | ') + '\n';
+        }
+      }
+      parts.push(info);
+    }
+    return parts.join('\n---\n');
+  }
+
+  // Format AI response text with basic markdown
+  function formatAIResponse(text) {
+    let html = escHtml(text);
+    // Code blocks: ```...```
+    html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => '<pre>' + code.trim() + '</pre>');
+    // Inline code
+    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+    // Bold
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    // Newlines (but not inside pre tags)
+    html = html.replace(/\n/g, '<br>');
+    // Clean up <br> inside <pre>
+    html = html.replace(/<pre>([\s\S]*?)<\/pre>/g, (_, code) => '<pre>' + code.replace(/<br>/g, '\n') + '</pre>');
+    return html;
+  }
+
+  // Run AI analysis
+  async function runAI() {
+    const sel = document.getElementById('ai-table-select');
+    const input = document.getElementById('ai-input');
+    const respDiv = document.getElementById('ai-response');
+    if (!sel || !input || !respDiv) return;
+
+    const selectedTables = [...sel.selectedOptions].map(o => o.value);
+    const prompt = input.value.trim();
+
+    if (selectedTables.length === 0) {
+      if (Object.keys(tables).length === 0) {
+        setAIStatus('Open a CSV file first to analyze data.', 'error');
+      } else {
+        setAIStatus('Select at least one table to analyze.', 'error');
+      }
+      return;
+    }
+    if (!prompt) {
+      setAIStatus('Enter a prompt to analyze the data.', 'error');
+      return;
+    }
+    if (!_aiProvider) {
+      setAIStatus('No AI provider available. Install Ollama or use Chrome with WebGPU.', 'error');
+      showSetupHelp();
+      return;
+    }
+
+    flushAllSyncs();
+    const dataContext = buildDataContext(selectedTables);
+    const messages = [
+      {
+        role: 'system',
+        content: 'You are a data analyst. Analyze the following table data and answer the user\'s question concisely. Focus on insights, patterns, and actionable findings.\n\n' + dataContext
+      },
+      { role: 'user', content: prompt }
+    ];
+
+    respDiv.innerHTML = '';
+    let fullText = '';
+    const t0 = performance.now();
+    setAIStatus('Generating response... 0s', 'working');
+
+    // Cancel any previous request
+    if (_aiAbort) _aiAbort.abort();
+    _aiAbort = new AbortController();
+    const signal = _aiAbort.signal;
+
+    // Elapsed timer
+    const aiTimer = setInterval(() => {
+      const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+      setAIStatus(`Generating response... ${elapsed}s`, 'working');
+    }, 100);
+
+    try {
+      if (_aiProvider === 'ollama') {
+        await generateOllama(messages, (chunk) => {
+          fullText += chunk;
+          respDiv.innerHTML = formatAIResponse(fullText);
+          respDiv.scrollTop = respDiv.scrollHeight;
+        }, signal);
+      } else if (_aiProvider === 'webllm') {
+        await generateWebLLM(messages, (chunk) => {
+          fullText += chunk;
+          respDiv.innerHTML = formatAIResponse(fullText);
+          respDiv.scrollTop = respDiv.scrollHeight;
+        }, signal);
+      }
+      clearInterval(aiTimer);
+      const elapsed = performance.now() - t0;
+      setAIStatus(`Done in ${formatElapsed(elapsed)}`, 'success');
+    } catch (e) {
+      clearInterval(aiTimer);
+      if (e.name === 'AbortError') {
+        setAIStatus('Cancelled', '');
+      } else {
+        setAIStatus(`Error: ${e.message}`, 'error');
+      }
+    }
+    _aiAbort = null;
+  }
+
+  // Ollama streaming
+  async function generateOllama(messages, onChunk, signal) {
+    const r = await fetch(aiSettings.ollamaUrl + '/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: aiSettings.model, messages, stream: true }),
+      signal,
+    });
+    if (!r.ok) throw new Error(`Ollama error: ${r.status} ${r.statusText}`);
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const data = JSON.parse(line);
+          if (data.message && data.message.content) onChunk(data.message.content);
+        } catch {}
+      }
+    }
+    // Process remaining buffer
+    if (buf.trim()) {
+      try {
+        const data = JSON.parse(buf);
+        if (data.message && data.message.content) onChunk(data.message.content);
+      } catch {}
+    }
+  }
+
+  // WebLLM generation
+  async function generateWebLLM(messages, onChunk, signal) {
+    if (!_webllmEngine) {
+      setAIStatus('Loading WebLLM engine (first time may download model)...', 'working');
+      const webllm = await import('https://esm.run/@mlc-ai/web-llm');
+      const model = aiSettings.model || 'SmolLM2-1.7B-Instruct-q4f16_1-MLC';
+      _webllmEngine = await webllm.CreateMLCEngine(model, {
+        initProgressCallback: (progress) => {
+          const pct = progress.progress != null ? Math.round(progress.progress * 100) + '%' : '';
+          setAIStatus(`Loading model: ${progress.text || pct}`, 'working');
+        }
+      });
+    }
+    const response = await _webllmEngine.chat.completions.create({
+      messages,
+      stream: true,
+    });
+    for await (const chunk of response) {
+      if (signal.aborted) {
+        if (_webllmEngine.interruptGenerate) _webllmEngine.interruptGenerate();
+        throw new DOMException('Aborted', 'AbortError');
+      }
+      const delta = chunk.choices[0] && chunk.choices[0].delta && chunk.choices[0].delta.content;
+      if (delta) onChunk(delta);
+    }
+  }
+
+  // AI Settings modal
+  function showAISettings() {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+
+    const modelList = aiSettings.model ? aiSettings.model : '';
+    overlay.innerHTML = `
+      <div class="modal" style="min-width:380px">
+        <h3>AI Settings</h3>
+        <label style="font-size:12px;display:block;margin-bottom:4px;">Provider</label>
+        <select id="ai-set-provider" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit;font-size:13px;margin-bottom:10px;outline:none;">
+          <option value="auto" ${aiSettings.provider === 'auto' ? 'selected' : ''}>Auto-detect</option>
+          <option value="ollama" ${aiSettings.provider === 'ollama' ? 'selected' : ''}>Ollama</option>
+          <option value="webllm" ${aiSettings.provider === 'webllm' ? 'selected' : ''}>WebLLM (in-browser)</option>
+        </select>
+        <label style="font-size:12px;display:block;margin-bottom:4px;">Ollama URL</label>
+        <input type="text" id="ai-set-url" value="${escHtml(aiSettings.ollamaUrl)}">
+        <label style="font-size:12px;display:block;margin-bottom:4px;">Model</label>
+        <div style="display:flex;gap:6px;margin-bottom:10px;">
+          <select id="ai-set-model" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit;font-size:13px;outline:none;">
+            ${modelList ? `<option value="${escHtml(modelList)}" selected>${escHtml(modelList)}</option>` : '<option value="">Loading...</option>'}
+          </select>
+          <button id="ai-set-refresh" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:12px;">Refresh</button>
+        </div>
+        <div class="modal-buttons">
+          <button class="cancel">Cancel</button>
+          <button class="primary ok">Save</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    const providerSel = overlay.querySelector('#ai-set-provider');
+    const urlInput = overlay.querySelector('#ai-set-url');
+    const modelSel = overlay.querySelector('#ai-set-model');
+    const refreshBtn = overlay.querySelector('#ai-set-refresh');
+
+    async function refreshModels() {
+      const provider = providerSel.value;
+      modelSel.innerHTML = '<option value="">Loading...</option>';
+      if (provider === 'ollama' || provider === 'auto') {
+        try {
+          const r = await fetch(urlInput.value + '/api/tags', { signal: AbortSignal.timeout(3000) });
+          if (r.ok) {
+            const data = await r.json();
+            const models = (data.models || []).map(m => m.name);
+            modelSel.innerHTML = models.map(m =>
+              `<option value="${escHtml(m)}" ${m === aiSettings.model ? 'selected' : ''}>${escHtml(m)}</option>`
+            ).join('') || '<option value="">No models found</option>';
+            return;
+          }
+        } catch {}
+      }
+      if (provider === 'webllm' || provider === 'auto') {
+        const webllmModels = [
+          'SmolLM2-1.7B-Instruct-q4f16_1-MLC',
+          'Llama-3.2-1B-Instruct-q4f16_1-MLC',
+          'Llama-3.2-3B-Instruct-q4f16_1-MLC',
+          'Phi-3.5-mini-instruct-q4f16_1-MLC',
+        ];
+        modelSel.innerHTML = webllmModels.map(m =>
+          `<option value="${escHtml(m)}" ${m === aiSettings.model ? 'selected' : ''}>${escHtml(m)}</option>`
+        ).join('');
+        return;
+      }
+      modelSel.innerHTML = '<option value="">No provider available</option>';
+    }
+
+    refreshBtn.addEventListener('click', refreshModels);
+    providerSel.addEventListener('change', refreshModels);
+    refreshModels();
+
+    const close = (save) => {
+      if (save) {
+        aiSettings.provider = providerSel.value;
+        aiSettings.ollamaUrl = urlInput.value.replace(/\/+$/, '');
+        aiSettings.model = modelSel.value;
+        saveAISettings();
+        _webllmEngine = null; // Reset engine on settings change
+        detectAIProvider();
+      }
+      overlay.remove();
+    };
+    overlay.querySelector('.cancel').addEventListener('click', () => close(false));
+    overlay.querySelector('.ok').addEventListener('click', () => close(true));
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
+  }
+
+  function setupAI() {
+    setupConsoleTabs();
+    document.getElementById('ai-settings-btn').addEventListener('click', showAISettings);
   }
 
   // ---- Public API ----
@@ -2525,6 +2969,7 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
     executeQuery,
     cancelQuery,
     clearConsole,
+    runConsole,
     layoutTileH,
     layoutTileV,
     layoutGrid,

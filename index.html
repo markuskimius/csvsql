@@ -58,16 +58,28 @@
   <div id="console-panel">
     <div id="console-resize-handle"></div>
     <div id="console-header">
-      <span>SQL Console</span>
+      <div id="console-tabs">
+        <button class="console-tab active" data-tab="sql">SQL</button>
+        <button class="console-tab" data-tab="ai">AI</button>
+      </div>
       <div id="console-actions">
-        <button onclick="app.executeQuery()" title="Execute (Ctrl+Enter)">Run</button>
+        <button onclick="app.runConsole()" title="Execute (Ctrl+Enter)">Run</button>
         <button onclick="app.clearConsole()" title="Clear">Clear</button>
       </div>
     </div>
     <div id="console-body">
       <textarea id="sql-input" placeholder="SELECT * FROM tablename WHERE ..." spellcheck="false"></textarea>
-      <div id="console-status"></div>
     </div>
+    <div id="ai-body" style="display:none">
+      <div id="ai-controls">
+        <select id="ai-table-select" multiple title="Select tables to analyze (Ctrl/Cmd+click for multiple)"></select>
+        <button id="ai-settings-btn" title="AI Settings">&#9881;</button>
+        <span id="ai-provider-badge"></span>
+      </div>
+      <textarea id="ai-input" placeholder="Ask about your data... e.g. 'summarize this data' or 'what trends do you see?'" spellcheck="false"></textarea>
+      <div id="ai-response"></div>
+    </div>
+    <div id="console-status"></div>
   </div>
 
   <input type="file" id="file-input" accept=".csv,.tsv,.psv,.txt,.xlsx,.xls,.gz,.zip,.bz2,.xz,.rar,.7z,.zst" multiple style="display:none">
