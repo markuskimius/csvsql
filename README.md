@@ -128,7 +128,7 @@ INSERT, UPDATE, DELETE, ALTER TABLE, and DROP TABLE all work. Changes to existin
 
 ### AI Analysis *(experimental)*
 
-The AI tab lets you analyze data using natural language. The AI automatically writes and executes SQL queries against your full dataset, so it works with tables of any size.
+The AI tab lets you analyze data using natural language. The AI automatically writes and executes SQL queries against your full dataset, so it works with tables of any size. You can also chat with the AI without any tables loaded.
 
 **Providers:**
 

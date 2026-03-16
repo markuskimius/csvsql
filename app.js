@@ -2142,15 +2142,15 @@ const app = (() => {
     };
   }
 
-  function showInterruptButton(show) {
+  function showInterruptButton(show, handler) {
     let btn = document.getElementById('btn-interrupt');
     if (!btn) {
       btn = document.createElement('button');
       btn.id = 'btn-interrupt';
-      btn.textContent = 'Interrupt';
-      btn.onclick = cancelQuery;
       document.getElementById('console-actions').appendChild(btn);
     }
+    btn.textContent = 'Interrupt';
+    btn.onclick = handler || cancelQuery;
     btn.style.display = show ? '' : 'none';
   }
 
@@ -2638,7 +2638,7 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 </table>
 
 <h4>AI Analysis <em>(experimental)</em></h4>
-<p>The AI tab in the console panel lets you analyze your data using natural language. The AI has full SQL access to your data &mdash; it writes and executes queries automatically to answer your questions with exact results, regardless of dataset size.</p>
+<p>The AI tab in the console panel lets you analyze your data using natural language. The AI has full SQL access to your data &mdash; it writes and executes queries automatically to answer your questions with exact results, regardless of dataset size. You can also chat with the AI without any tables loaded.</p>
 <p><strong>Four provider options:</strong></p>
 <ul>
 <li><strong>WebLLM (default):</strong> Runs entirely in the browser via WebGPU. Requires Chrome/Edge 113+. No install, no API key, no data leaves your machine.</li>
@@ -2893,6 +2893,7 @@ Smaller models, runs entirely in the browser — no install needed.<br>
 
   function buildDataContext(tableNames) {
     const parts = [];
+    if (tableNames.length === 0) return '';
     const budgetPerTable = Math.floor(getDataCharBudget() / tableNames.length);
 
     for (const name of tableNames) {
@@ -2977,12 +2978,8 @@ Smaller models, runs entirely in the browser — no install needed.<br>
 
     // Default to all open tables if none selected
     if (selectedTables.length === 0) selectedTables = Object.keys(tables);
-    if (selectedTables.length === 0) {
-      setAIStatus('Open a CSV file first to analyze data.', 'error');
-      return;
-    }
     if (!prompt) {
-      setAIStatus('Enter a prompt to analyze the data.', 'error');
+      setAIStatus('Enter a prompt.', 'error');
       return;
     }
     if (!_aiProvider) {
@@ -2991,15 +2988,17 @@ Smaller models, runs entirely in the browser — no install needed.<br>
       return;
     }
 
-    flushAllSyncs();
-    const dataContext = buildDataContext(selectedTables);
+    if (selectedTables.length > 0) flushAllSyncs();
     _aiConversation.push({ role: 'user', content: prompt });
 
-    const tableList = selectedTables.map(n => {
-      const t = tables[n];
-      return `[${n}] (${t ? t.columns.join(', ') : 'unknown columns'})`;
-    }).join(', ');
-    const systemPrompt = `You are a data analyst. You have full access to a SQLite database containing the user's data.
+    let systemPrompt;
+    if (selectedTables.length > 0) {
+      const dataContext = buildDataContext(selectedTables);
+      const tableList = selectedTables.map(n => {
+        const t = tables[n];
+        return `[${n}] (${t ? t.columns.join(', ') : 'unknown columns'})`;
+      }).join(', ');
+      systemPrompt = `You are a data analyst. You have full access to a SQLite database containing the user's data.
 
 IMPORTANT: To answer questions, you MUST write SQL queries. Write them in \`\`\`sql code blocks and they will be executed automatically. The results will be returned to you. Then use the results to answer the user's question.
 
@@ -3018,6 +3017,9 @@ SELECT [product], SUM([revenue]) as total FROM [sales] GROUP BY [product] ORDER 
 \`\`\`
 
 ${dataContext}`;
+    } else {
+      systemPrompt = `You are a helpful assistant. No data tables are currently loaded. Answer the user's question to the best of your ability. If the user asks about data analysis, let them know they can open CSV, Excel, or other data files to analyze.`;
+    }
 
     // Append user message bubble
     const userMsg = document.createElement('div');
@@ -3038,6 +3040,8 @@ ${dataContext}`;
     if (_aiAbort) _aiAbort.abort();
     _aiAbort = new AbortController();
     const signal = _aiAbort.signal;
+
+    showInterruptButton(true, () => { if (_aiAbort) _aiAbort.abort(); });
 
     // Elapsed timer
     const aiTimer = setInterval(() => {
@@ -3125,10 +3129,12 @@ ${dataContext}`;
       }
 
       clearInterval(aiTimer);
+      showInterruptButton(false);
       const elapsed = performance.now() - t0;
       setAIStatus(`Done in ${formatElapsed(elapsed)}`, 'success');
     } catch (e) {
       clearInterval(aiTimer);
+      showInterruptButton(false);
       if (e.name === 'AbortError') {
         setAIStatus('Cancelled', '');
       } else {
