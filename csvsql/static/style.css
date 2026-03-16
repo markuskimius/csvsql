@@ -552,9 +552,9 @@ body {
 
 #console-header {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
-  padding: 4px 12px;
+  padding: 6px 12px 0;
   background: var(--surface2);
   font-size: 12px;
   font-weight: 600;
@@ -563,8 +563,7 @@ body {
 
 #console-tabs {
   display: flex;
-  gap: 0;
-  margin-bottom: -1px;
+  gap: 2px;
   position: relative;
   z-index: 1;
 }
@@ -577,26 +576,55 @@ body {
   font-size: 12px;
   font-weight: 600;
   font-family: inherit;
-  padding: 3px 14px 4px;
-  border-radius: 4px 4px 0 0;
+  padding: 4px 14px 5px;
+  border-radius: 6px 6px 0 0;
   cursor: pointer;
-  margin-right: 1px;
+  position: relative;
 }
 
 .console-tab:hover {
   color: var(--text);
-  background: rgba(255,255,255,0.04);
+  background: rgba(255,255,255,0.05);
 }
 
 .console-tab.active {
   color: var(--text);
   background: var(--bg);
   border-color: var(--border);
+  border-bottom: none;
+  margin-bottom: -1px;
+  padding-bottom: 6px;
+}
+
+.console-tab.active::before,
+.console-tab.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  width: 6px;
+  height: 6px;
+}
+
+.console-tab.active::before {
+  left: -6px;
+  border-bottom-right-radius: 6px;
+  box-shadow: 0 0 0 6px var(--bg);
+  background: var(--surface2);
+  clip-path: inset(0 0 0 50%);
+}
+
+.console-tab.active::after {
+  right: -6px;
+  border-bottom-left-radius: 6px;
+  box-shadow: 0 0 0 6px var(--bg);
+  background: var(--surface2);
+  clip-path: inset(0 50% 0 0);
 }
 
 #console-actions {
   display: flex;
   gap: 6px;
+  padding-bottom: 4px;
 }
 
 #console-actions button {

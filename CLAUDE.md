@@ -33,7 +33,7 @@ Single-page app with three core files:
 
 ### Window management
 
-Custom subwindow system — each table/query result gets a draggable, resizable, minimizable window inside `#window-area`. Layout functions (tile, grid, cascade) reposition all visible windows. Windows track their own sort/filter state. The `windows` array and `tables` object are the two central data structures.
+Custom subwindow system — each table/query result gets a draggable, resizable, minimizable window inside `#window-area`. Layout functions (tile, grid, cascade) reposition all visible windows. Windows reposition/resize proportionally when the browser window or console panel is resized (`scaleWindowsToArea()`). Windows track their own sort/filter state. The `windows` array and `tables` object are the two central data structures. Help windows (Manual, About) are singletons — reopening focuses the existing window instead of creating a duplicate.
 
 ### Row identity
 
@@ -97,3 +97,5 @@ Version is in `pyproject.toml`.
 - AI settings (provider, model, API keys) are persisted in localStorage under `csvsql_ai_settings`
 - AI conversation history is kept in-memory (`_aiConversation` array) and cleared with the console
 - AI prompt history (Up/Down arrow) is in-memory only, not persisted across sessions
+- Console tab switching auto-focuses the corresponding input field (SQL input or AI prompt)
+- Help windows (Manual, About) are singletons — `showHelpWindow()` focuses/restores existing window instead of creating a duplicate

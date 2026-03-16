@@ -2488,6 +2488,12 @@ const app = (() => {
 
   // ---- Help ----
   function showHelpWindow(title, bodyHTML) {
+    const existing = windows.find(w => w.title === title);
+    if (existing) {
+      if (existing.el.classList.contains('minimized')) restoreWindow(existing.id);
+      else focusWindow(existing.id);
+      return;
+    }
     const area = document.getElementById('window-area');
     const rect = area.getBoundingClientRect();
     const w = Math.min(600, rect.width - 60);
@@ -2509,7 +2515,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.7.6 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.8.1 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -2615,6 +2621,7 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <li><strong>Minimize:</strong> Click the minimize button. Restore from the Windows menu.</li>
 <li><strong>Close:</strong> Click the close button. <code>Ctrl</code>/<code>&#8984;</code>+click closes all windows.</li>
 <li><strong>Layout:</strong> Use the View menu to tile, grid, or cascade all windows.</li>
+<li><strong>Proportional scaling:</strong> Windows reposition and resize proportionally when the browser window or console panel is resized.</li>
 </ul>
 
 <h4>Keyboard Shortcuts</h4>
@@ -2690,6 +2697,9 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
     if (tab === 'ai') {
       populateTableSelect();
       detectAIProvider();
+      document.getElementById('ai-input').focus();
+    } else {
+      document.getElementById('sql-input').focus();
     }
   }
 
