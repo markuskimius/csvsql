@@ -9,6 +9,7 @@ const app = (() => {
   let activeWinId = null;
   let tables = {};  // tableName -> { columns, rows, filename, modified }
   let db = null;    // sql.js Database instance
+  let _activeConsoleTab = 'sql';
 
   // Virtual scrolling constants
   const ROW_HEIGHT = 26;
@@ -40,6 +41,8 @@ const app = (() => {
     setupDragAndDrop();
     setupKeyboard();
     setupMenuClose();
+    setupAI();
+    setupBrowserResize();
     fixShortcutLabels();
     window._appReady = true;
   }
@@ -860,10 +863,9 @@ const app = (() => {
     const idx = windows.findIndex(w => w.id === id);
     if (idx === -1) return;
     const win = windows[idx];
-    // If it's a table window (not a query result), also remove from tables
-    if (win.tableName && !win.isQuery && tables[win.tableName]) {
+    if (win.tableName && tables[win.tableName]) {
       const t = tables[win.tableName];
-      if (t.modified) {
+      if (!win.isQuery && t.modified) {
         if (!confirm(`Table "${win.tableName}" has unsaved changes. Close anyway?`)) return;
       }
       try { db.run(`DROP TABLE IF EXISTS [${win.tableName}]`); } catch (e) {}
@@ -876,6 +878,7 @@ const app = (() => {
       if (activeWinId) focusWindow(activeWinId);
     }
     updateWindowsList();
+    if (_activeConsoleTab === 'ai') populateTableSelect();
   }
 
   function closeAllWindows() {
@@ -1208,6 +1211,56 @@ const app = (() => {
     updateWindowsList();
   }
 
+  let _prevAreaWidth = 0;
+  let _prevAreaHeight = 0;
+
+  function scaleWindowsToArea() {
+    const area = document.getElementById('window-area');
+    const rect = area.getBoundingClientRect();
+    const w = rect.width;
+    const h = rect.height;
+    if (_prevAreaWidth === 0 || _prevAreaHeight === 0) {
+      _prevAreaWidth = w;
+      _prevAreaHeight = h;
+      return;
+    }
+    const scaleX = w / _prevAreaWidth;
+    const scaleY = h / _prevAreaHeight;
+    if (scaleX === 1 && scaleY === 1) return;
+    windows.forEach(win => {
+      if (win.el.classList.contains('minimized')) return;
+      if (win.maximized) {
+        win.el.style.width = w + 'px';
+        win.el.style.height = h + 'px';
+        if (win.prevBounds) {
+          win.prevBounds.left = Math.round(win.prevBounds.left * scaleX);
+          win.prevBounds.top = Math.round(win.prevBounds.top * scaleY);
+          win.prevBounds.width = Math.round(win.prevBounds.width * scaleX);
+          win.prevBounds.height = Math.round(win.prevBounds.height * scaleY);
+        }
+        return;
+      }
+      const left = parseFloat(win.el.style.left) || 0;
+      const top = parseFloat(win.el.style.top) || 0;
+      const width = parseFloat(win.el.style.width) || 0;
+      const height = parseFloat(win.el.style.height) || 0;
+      win.el.style.left = Math.round(left * scaleX) + 'px';
+      win.el.style.top = Math.round(top * scaleY) + 'px';
+      win.el.style.width = Math.round(width * scaleX) + 'px';
+      win.el.style.height = Math.round(height * scaleY) + 'px';
+    });
+    _prevAreaWidth = w;
+    _prevAreaHeight = h;
+  }
+
+  function setupBrowserResize() {
+    const area = document.getElementById('window-area');
+    const rect = area.getBoundingClientRect();
+    _prevAreaWidth = rect.width;
+    _prevAreaHeight = rect.height;
+    window.addEventListener('resize', scaleWindowsToArea);
+  }
+
   // ---- Table Window ----
   function createTableWindow(tableName) {
     const t = tables[tableName];
@@ -1218,6 +1271,7 @@ const app = (() => {
       win.tableName = tableName;
       renderTableView(win, body, t);
     }, { tableName });
+    if (_activeConsoleTab === 'ai') populateTableSelect();
   }
 
   function renderTableView(win, body, tableData) {
@@ -1852,12 +1906,67 @@ const app = (() => {
   }
 
   // ---- SQL Console ----
+
+  // Prompt history (Up/Down arrow to navigate previous commands)
+  const _aiHistory = [];
+  let _aiHistoryIdx = _aiHistory.length;
+  let _aiHistoryDraft = '';
+  const MAX_HISTORY = 100;
+
+  function pushHistory(arr, value) {
+    if (!value) return;
+    const idx = arr.indexOf(value);
+    if (idx !== -1) arr.splice(idx, 1);
+    arr.push(value);
+    if (arr.length > MAX_HISTORY) arr.shift();
+  }
+
+  function handleHistoryKey(e, history, getIdx, setIdx, getDraft, setDraft) {
+    const el = e.target;
+    if (e.key === 'ArrowUp') {
+      // Only navigate history when cursor is at the very start
+      if (el.selectionStart !== 0 || el.selectionEnd !== 0) return;
+      if (history.length === 0) return;
+      e.preventDefault();
+      // Save draft on first up
+      if (getIdx() === history.length) setDraft(el.value);
+      if (getIdx() > 0) {
+        setIdx(getIdx() - 1);
+        el.value = history[getIdx()];
+        el.setSelectionRange(0, 0);
+      }
+    } else if (e.key === 'ArrowDown') {
+      // Only navigate history when cursor is at the very end
+      if (el.selectionStart !== el.value.length || el.selectionEnd !== el.value.length) return;
+      if (getIdx() >= history.length) return;
+      e.preventDefault();
+      setIdx(getIdx() + 1);
+      if (getIdx() === history.length) {
+        el.value = getDraft();
+      } else {
+        el.value = history[getIdx()];
+      }
+      el.setSelectionRange(el.value.length, el.value.length);
+    }
+  }
+
   function setupKeyboard() {
     document.getElementById('sql-input').addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         executeQuery();
       }
+    });
+
+    document.getElementById('ai-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        runAI();
+        return;
+      }
+      handleHistoryKey(e, _aiHistory,
+        () => _aiHistoryIdx, v => _aiHistoryIdx = v,
+        () => _aiHistoryDraft, v => _aiHistoryDraft = v);
     });
 
     document.addEventListener('keydown', (e) => {
@@ -2195,7 +2304,13 @@ const app = (() => {
   }
 
   function clearConsole() {
-    document.getElementById('sql-input').value = '';
+    if (_activeConsoleTab === 'ai') {
+      document.getElementById('ai-response').innerHTML = '';
+      document.getElementById('ai-input').value = '';
+      _aiConversation = [];
+    } else {
+      document.getElementById('sql-input').value = '';
+    }
     setStatus('');
   }
 
@@ -2228,6 +2343,7 @@ const app = (() => {
       if (!resizing) return;
       const newH = origH - (e.clientY - startY);
       panel.style.height = Math.max(60, Math.min(window.innerHeight * 0.5, newH)) + 'px';
+      scaleWindowsToArea();
     });
 
     document.addEventListener('mouseup', () => { resizing = false; });
@@ -2509,8 +2625,847 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <tr><td><code>Ctrl+N</code> / <code>&#8984;N</code></td><td>New table</td></tr>
 <tr><td><code>Ctrl+W</code> / <code>&#8984;W</code></td><td>Close window</td></tr>
 <tr><td><code>Ctrl+Enter</code></td><td>Execute SQL query</td></tr>
+<tr><td><code>Enter</code></td><td>Send AI prompt</td></tr>
+<tr><td><code>Shift+Enter</code></td><td>Newline in AI prompt</td></tr>
+<tr><td><code>Up</code> / <code>Down</code></td><td>AI prompt history</td></tr>
 </table>
+
+<h4>AI Analysis <em>(experimental)</em></h4>
+<p>The AI tab in the console panel lets you analyze your data using natural language. The AI has full SQL access to your data &mdash; it writes and executes queries automatically to answer your questions with exact results, regardless of dataset size.</p>
+<p><strong>Four provider options:</strong></p>
+<ul>
+<li><strong>WebLLM (default):</strong> Runs entirely in the browser via WebGPU. Requires Chrome/Edge 113+. No install, no API key, no data leaves your machine.</li>
+<li><strong>Ollama:</strong> Local AI server. Install from <a href="https://ollama.com">ollama.com</a>, then run <code>ollama pull llama3.2</code>. Larger models than WebLLM, still fully local.</li>
+<li><strong>Claude (Anthropic):</strong> Cloud provider. Requires an API key from <a href="https://console.anthropic.com">console.anthropic.com</a>. Best reasoning quality.</li>
+<li><strong>OpenAI:</strong> Cloud provider. Requires an API key from <a href="https://platform.openai.com">platform.openai.com</a>.</li>
+</ul>
+<p><strong>Usage:</strong> Switch to the AI tab, select one or more tables, type your question, and press <code>Enter</code> or click Run. Use <code>Shift+Enter</code> for multiline prompts. Press <code>Up</code>/<code>Down</code> arrow to recall previous prompts.</p>
+<p><strong>How it works:</strong> The AI receives column statistics and sample rows for context, then writes SQL queries in <code>\`\`\`sql</code> code blocks. These queries are executed automatically against the full dataset, and the results are fed back to the AI for analysis. This loop repeats (up to 5 rounds) until the AI has enough data to answer.</p>
+<p>Click the gear icon &#9881; to configure the provider, model, and API keys.</p>
     `);
+  }
+
+  // ---- AI Analysis ----
+  let _aiProvider = null;
+  let _aiAbort = null;
+  let _webllmEngine = null;
+  let _aiConversation = []; // accumulated user/assistant message history
+
+  let aiSettings = JSON.parse(localStorage.getItem('csvsql_ai_settings') || 'null') || {
+    provider: 'webllm',
+    model: '',
+    ollamaUrl: 'http://localhost:11434',
+    claudeApiKey: '',
+    openaiApiKey: '',
+  };
+  // Ensure keys exist for older saved settings
+  if (!('claudeApiKey' in aiSettings)) aiSettings.claudeApiKey = '';
+  if (!('openaiApiKey' in aiSettings)) aiSettings.openaiApiKey = '';
+
+  function saveAISettings() {
+    localStorage.setItem('csvsql_ai_settings', JSON.stringify(aiSettings));
+  }
+
+  function setAIStatus(msg, type = '') {
+    setStatus(msg, type);
+  }
+
+  // Tab switching
+  function setupConsoleTabs() {
+    const tabs = document.querySelectorAll('.console-tab');
+    tabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        switchConsoleTab(tab.dataset.tab);
+      });
+    });
+  }
+
+  function switchConsoleTab(tab) {
+    _activeConsoleTab = tab;
+    document.querySelectorAll('.console-tab').forEach(t => {
+      t.classList.toggle('active', t.dataset.tab === tab);
+    });
+    document.getElementById('console-body').style.display = tab === 'sql' ? '' : 'none';
+    document.getElementById('ai-body').style.display = tab === 'ai' ? '' : 'none';
+    if (tab === 'ai') {
+      populateTableSelect();
+      detectAIProvider();
+    }
+  }
+
+  function runConsole() {
+    if (_activeConsoleTab === 'ai') runAI();
+    else executeQuery();
+  }
+
+  function populateTableSelect() {
+    const sel = document.getElementById('ai-table-select');
+    if (!sel) return;
+    const prev = new Set([...sel.selectedOptions].map(o => o.value));
+    const hadPrev = prev.size > 0;
+    sel.innerHTML = '';
+    for (const name of Object.keys(tables)) {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = `${name} (${tables[name].rows.length} rows, ${tables[name].columns.length} cols)`;
+      // Select all by default; preserve previous selection if user had one
+      opt.selected = hadPrev ? prev.has(name) : true;
+      sel.appendChild(opt);
+    }
+  }
+
+  // Provider detection
+  async function detectAIProvider() {
+    const badge = document.getElementById('ai-provider-badge');
+    if (!badge) return;
+
+    if (aiSettings.provider === 'ollama' || aiSettings.provider === 'auto') {
+      try {
+        const r = await fetch(aiSettings.ollamaUrl + '/api/tags', { signal: AbortSignal.timeout(2000) });
+        if (r.ok) {
+          const data = await r.json();
+          const models = (data.models || []).map(m => m.name);
+          _aiProvider = 'ollama';
+          if (!aiSettings.model || !models.includes(aiSettings.model)) {
+            aiSettings.model = models[0] || '';
+            saveAISettings();
+          }
+          badge.textContent = 'Ollama: ' + (aiSettings.model || 'no models');
+          return;
+        }
+      } catch {}
+    }
+
+    if (aiSettings.provider === 'claude') {
+      if (aiSettings.claudeApiKey) {
+        _aiProvider = 'claude';
+        if (!aiSettings.model) {
+          aiSettings.model = 'claude-opus-4-20250514';
+          saveAISettings();
+        }
+        badge.textContent = 'Claude: ' + aiSettings.model;
+        return;
+      }
+    }
+
+    if (aiSettings.provider === 'openai') {
+      if (aiSettings.openaiApiKey) {
+        _aiProvider = 'openai';
+        if (!aiSettings.model) {
+          aiSettings.model = 'o3';
+          saveAISettings();
+        }
+        badge.textContent = 'OpenAI: ' + aiSettings.model;
+        return;
+      }
+    }
+
+    if (aiSettings.provider === 'webllm' || aiSettings.provider === 'auto') {
+      if (navigator.gpu) {
+        _aiProvider = 'webllm';
+        badge.textContent = 'WebLLM (WebGPU)';
+        if (!aiSettings.model) {
+          aiSettings.model = 'Qwen3-8B-q4f16_1-MLC';
+          saveAISettings();
+        }
+        return;
+      }
+    }
+
+    _aiProvider = null;
+    badge.textContent = 'No AI provider';
+    showSetupHelp();
+  }
+
+  function showSetupHelp() {
+    const resp = document.getElementById('ai-response');
+    if (!resp || resp.innerHTML.includes('ai-setup-help')) return;
+    resp.innerHTML = `<div class="ai-setup-help">
+<strong>No AI provider detected.</strong> Options:<br><br>
+<strong>Option 1: Claude or OpenAI (cloud)</strong><br>
+Click the gear icon, select Claude or OpenAI, and enter your API key.<br>
+Best reasoning quality for data analysis.<br><br>
+<strong>Option 2: Ollama (local)</strong><br>
+1. Install from <a href="https://ollama.com" target="_blank">ollama.com</a><br>
+2. Run: <code>ollama pull llama3.2</code><br>
+3. Ollama runs on localhost:11434 by default<br><br>
+<strong>Option 3: WebLLM (in-browser)</strong><br>
+Requires Chrome 113+ with WebGPU enabled.<br>
+Smaller models, runs entirely in the browser — no install needed.<br>
+</div>`;
+  }
+
+  // Build data context for the AI prompt
+  // Budget for data context chars. The AI also has SQL query access to the full
+  // dataset, so this budget is for column stats + sample rows to orient the model.
+  function getDataCharBudget() {
+    if (_aiProvider === 'claude' || _aiProvider === 'openai') return 500000;
+    if (_aiProvider === 'webllm') return 6000; // 4K token context; leave room for system prompt, conversation, and response
+    return 100000; // ollama
+  }
+
+  function buildColumnStats(tableName, columns) {
+    const stats = [];
+    const maxDetailCols = 30;
+    for (let ci = 0; ci < columns.length; ci++) {
+      const col = columns[ci];
+      const fullStats = ci < maxDetailCols;
+      try {
+        const basic = db.exec(`SELECT COUNT([${col}]), COUNT(CASE WHEN [${col}] IS NULL OR [${col}] = '' THEN 1 END), COUNT(DISTINCT [${col}]), MIN([${col}]), MAX([${col}]) FROM [${tableName}]`);
+        if (!basic.length) continue;
+        const [total, nullEmpty, distinct, mn, mx] = basic[0].values[0];
+        let line = `  ${col}: ${total} values, ${nullEmpty} null/empty, ${distinct} distinct, min=${mn}, max=${mx}`;
+
+        if (!fullStats) { stats.push(line); continue; }
+
+        // Check if numeric
+        const numCheck = db.exec(`SELECT COUNT(*) FROM [${tableName}] WHERE [${col}] GLOB '*[0-9]*' AND TYPEOF(CAST([${col}] AS REAL)) = 'real'`);
+        const numCount = numCheck.length ? numCheck[0].values[0][0] : 0;
+        const isNumeric = numCount > total * 0.5;
+
+        if (isNumeric) {
+          try {
+            const agg = db.exec(`SELECT AVG(CAST([${col}] AS REAL)), AVG(CAST([${col}] AS REAL) * CAST([${col}] AS REAL)) FROM [${tableName}] WHERE [${col}] GLOB '*[0-9]*'`);
+            if (agg.length) {
+              const mean = agg[0].values[0][0];
+              const meanSq = agg[0].values[0][1];
+              const variance = meanSq - mean * mean;
+              const stddev = variance > 0 ? Math.sqrt(variance) : 0;
+              line += `\n    Numeric: mean=${Number(mean).toFixed(2)}, stddev=${Number(stddev).toFixed(2)}`;
+            }
+            // Percentiles via OFFSET
+            const cntRes = db.exec(`SELECT COUNT(*) FROM [${tableName}] WHERE [${col}] GLOB '*[0-9]*'`);
+            const cnt = cntRes.length ? cntRes[0].values[0][0] : 0;
+            if (cnt > 4) {
+              const pcts = [0.25, 0.5, 0.75];
+              const pVals = [];
+              for (const p of pcts) {
+                const off = Math.floor(cnt * p);
+                const pr = db.exec(`SELECT CAST([${col}] AS REAL) FROM [${tableName}] WHERE [${col}] GLOB '*[0-9]*' ORDER BY CAST([${col}] AS REAL) LIMIT 1 OFFSET ${off}`);
+                pVals.push(pr.length ? Number(pr[0].values[0][0]).toFixed(2) : '?');
+              }
+              line += `\n    Percentiles: p25=${pVals[0]}, median=${pVals[1]}, p75=${pVals[2]}`;
+            }
+            // 10-bucket histogram
+            if (mn != null && mx != null) {
+              const minVal = Number(mn), maxVal = Number(mx);
+              if (isFinite(minVal) && isFinite(maxVal) && maxVal > minVal) {
+                const bucketWidth = (maxVal - minVal) / 10;
+                const histRes = db.exec(`SELECT CASE WHEN CAST(((CAST([${col}] AS REAL) - ${minVal}) / ${bucketWidth}) AS INTEGER) >= 10 THEN 9 ELSE CAST(((CAST([${col}] AS REAL) - ${minVal}) / ${bucketWidth}) AS INTEGER) END AS bucket, COUNT(*) FROM [${tableName}] WHERE [${col}] GLOB '*[0-9]*' GROUP BY bucket ORDER BY bucket`);
+                if (histRes.length) {
+                  const buckets = histRes[0].values.map(r => {
+                    const b = r[0];
+                    const lo = (minVal + b * bucketWidth).toFixed(2);
+                    const hi = (minVal + (b + 1) * bucketWidth).toFixed(2);
+                    return `[${lo}-${hi}]: ${r[1]}`;
+                  });
+                  line += `\n    Distribution: ${buckets.join(' | ')}`;
+                }
+              }
+            }
+          } catch {}
+        } else if (distinct <= 1000 && distinct > 0) {
+          // Categorical: all value counts (≤1000 distinct fits easily in budget)
+          try {
+            const topRes = db.exec(`SELECT [${col}], COUNT(*) as cnt FROM [${tableName}] WHERE [${col}] IS NOT NULL AND [${col}] != '' GROUP BY [${col}] ORDER BY cnt DESC`);
+            if (topRes.length) {
+              const vals = topRes[0].values.map(r => `${r[0]} (${r[1]})`).join(', ');
+              line += `\n    Value counts: ${vals}`;
+            }
+          } catch {}
+        }
+
+        stats.push(line);
+      } catch {}
+    }
+    return stats.length ? 'Column statistics:\n' + stats.join('\n') + '\n' : '';
+  }
+
+  function buildDataContext(tableNames) {
+    const parts = [];
+    const budgetPerTable = Math.floor(getDataCharBudget() / tableNames.length);
+
+    for (const name of tableNames) {
+      const t = tables[name];
+      if (!t || t.columns.length === 0) continue;
+
+      let info = `Table: ${name}\nColumns: ${t.columns.join(', ')}\nTotal rows: ${t.rows.length}\n\n`;
+
+      // For small tables (<=200 rows), include all rows directly
+      if (t.rows.length <= 200) {
+        const header = t.columns.join(' | ');
+        const maxCellLen = 100;
+        const rowLines = t.rows.map(row =>
+          t.columns.map(c => {
+            const v = String(row[c] ?? '');
+            return v.length > maxCellLen ? v.substring(0, maxCellLen) + '...' : v;
+          }).join(' | ')
+        );
+        info += 'Data:\n' + header + '\n' + rowLines.join('\n') + '\n';
+        parts.push(info);
+        continue;
+      }
+
+      // For larger tables: compute column stats first, then fill with sample rows
+      const statsText = buildColumnStats(name, t.columns);
+      info += statsText + '\n';
+
+      // Determine sample size
+      const sampleSize = t.rows.length <= 10000 ? 50 : 100;
+
+      // Get random sample rows via SQL
+      try {
+        const sampleRes = db.exec(`SELECT * FROM [${name}] ORDER BY RANDOM() LIMIT ${sampleSize}`);
+        if (sampleRes.length) {
+          const sampleCols = sampleRes[0].columns;
+          const header = sampleCols.join(' | ');
+          const maxCellLen = 100;
+          let sampleText = `Sample data (${sampleRes[0].values.length} random rows):\n${header}\n`;
+          for (const row of sampleRes[0].values) {
+            const line = row.map(v => {
+              const s = String(v ?? '');
+              return s.length > maxCellLen ? s.substring(0, maxCellLen) + '...' : s;
+            }).join(' | ');
+            // Check budget
+            if (info.length + sampleText.length + line.length + 1 > budgetPerTable) break;
+            sampleText += line + '\n';
+          }
+          info += sampleText;
+        }
+      } catch {}
+
+      parts.push(info);
+    }
+    return parts.join('\n---\n');
+  }
+
+  // Format AI response text with basic markdown
+  function formatAIResponse(text) {
+    let html = escHtml(text);
+    // Code blocks: ```...```
+    html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => '<pre>' + code.trim() + '</pre>');
+    // Inline code
+    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+    // Bold
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    // Newlines (but not inside pre tags)
+    html = html.replace(/\n/g, '<br>');
+    // Clean up <br> inside <pre>
+    html = html.replace(/<pre>([\s\S]*?)<\/pre>/g, (_, code) => '<pre>' + code.replace(/<br>/g, '\n') + '</pre>');
+    return html;
+  }
+
+  // Run AI analysis
+  async function runAI() {
+    const sel = document.getElementById('ai-table-select');
+    const input = document.getElementById('ai-input');
+    const respDiv = document.getElementById('ai-response');
+    if (!sel || !input || !respDiv) return;
+
+    let selectedTables = [...sel.selectedOptions].map(o => o.value);
+    const prompt = input.value.trim();
+
+    // Default to all open tables if none selected
+    if (selectedTables.length === 0) selectedTables = Object.keys(tables);
+    if (selectedTables.length === 0) {
+      setAIStatus('Open a CSV file first to analyze data.', 'error');
+      return;
+    }
+    if (!prompt) {
+      setAIStatus('Enter a prompt to analyze the data.', 'error');
+      return;
+    }
+    if (!_aiProvider) {
+      setAIStatus('No AI provider available. Install Ollama or use Chrome with WebGPU.', 'error');
+      showSetupHelp();
+      return;
+    }
+
+    flushAllSyncs();
+    const dataContext = buildDataContext(selectedTables);
+    _aiConversation.push({ role: 'user', content: prompt });
+
+    const tableList = selectedTables.map(n => {
+      const t = tables[n];
+      return `[${n}] (${t ? t.columns.join(', ') : 'unknown columns'})`;
+    }).join(', ');
+    const systemPrompt = `You are a data analyst. You have full access to a SQLite database containing the user's data.
+
+IMPORTANT: To answer questions, you MUST write SQL queries. Write them in \`\`\`sql code blocks and they will be executed automatically. The results will be returned to you. Then use the results to answer the user's question.
+
+Available tables: ${tableList}
+
+Rules:
+- ALWAYS query the data — never guess or estimate from the summary alone.
+- Table and column names must be wrapped in square brackets, e.g. SELECT [column] FROM [table].
+- You can run multiple queries, one per \`\`\`sql block.
+- Use COUNT, SUM, AVG, GROUP BY, ORDER BY, JOINs, subqueries — any valid SQLite SQL.
+- After receiving query results, give a clear, concise answer to the user.
+
+Example — if the user asks "what are the top 5 products by revenue?", write:
+\`\`\`sql
+SELECT [product], SUM([revenue]) as total FROM [sales] GROUP BY [product] ORDER BY total DESC LIMIT 5
+\`\`\`
+
+${dataContext}`;
+
+    // Append user message bubble
+    const userMsg = document.createElement('div');
+    userMsg.className = 'ai-msg ai-msg-user';
+    userMsg.innerHTML = '<div class="ai-msg-bubble">' + escHtml(prompt) + '</div>';
+    respDiv.appendChild(userMsg);
+
+    // Save to history and clear input
+    pushHistory(_aiHistory, prompt);
+    _aiHistoryIdx = _aiHistory.length;
+    _aiHistoryDraft = '';
+    input.value = '';
+
+    const t0 = performance.now();
+    setAIStatus('Generating response... 0s', 'working');
+
+    // Cancel any previous request
+    if (_aiAbort) _aiAbort.abort();
+    _aiAbort = new AbortController();
+    const signal = _aiAbort.signal;
+
+    // Elapsed timer
+    const aiTimer = setInterval(() => {
+      const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+      setAIStatus(`Generating response... ${elapsed}s`, 'working');
+    }, 100);
+
+    const MAX_SQL_ROUNDS = 5;
+
+    try {
+      for (let round = 0; round <= MAX_SQL_ROUNDS; round++) {
+        const messages = [
+          { role: 'system', content: systemPrompt },
+          ..._aiConversation,
+        ];
+
+        // Create AI response bubble
+        const aiMsg = document.createElement('div');
+        aiMsg.className = 'ai-msg ai-msg-ai';
+        const aiBubble = document.createElement('div');
+        aiBubble.className = 'ai-msg-bubble';
+        aiMsg.appendChild(aiBubble);
+        respDiv.appendChild(aiMsg);
+        respDiv.scrollTop = respDiv.scrollHeight;
+
+        let fullText = '';
+        const onChunk = (chunk) => {
+          const nearBottom = respDiv.scrollHeight - respDiv.scrollTop - respDiv.clientHeight < 40;
+          fullText += chunk;
+          aiBubble.innerHTML = formatAIResponse(fullText);
+          if (nearBottom) respDiv.scrollTop = respDiv.scrollHeight;
+        };
+
+        if (_aiProvider === 'ollama') {
+          await generateOllama(messages, onChunk, signal);
+        } else if (_aiProvider === 'webllm') {
+          await generateWebLLM(messages, onChunk, signal);
+        } else if (_aiProvider === 'claude') {
+          await generateClaude(messages, onChunk, signal);
+        } else if (_aiProvider === 'openai') {
+          await generateOpenAI(messages, onChunk, signal);
+        }
+
+        _aiConversation.push({ role: 'assistant', content: fullText });
+
+        // Extract SQL blocks and execute them
+        const sqlBlocks = [];
+        fullText.replace(/```sql\n([\s\S]*?)```/g, (_, sql) => { sqlBlocks.push(sql.trim()); });
+
+        if (sqlBlocks.length === 0 || round === MAX_SQL_ROUNDS) break;
+
+        // Execute SQL queries and collect results
+        let resultsText = '';
+        for (const sql of sqlBlocks) {
+          try {
+            const results = db.exec(sql);
+            if (results.length === 0) {
+              resultsText += `Query: ${sql}\nResult: (no rows returned)\n\n`;
+            } else {
+              for (const r of results) {
+                const header = r.columns.join(' | ');
+                const rows = r.values.map(row => row.map(v => String(v ?? 'NULL')).join(' | '));
+                // Limit to 200 result rows to stay within budget
+                const shown = rows.slice(0, 200);
+                resultsText += `Query: ${sql}\n${header}\n${shown.join('\n')}`;
+                if (rows.length > 200) resultsText += `\n... (${rows.length - 200} more rows)`;
+                resultsText += '\n\n';
+              }
+            }
+          } catch (e) {
+            resultsText += `Query: ${sql}\nError: ${e.message}\n\n`;
+          }
+        }
+
+        // Show query results as a system bubble
+        const resultsMsg = document.createElement('div');
+        resultsMsg.className = 'ai-msg ai-msg-ai';
+        resultsMsg.innerHTML = '<div class="ai-msg-bubble"><pre style="margin:0;white-space:pre-wrap;font-size:12px;">' + escHtml(resultsText.trim()) + '</pre></div>';
+        respDiv.appendChild(resultsMsg);
+        const nearBottom = respDiv.scrollHeight - respDiv.scrollTop - respDiv.clientHeight < 40;
+        if (nearBottom) respDiv.scrollTop = respDiv.scrollHeight;
+
+        // Add results to conversation for next round
+        _aiConversation.push({ role: 'user', content: 'SQL query results:\n\n' + resultsText });
+      }
+
+      clearInterval(aiTimer);
+      const elapsed = performance.now() - t0;
+      setAIStatus(`Done in ${formatElapsed(elapsed)}`, 'success');
+    } catch (e) {
+      clearInterval(aiTimer);
+      if (e.name === 'AbortError') {
+        setAIStatus('Cancelled', '');
+      } else {
+        setAIStatus(`Error: ${e.message}`, 'error');
+        // Show error in a bubble
+        const errMsg = document.createElement('div');
+        errMsg.className = 'ai-msg ai-msg-ai';
+        errMsg.innerHTML = '<div class="ai-msg-bubble"><span style="color:var(--danger)">' + escHtml(e.message) + '</span></div>';
+        respDiv.appendChild(errMsg);
+      }
+    }
+    _aiAbort = null;
+  }
+
+  // Ollama streaming
+  async function generateOllama(messages, onChunk, signal) {
+    const r = await fetch(aiSettings.ollamaUrl + '/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: aiSettings.model, messages, stream: true }),
+      signal,
+    });
+    if (!r.ok) throw new Error(`Ollama error: ${r.status} ${r.statusText}`);
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const data = JSON.parse(line);
+          if (data.message && data.message.content) onChunk(data.message.content);
+        } catch {}
+      }
+    }
+    // Process remaining buffer
+    if (buf.trim()) {
+      try {
+        const data = JSON.parse(buf);
+        if (data.message && data.message.content) onChunk(data.message.content);
+      } catch {}
+    }
+  }
+
+  // WebLLM generation
+  async function generateWebLLM(messages, onChunk, signal) {
+    if (!_webllmEngine) {
+      setAIStatus('Loading WebLLM engine (first time may download model)...', 'working');
+      const webllm = await import('https://esm.run/@mlc-ai/web-llm');
+      const model = aiSettings.model || 'Qwen3-8B-q4f16_1-MLC';
+      _webllmEngine = await webllm.CreateMLCEngine(model, {
+        initProgressCallback: (progress) => {
+          const pct = progress.progress != null ? Math.round(progress.progress * 100) + '%' : '';
+          setAIStatus(`Loading model: ${progress.text || pct}`, 'working');
+        },
+      }, {
+        context_window_size: 4096,
+        sliding_window_size: -1,
+      });
+    }
+    const response = await _webllmEngine.chat.completions.create({
+      messages,
+      stream: true,
+    });
+    for await (const chunk of response) {
+      if (signal.aborted) {
+        if (_webllmEngine.interruptGenerate) _webllmEngine.interruptGenerate();
+        throw new DOMException('Aborted', 'AbortError');
+      }
+      const delta = chunk.choices[0] && chunk.choices[0].delta && chunk.choices[0].delta.content;
+      if (delta) onChunk(delta);
+    }
+  }
+
+  // Claude streaming
+  async function generateClaude(messages, onChunk, signal) {
+    // Extract system message into top-level field (Anthropic format)
+    let system = '';
+    const filtered = [];
+    for (const msg of messages) {
+      if (msg.role === 'system') system = msg.content;
+      else filtered.push(msg);
+    }
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': aiSettings.claudeApiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model: aiSettings.model,
+        max_tokens: 4096,
+        system,
+        messages: filtered,
+        stream: true,
+      }),
+      signal,
+    });
+    if (!r.ok) {
+      const errText = await r.text().catch(() => r.statusText);
+      throw new Error(`Claude error: ${r.status} ${errText}`);
+    }
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const data = JSON.parse(line.slice(6));
+          if (data.type === 'content_block_delta' && data.delta && data.delta.text) {
+            onChunk(data.delta.text);
+          }
+        } catch {}
+      }
+    }
+  }
+
+  // OpenAI streaming
+  async function generateOpenAI(messages, onChunk, signal) {
+    const r = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + aiSettings.openaiApiKey,
+      },
+      body: JSON.stringify({
+        model: aiSettings.model,
+        messages,
+        stream: true,
+      }),
+      signal,
+    });
+    if (!r.ok) {
+      const errText = await r.text().catch(() => r.statusText);
+      throw new Error(`OpenAI error: ${r.status} ${errText}`);
+    }
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const payload = line.slice(6).trim();
+        if (payload === '[DONE]') return;
+        try {
+          const data = JSON.parse(payload);
+          const content = data.choices && data.choices[0] && data.choices[0].delta && data.choices[0].delta.content;
+          if (content) onChunk(content);
+        } catch {}
+      }
+    }
+  }
+
+  // AI Settings modal
+  function showAISettings() {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+
+    const modelList = aiSettings.model ? aiSettings.model : '';
+    const inputStyle = 'width:100%;box-sizing:border-box;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit;font-size:13px;margin-bottom:10px;outline:none;';
+    overlay.innerHTML = `
+      <div class="modal" style="min-width:380px">
+        <h3>AI Settings</h3>
+        <label style="font-size:12px;display:block;margin-bottom:4px;">Provider</label>
+        <select id="ai-set-provider" style="${inputStyle}">
+          <option value="auto" ${aiSettings.provider === 'auto' ? 'selected' : ''}>Auto-detect</option>
+          <option value="claude" ${aiSettings.provider === 'claude' ? 'selected' : ''}>Claude (Anthropic)</option>
+          <option value="openai" ${aiSettings.provider === 'openai' ? 'selected' : ''}>OpenAI</option>
+          <option value="ollama" ${aiSettings.provider === 'ollama' ? 'selected' : ''}>Ollama</option>
+          <option value="webllm" ${aiSettings.provider === 'webllm' ? 'selected' : ''}>WebLLM (in-browser)</option>
+        </select>
+        <div id="ai-set-ollama-fields">
+          <label style="font-size:12px;display:block;margin-bottom:4px;">Ollama URL</label>
+          <input type="text" id="ai-set-url" value="${escHtml(aiSettings.ollamaUrl)}" style="${inputStyle}">
+        </div>
+        <div id="ai-set-claude-fields">
+          <label style="font-size:12px;display:block;margin-bottom:4px;">Claude API Key</label>
+          <div style="display:flex;gap:6px;margin-bottom:10px;">
+            <input type="password" id="ai-set-claude-key" value="${escHtml(aiSettings.claudeApiKey)}" placeholder="sk-ant-..." style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit;font-size:13px;outline:none;">
+            <button class="ai-key-toggle" data-target="ai-set-claude-key" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:4px;cursor:pointer;font-size:12px;">Show</button>
+          </div>
+        </div>
+        <div id="ai-set-openai-fields">
+          <label style="font-size:12px;display:block;margin-bottom:4px;">OpenAI API Key</label>
+          <div style="display:flex;gap:6px;margin-bottom:10px;">
+            <input type="password" id="ai-set-openai-key" value="${escHtml(aiSettings.openaiApiKey)}" placeholder="sk-..." style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit;font-size:13px;outline:none;">
+            <button class="ai-key-toggle" data-target="ai-set-openai-key" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:4px;cursor:pointer;font-size:12px;">Show</button>
+          </div>
+        </div>
+        <label style="font-size:12px;display:block;margin-bottom:4px;">Model</label>
+        <div style="display:flex;gap:6px;margin-bottom:10px;">
+          <select id="ai-set-model" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit;font-size:13px;outline:none;">
+            ${modelList ? `<option value="${escHtml(modelList)}" selected>${escHtml(modelList)}</option>` : '<option value="">Loading...</option>'}
+          </select>
+          <button id="ai-set-refresh" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:12px;">Refresh</button>
+        </div>
+        <div class="modal-buttons">
+          <button class="cancel">Cancel</button>
+          <button class="primary ok">Save</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    const providerSel = overlay.querySelector('#ai-set-provider');
+    const urlInput = overlay.querySelector('#ai-set-url');
+    const modelSel = overlay.querySelector('#ai-set-model');
+    const refreshBtn = overlay.querySelector('#ai-set-refresh');
+    const ollamaFields = overlay.querySelector('#ai-set-ollama-fields');
+    const claudeFields = overlay.querySelector('#ai-set-claude-fields');
+    const openaiFields = overlay.querySelector('#ai-set-openai-fields');
+
+    // Show/hide toggle for API key fields
+    overlay.querySelectorAll('.ai-key-toggle').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const inp = overlay.querySelector('#' + btn.dataset.target);
+        if (inp.type === 'password') { inp.type = 'text'; btn.textContent = 'Hide'; }
+        else { inp.type = 'password'; btn.textContent = 'Show'; }
+      });
+    });
+
+    function updateFieldVisibility() {
+      const p = providerSel.value;
+      ollamaFields.style.display = (p === 'ollama' || p === 'auto') ? '' : 'none';
+      claudeFields.style.display = (p === 'claude') ? '' : 'none';
+      openaiFields.style.display = (p === 'openai') ? '' : 'none';
+    }
+
+    async function refreshModels() {
+      const provider = providerSel.value;
+      updateFieldVisibility();
+      modelSel.innerHTML = '<option value="">Loading...</option>';
+
+      if (provider === 'claude') {
+        const claudeModels = [
+          'claude-opus-4-20250514',
+          'claude-sonnet-4-20250514',
+          'claude-haiku-4-20250414',
+        ];
+        modelSel.innerHTML = claudeModels.map(m =>
+          `<option value="${escHtml(m)}" ${m === aiSettings.model ? 'selected' : ''}>${escHtml(m)}</option>`
+        ).join('');
+        return;
+      }
+      if (provider === 'openai') {
+        const openaiModels = [
+          'o3', 'o3-mini',
+          'o4-mini',
+          'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano',
+          'gpt-4o', 'gpt-4o-mini',
+        ];
+        modelSel.innerHTML = openaiModels.map(m =>
+          `<option value="${escHtml(m)}" ${m === aiSettings.model ? 'selected' : ''}>${escHtml(m)}</option>`
+        ).join('');
+        return;
+      }
+      if (provider === 'ollama' || provider === 'auto') {
+        try {
+          const r = await fetch(urlInput.value + '/api/tags', { signal: AbortSignal.timeout(3000) });
+          if (r.ok) {
+            const data = await r.json();
+            const models = (data.models || []).map(m => m.name);
+            modelSel.innerHTML = models.map(m =>
+              `<option value="${escHtml(m)}" ${m === aiSettings.model ? 'selected' : ''}>${escHtml(m)}</option>`
+            ).join('') || '<option value="">No models found</option>';
+            return;
+          }
+        } catch {}
+      }
+      if (provider === 'webllm' || provider === 'auto') {
+        const webllmModels = [
+          'Qwen3-8B-q4f16_1-MLC',
+          'Qwen3-4B-q4f16_1-MLC',
+          'Qwen3-1.7B-q4f16_1-MLC',
+          'Qwen3-0.6B-q4f16_1-MLC',
+          'Llama-3.1-8B-Instruct-q4f16_1-MLC',
+          'Llama-3.2-3B-Instruct-q4f16_1-MLC',
+          'Llama-3.2-1B-Instruct-q4f16_1-MLC',
+          'DeepSeek-R1-Distill-Llama-8B-q4f16_1-MLC',
+          'DeepSeek-R1-Distill-Qwen-7B-q4f16_1-MLC',
+          'Phi-3.5-mini-instruct-q4f16_1-MLC',
+          'Mistral-7B-Instruct-v0.3-q4f16_1-MLC',
+          'Hermes-3-Llama-3.1-8B-q4f16_1-MLC',
+          'gemma-2-9b-it-q4f16_1-MLC',
+          'gemma-2-2b-it-q4f16_1-MLC',
+          'Qwen2.5-7B-Instruct-q4f16_1-MLC',
+          'Qwen2.5-3B-Instruct-q4f16_1-MLC',
+          'Qwen2.5-1.5B-Instruct-q4f16_1-MLC',
+          'Qwen2.5-Coder-7B-Instruct-q4f16_1-MLC',
+          'SmolLM2-1.7B-Instruct-q4f16_1-MLC',
+          'SmolLM2-360M-Instruct-q4f16_1-MLC',
+        ];
+        modelSel.innerHTML = webllmModels.map(m =>
+          `<option value="${escHtml(m)}" ${m === aiSettings.model ? 'selected' : ''}>${escHtml(m)}</option>`
+        ).join('');
+        return;
+      }
+      modelSel.innerHTML = '<option value="">No provider available</option>';
+    }
+
+    refreshBtn.addEventListener('click', refreshModels);
+    providerSel.addEventListener('change', () => {
+      // Reset model when switching provider type
+      aiSettings.model = '';
+      refreshModels();
+    });
+    refreshModels();
+
+    const close = (save) => {
+      if (save) {
+        aiSettings.provider = providerSel.value;
+        aiSettings.ollamaUrl = urlInput.value.replace(/\/+$/, '');
+        aiSettings.claudeApiKey = (overlay.querySelector('#ai-set-claude-key').value || '').trim();
+        aiSettings.openaiApiKey = (overlay.querySelector('#ai-set-openai-key').value || '').trim();
+        aiSettings.model = modelSel.value;
+        saveAISettings();
+        _webllmEngine = null; // Reset engine on settings change
+        detectAIProvider();
+      }
+      overlay.remove();
+    };
+    overlay.querySelector('.cancel').addEventListener('click', () => close(false));
+    overlay.querySelector('.ok').addEventListener('click', () => close(true));
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
+  }
+
+  function setupAI() {
+    setupConsoleTabs();
+    document.getElementById('ai-settings-btn').addEventListener('click', showAISettings);
   }
 
   // ---- Public API ----
@@ -2525,6 +3480,7 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
     executeQuery,
     cancelQuery,
     clearConsole,
+    runConsole,
     layoutTileH,
     layoutTileV,
     layoutGrid,

@@ -21,6 +21,7 @@ Single-page app with three core files:
 - **SheetJS (XLSX)** — Excel file reading/writing
 - **JSZip** — ZIP archive support
 - **pako** — Gzip compression/decompression
+- **@mlc-ai/web-llm** — In-browser LLM inference via WebGPU (loaded dynamically)
 
 ### Data flow
 
@@ -91,3 +92,8 @@ Version is in `pyproject.toml`.
 - Table and column names are sanitized to `[a-zA-Z0-9_]` for SQL compatibility
 - SQL identifiers use bracket-quoting (`[tableName]`) to handle edge cases
 - SELECT INTO is intercepted and handled manually (SQLite doesn't support it natively)
+- AI analysis (experimental) uses a SQL tool-use loop: the AI writes SQL in ```sql code blocks, which are executed against SQLite and results fed back (up to 5 rounds)
+- AI providers: WebLLM (default, in-browser via WebGPU), Ollama (local), Claude (cloud), OpenAI (cloud)
+- AI settings (provider, model, API keys) are persisted in localStorage under `csvsql_ai_settings`
+- AI conversation history is kept in-memory (`_aiConversation` array) and cleared with the console
+- AI prompt history (Up/Down arrow) is in-memory only, not persisted across sessions

@@ -19,6 +19,7 @@ A browser-based CSV database application. Open CSV, Excel, and compressed files 
 - **Open from URL** — Load data files from any HTTP/HTTPS URL
 - **Save** — Write directly back to the original file (Chrome/Edge) or download. Save As supports CSV, TSV, PSV, Excel, Gzip, and ZIP formats
 - **Virtual scrolling** — Handles large datasets efficiently
+- **AI analysis** *(experimental)* — Natural language data analysis with automatic SQL query execution. Supports WebLLM (in-browser), Ollama (local), Claude, and OpenAI
 
 ## Installation
 
@@ -125,6 +126,23 @@ INSERT, UPDATE, DELETE, ALTER TABLE, and DROP TABLE all work. Changes to existin
 
 <!-- ![SQL Console](screenshots/sql-console.png) -->
 
+### AI Analysis *(experimental)*
+
+The AI tab lets you analyze data using natural language. The AI automatically writes and executes SQL queries against your full dataset, so it works with tables of any size.
+
+**Providers:**
+
+| Provider | Type | Setup |
+|----------|------|-------|
+| WebLLM (default) | In-browser | No setup — runs via WebGPU in Chrome/Edge 113+ |
+| Ollama | Local | Install from [ollama.com](https://ollama.com), run `ollama pull llama3.2` |
+| Claude | Cloud | API key from [console.anthropic.com](https://console.anthropic.com) |
+| OpenAI | Cloud | API key from [platform.openai.com](https://platform.openai.com) |
+
+Type a question and press **Enter** to send. Use **Shift+Enter** for multiline prompts and **Up/Down** arrows for prompt history. Click the gear icon to configure provider, model, and API keys.
+
+The AI receives column statistics and sample rows, then writes SQL queries to get exact answers. Queries are executed automatically and results fed back for up to 5 rounds of analysis.
+
 ### Saving Files
 
 - **Save** (Ctrl+S / Cmd+S) — Writes directly back to the original file on Chrome/Edge (via File System Access API). On Firefox, triggers a download
@@ -152,6 +170,9 @@ INSERT, UPDATE, DELETE, ALTER TABLE, and DROP TABLE all work. Changes to existin
 | Ctrl+N / Cmd+N | New table |
 | Ctrl+W / Cmd+W | Close window |
 | Ctrl+Enter / Cmd+Enter | Execute SQL query |
+| Enter (AI tab) | Send AI prompt |
+| Shift+Enter (AI tab) | Newline in AI prompt |
+| Up / Down (AI tab) | AI prompt history |
 | Tab / Shift+Tab | Navigate between cells |
 | Enter | Move to next row |
 | Escape | Cancel cell edit |

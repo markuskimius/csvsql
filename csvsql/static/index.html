@@ -58,16 +58,32 @@
   <div id="console-panel">
     <div id="console-resize-handle"></div>
     <div id="console-header">
-      <span>SQL Console</span>
+      <div id="console-tabs">
+        <button class="console-tab active" data-tab="sql">SQL</button>
+        <button class="console-tab" data-tab="ai">AI <span style="font-size:9px;opacity:0.6;">(experimental)</span></button>
+      </div>
       <div id="console-actions">
-        <button onclick="app.executeQuery()" title="Execute (Ctrl+Enter)">Run</button>
+        <button onclick="app.runConsole()" title="Execute (Ctrl+Enter)">Run</button>
         <button onclick="app.clearConsole()" title="Clear">Clear</button>
       </div>
     </div>
     <div id="console-body">
       <textarea id="sql-input" placeholder="SELECT * FROM tablename WHERE ..." spellcheck="false"></textarea>
-      <div id="console-status"></div>
     </div>
+    <div id="ai-body" style="display:none">
+      <div id="ai-controls">
+        <label for="ai-table-select" id="ai-table-label">Tables:</label>
+        <select id="ai-table-select" multiple title="Select tables to include in analysis (all included by default)"></select>
+        <button id="ai-settings-btn" title="AI Settings">&#9881;</button>
+        <span id="ai-provider-badge"></span>
+      </div>
+      <div id="ai-response"></div>
+      <div id="ai-input-row">
+        <textarea id="ai-input" placeholder="Ask about your data..." spellcheck="false" rows="2"></textarea>
+        <button id="ai-send-btn" onclick="app.runConsole()" title="Send (Ctrl+Enter)">&#9654;</button>
+      </div>
+    </div>
+    <div id="console-status"></div>
   </div>
 
   <input type="file" id="file-input" accept=".csv,.tsv,.psv,.txt,.xlsx,.xls,.gz,.zip,.bz2,.xz,.rar,.7z,.zst" multiple style="display:none">
