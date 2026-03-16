@@ -2690,6 +2690,9 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
     if (tab === 'ai') {
       populateTableSelect();
       detectAIProvider();
+      document.getElementById('ai-input').focus();
+    } else {
+      document.getElementById('sql-input').focus();
     }
   }
 
