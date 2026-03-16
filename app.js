@@ -65,6 +65,10 @@ const app = (() => {
     });
   }
 
+  function isImageFile(file) {
+    return file && (file.type.startsWith('image/') || /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(file.name));
+  }
+
   function setupDragAndDrop() {
     const overlay = document.getElementById('drop-overlay');
     let dragCounter = 0;
@@ -84,6 +88,12 @@ const app = (() => {
       }
     });
 
+    // Highlight AI panel when hovering over it during a drag
+    const aiBody = document.getElementById('ai-body');
+    let aiDragCounter = 0;
+    aiBody.addEventListener('dragenter', () => { aiDragCounter++; aiBody.classList.add('ai-drag-over'); });
+    aiBody.addEventListener('dragleave', () => { aiDragCounter--; if (aiDragCounter <= 0) { aiDragCounter = 0; aiBody.classList.remove('ai-drag-over'); } });
+
     document.addEventListener('dragover', (e) => {
       e.preventDefault();
     });
@@ -91,7 +101,20 @@ const app = (() => {
     document.addEventListener('drop', async (e) => {
       e.preventDefault();
       dragCounter = 0;
+      aiDragCounter = 0;
       overlay.classList.remove('visible');
+      aiBody.classList.remove('ai-drag-over');
+
+      // If dropped on AI panel and files are images, handle as AI image upload
+      if (aiBody && aiBody.style.display !== 'none' && aiBody.contains(e.target)) {
+        const files = [...e.dataTransfer.files];
+        const images = files.filter(isImageFile);
+        if (images.length > 0) {
+          for (const img of images) addAIImage(img);
+          return;
+        }
+      }
+
       closeMenus();
       const entries = [...e.dataTransfer.items].map(item => ({
         file: item.getAsFile(),
@@ -2308,6 +2331,8 @@ const app = (() => {
       document.getElementById('ai-response').innerHTML = '';
       document.getElementById('ai-input').value = '';
       _aiConversation = [];
+      _aiImages = {};
+      renderImageThumbs();
     } else {
       document.getElementById('sql-input').value = '';
     }
@@ -2515,7 +2540,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.8.1 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.9.0 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -2648,6 +2673,16 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 </ul>
 <p><strong>Usage:</strong> Switch to the AI tab, select one or more tables, type your question, and press <code>Enter</code> or click Run. Use <code>Shift+Enter</code> for multiline prompts. Press <code>Up</code>/<code>Down</code> arrow to recall previous prompts.</p>
 <p><strong>How it works:</strong> The AI receives column statistics and sample rows for context, then writes SQL queries in <code>\`\`\`sql</code> code blocks. These queries are executed automatically against the full dataset, and the results are fed back to the AI for analysis. This loop repeats (up to 5 rounds) until the AI has enough data to answer.</p>
+
+<h4>Rich AI Output</h4>
+<p>The AI can produce rich output beyond plain text:</p>
+<ul>
+<li><strong>Charts:</strong> Ask for a chart or visualization and the AI will render an interactive Chart.js chart inline. Example: &ldquo;show me a bar chart of sales by region&rdquo;</li>
+<li><strong>Formatted tables:</strong> Ask for a formatted table and the AI will render a styled HTML table. Example: &ldquo;show the top 10 rows as a table&rdquo;</li>
+<li><strong>PDF reports:</strong> Ask for a PDF or report and the AI will generate a downloadable PDF file. PDFs can include text, tables, embedded charts, and images. Example: &ldquo;generate a PDF report with charts and summary statistics&rdquo;</li>
+</ul>
+<p><strong>Images:</strong> Drag and drop PNG or JPG images onto the AI chat area to upload them. Uploaded images appear as thumbnails above the input field and can be included in PDF reports (e.g., as a logo). Click &times; to remove an image.</p>
+<p>The AI queries your data with SQL first, then uses the results to build the rich output. Chart.js and jsPDF libraries are loaded on demand when first needed.</p>
 <p>Click the gear icon &#9881; to configure the provider, model, and API keys.</p>
     `);
   }
@@ -2657,6 +2692,7 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
   let _aiAbort = null;
   let _webllmEngine = null;
   let _aiConversation = []; // accumulated user/assistant message history
+  let _aiImages = {};       // name -> data URL for images dropped into AI chat
 
   let aiSettings = JSON.parse(localStorage.getItem('csvsql_ai_settings') || 'null') || {
     provider: 'webllm',
@@ -2950,11 +2986,78 @@ Smaller models, runs entirely in the browser — no install needed.<br>
     return parts.join('\n---\n');
   }
 
+  // Rich block system prompt instructions
+  const _richBlockPrompt = `RICH OUTPUT — IMPORTANT:
+When the user asks for a chart, visualization, formatted table, or PDF/report, you MUST output special code blocks. These blocks are rendered automatically — do NOT describe or explain the JSON, just output the block.
+
+CHART — use the language tag "chart" (NOT "json"):
+\`\`\`chart
+{"type":"bar","data":{"labels":["A","B","C"],"datasets":[{"label":"Sales","data":[10,20,30]}]}}
+\`\`\`
+Supported chart types: bar, line, pie, doughnut, radar, polarArea, scatter, bubble. The JSON must be a valid Chart.js configuration object with "type" and "data" keys. Always include real data from your SQL query results. Do NOT use JavaScript functions or callbacks anywhere in the config — only plain JSON values (strings, numbers, booleans, arrays, objects, null).
+
+TABLE — use the language tag "table" (NOT "json"):
+\`\`\`table
+{"columns":["Name","Value"],"rows":[{"Name":"Alice","Value":"100"},{"Name":"Bob","Value":"200"}]}
+\`\`\`
+The JSON must have "columns" (array of strings) and "rows" (array of objects keyed by column name). Use this for nicely formatted data tables.
+
+PDF — use the language tag "pdf" (NOT "json"):
+\`\`\`pdf
+{"filename":"report.pdf","title":"My Report","content":[{"type":"heading","value":"Summary"},{"type":"text","value":"Total revenue was $1.2M."},{"type":"table","columns":["Product","Revenue"],"rows":[{"Product":"A","Revenue":"$500K"}]}]}
+\`\`\`
+Content block types: "heading", "text", "table", "chart", and "image". For chart blocks, include a "chart" key with a Chart.js config object. For image blocks, include a "name" key matching an uploaded image filename (e.g. {"type":"image","name":"logo.png"}). This generates a downloadable PDF file.
+
+CRITICAL RULES:
+- The code fence language MUST be chart, table, or pdf — never use json, javascript, or other languages for these blocks.
+- Output ONLY valid JSON inside the block — no comments, no markdown, no extra text.
+- Query the data with SQL first, then use the actual results to populate the rich block.
+- You can combine rich blocks with regular text explanations.`;
+
+  // Build image context for system prompt
+  function _aiImageContext() {
+    const names = Object.keys(_aiImages);
+    if (names.length === 0) return '';
+    return `\nIMAGES — The user has uploaded these images: ${names.join(', ')}
+To include an image in a PDF, add a content block: {"type":"image","name":"filename.png"}
+You can optionally set "width" (in PDF points, max is page width). Reference images by their exact filename.`;
+  }
+
+  // Lazy CDN script loader
+  const _loadedScripts = {};
+  function loadScript(url) {
+    if (_loadedScripts[url]) return _loadedScripts[url];
+    _loadedScripts[url] = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = url;
+      s.onload = resolve;
+      s.onerror = () => reject(new Error('Failed to load ' + url));
+      document.head.appendChild(s);
+    });
+    return _loadedScripts[url];
+  }
+
+  async function ensureChartJs() {
+    if (typeof Chart === 'undefined') {
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js');
+    }
+  }
+
+  async function ensureJsPDF() {
+    if (typeof jspdf === 'undefined') {
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.4/jspdf.plugin.autotable.min.js');
+    }
+  }
+
   // Format AI response text with basic markdown
   function formatAIResponse(text) {
     let html = escHtml(text);
-    // Code blocks: ```...```
-    html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => '<pre>' + code.trim() + '</pre>');
+    // Code blocks: ```...``` — tag rich blocks with CSS classes for post-processing
+    html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+      const cls = ['chart','table','pdf'].includes(lang) ? ` class="ai-block-${lang}"` : '';
+      return `<pre${cls}>` + code.trim() + '</pre>';
+    });
     // Inline code
     html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
     // Bold
@@ -2962,8 +3065,286 @@ Smaller models, runs entirely in the browser — no install needed.<br>
     // Newlines (but not inside pre tags)
     html = html.replace(/\n/g, '<br>');
     // Clean up <br> inside <pre>
-    html = html.replace(/<pre>([\s\S]*?)<\/pre>/g, (_, code) => '<pre>' + code.replace(/<br>/g, '\n') + '</pre>');
+    html = html.replace(/<pre([^>]*)>([\s\S]*?)<\/pre>/g, (_, attrs, code) => '<pre' + attrs + '>' + code.replace(/<br>/g, '\n') + '</pre>');
     return html;
+  }
+
+  // Apply dark theme defaults to Chart.js config
+  function applyChartDefaults(config) {
+    const colors = {
+      text: '#e0e0f0',
+      grid: '#444466',
+      bg: '#2a2a3d',
+    };
+    if (!config.options) config.options = {};
+    config.options.responsive = true;
+    config.options.maintainAspectRatio = false;
+    if (!config.options.plugins) config.options.plugins = {};
+    if (!config.options.plugins.legend) config.options.plugins.legend = {};
+    if (!config.options.plugins.legend.labels) config.options.plugins.legend.labels = {};
+    config.options.plugins.legend.labels.color = colors.text;
+    if (!config.options.plugins.title) config.options.plugins.title = {};
+    config.options.plugins.title.color = colors.text;
+    if (!config.options.scales) config.options.scales = {};
+    for (const axis of ['x', 'y']) {
+      if (!config.options.scales[axis]) config.options.scales[axis] = {};
+      if (!config.options.scales[axis].ticks) config.options.scales[axis].ticks = {};
+      config.options.scales[axis].ticks.color = colors.text;
+      if (!config.options.scales[axis].grid) config.options.scales[axis].grid = {};
+      config.options.scales[axis].grid.color = colors.grid;
+    }
+    // Default color palette if not specified
+    if (config.data && config.data.datasets) {
+      const palette = ['#7c6ff7','#55cc88','#e05577','#f0a050','#50b0f0','#cc77dd','#77ddaa','#ddaa55'];
+      config.data.datasets.forEach((ds, i) => {
+        if (!ds.backgroundColor) ds.backgroundColor = palette[i % palette.length];
+        if (!ds.borderColor) ds.borderColor = palette[i % palette.length];
+      });
+    }
+    return config;
+  }
+
+  // Detect rich block type from JSON structure
+  function detectRichBlockType(obj) {
+    if (obj && obj.type && obj.data && obj.data.datasets) return 'chart';
+    if (obj && obj.columns && obj.rows && Array.isArray(obj.columns)) return 'table';
+    if (obj && obj.content && Array.isArray(obj.content)) return 'pdf';
+    return null;
+  }
+
+  // Extract JSON object from text that may have leading/trailing non-JSON content
+  function extractJSON(text) {
+    text = text.trim();
+    const start = text.indexOf('{');
+    if (start < 0) return null;
+    // Find matching closing brace, respecting strings
+    let depth = 0;
+    let inStr = false;
+    let esc = false;
+    for (let i = start; i < text.length; i++) {
+      const ch = text[i];
+      if (esc) { esc = false; continue; }
+      if (ch === '\\' && inStr) { esc = true; continue; }
+      if (ch === '"') { inStr = !inStr; continue; }
+      if (inStr) continue;
+      if (ch === '{') depth++;
+      else if (ch === '}') { depth--; if (depth === 0) return text.slice(start, i + 1); }
+    }
+    return null;
+  }
+
+  // Strip JS function expressions from a JSON-like string so JSON.parse can handle it
+  function sanitizeChartJSON(text) {
+    // Find each "function" keyword and replace through its matching closing brace with null
+    let result = '';
+    let i = 0;
+    while (i < text.length) {
+      const funcIdx = text.indexOf('function', i);
+      if (funcIdx < 0) { result += text.slice(i); break; }
+      result += text.slice(i, funcIdx);
+      // Find opening brace of function body
+      let j = text.indexOf('{', funcIdx);
+      if (j < 0) { result += text.slice(funcIdx); break; }
+      // Match braces to find end
+      let depth = 0;
+      let k = j;
+      for (; k < text.length; k++) {
+        if (text[k] === '{') depth++;
+        else if (text[k] === '}') { depth--; if (depth === 0) break; }
+      }
+      result += 'null';
+      i = k + 1;
+    }
+    return result;
+  }
+
+  // Show error inline when a rich block fails to render
+  function showBlockError(pre, type, err) {
+    console.warn(`AI ${type} block error:`, err);
+    const msg = document.createElement('div');
+    msg.style.cssText = 'color:var(--danger);font-size:11px;margin:4px 0;';
+    msg.textContent = `Failed to render ${type}: ${err.message}`;
+    pre.after(msg);
+  }
+
+  // Post-process AI rich blocks (chart, table, pdf) after streaming completes
+  async function postProcessAIBlocks(bubbleEl) {
+    // Fallback: check unclassed pre blocks for JSON that looks like rich content
+    for (const pre of bubbleEl.querySelectorAll('pre:not([class])')) {
+      try {
+        const jsonStr = extractJSON(pre.textContent);
+        if (!jsonStr) continue;
+        const obj = JSON.parse(jsonStr);
+        const type = detectRichBlockType(obj);
+        if (type) pre.classList.add('ai-block-' + type);
+      } catch {}
+    }
+
+    // Process table blocks
+    for (const pre of [...bubbleEl.querySelectorAll('pre.ai-block-table')]) {
+      try {
+        const jsonStr = extractJSON(pre.textContent);
+        if (!jsonStr) continue;
+        const data = JSON.parse(jsonStr);
+        if (!data.columns || !data.rows) continue;
+        const table = document.createElement('table');
+        table.className = 'ai-inline-table';
+        const thead = document.createElement('thead');
+        const headerRow = document.createElement('tr');
+        for (const col of data.columns) {
+          const th = document.createElement('th');
+          th.textContent = col;
+          headerRow.appendChild(th);
+        }
+        thead.appendChild(headerRow);
+        table.appendChild(thead);
+        const tbody = document.createElement('tbody');
+        for (const row of data.rows) {
+          const tr = document.createElement('tr');
+          for (const col of data.columns) {
+            const td = document.createElement('td');
+            td.textContent = row[col] ?? '';
+            tr.appendChild(td);
+          }
+          tbody.appendChild(tr);
+        }
+        table.appendChild(tbody);
+        pre.replaceWith(table);
+      } catch (e) { showBlockError(pre, 'table', e); }
+    }
+
+    // Process chart blocks
+    for (const pre of [...bubbleEl.querySelectorAll('pre.ai-block-chart')]) {
+      try {
+        const jsonStr = extractJSON(pre.textContent);
+        if (!jsonStr) continue;
+        const config = JSON.parse(sanitizeChartJSON(jsonStr));
+        await ensureChartJs();
+        applyChartDefaults(config);
+        const container = document.createElement('div');
+        container.className = 'ai-chart-container';
+        const canvas = document.createElement('canvas');
+        container.appendChild(canvas);
+        pre.replaceWith(container);
+        new Chart(canvas, config);
+      } catch (e) { showBlockError(pre, 'chart', e); }
+    }
+
+    // Process PDF blocks
+    for (const pre of [...bubbleEl.querySelectorAll('pre.ai-block-pdf')]) {
+      try {
+        const jsonStr = extractJSON(pre.textContent);
+        if (!jsonStr) continue;
+        const spec = JSON.parse(jsonStr);
+        await ensureJsPDF();
+        const doc = new jspdf.jsPDF();
+        let y = 20;
+        if (spec.title) {
+          doc.setFontSize(18);
+          doc.text(spec.title, 14, y);
+          y += 12;
+        }
+        if (spec.content) {
+          for (const block of spec.content) {
+            if (block.type === 'text') {
+              doc.setFontSize(block.fontSize || 12);
+              const lines = doc.splitTextToSize(block.value || '', 180);
+              doc.text(lines, 14, y);
+              y += lines.length * (block.fontSize || 12) * 0.5 + 4;
+            } else if (block.type === 'heading') {
+              doc.setFontSize(block.fontSize || 14);
+              doc.text(block.value || '', 14, y);
+              y += 10;
+            } else if (block.type === 'table' && block.columns && block.rows) {
+              doc.autoTable({
+                startY: y,
+                head: [block.columns],
+                body: block.rows.map(r => block.columns.map(c => String(r[c] ?? ''))),
+                theme: 'grid',
+                headStyles: { fillColor: [124, 111, 247] },
+                styles: { fontSize: 9 },
+              });
+              y = doc.lastAutoTable.finalY + 8;
+            } else if (block.type === 'chart' && block.chart) {
+              await ensureChartJs();
+              const chartConfig = JSON.parse(sanitizeChartJSON(
+                typeof block.chart === 'string' ? block.chart : JSON.stringify(block.chart)
+              ));
+              // Render chart on offscreen canvas
+              const offCanvas = document.createElement('canvas');
+              offCanvas.width = block.width || 600;
+              offCanvas.height = block.height || 300;
+              // White background for PDF readability
+              const ctx2d = offCanvas.getContext('2d');
+              ctx2d.fillStyle = '#ffffff';
+              ctx2d.fillRect(0, 0, offCanvas.width, offCanvas.height);
+              // Override colors for light-background PDF
+              if (!chartConfig.options) chartConfig.options = {};
+              chartConfig.options.responsive = false;
+              chartConfig.options.animation = false;
+              const pdfColors = { text: '#333333', grid: '#cccccc' };
+              if (!chartConfig.options.scales) chartConfig.options.scales = {};
+              for (const axis of ['x', 'y']) {
+                if (!chartConfig.options.scales[axis]) chartConfig.options.scales[axis] = {};
+                if (!chartConfig.options.scales[axis].ticks) chartConfig.options.scales[axis].ticks = {};
+                chartConfig.options.scales[axis].ticks.color = pdfColors.text;
+                if (!chartConfig.options.scales[axis].grid) chartConfig.options.scales[axis].grid = {};
+                chartConfig.options.scales[axis].grid.color = pdfColors.grid;
+              }
+              if (!chartConfig.options.plugins) chartConfig.options.plugins = {};
+              if (!chartConfig.options.plugins.legend) chartConfig.options.plugins.legend = {};
+              if (!chartConfig.options.plugins.legend.labels) chartConfig.options.plugins.legend.labels = {};
+              chartConfig.options.plugins.legend.labels.color = pdfColors.text;
+              const chart = new Chart(offCanvas, chartConfig);
+              const imgData = offCanvas.toDataURL('image/png');
+              chart.destroy();
+              // Fit chart image to page width
+              const pageW = doc.internal.pageSize.getWidth() - 28;
+              const aspect = offCanvas.height / offCanvas.width;
+              const imgH = pageW * aspect;
+              if (y + imgH > doc.internal.pageSize.getHeight() - 20) {
+                doc.addPage();
+                y = 20;
+              }
+              doc.addImage(imgData, 'PNG', 14, y, pageW, imgH);
+              y += imgH + 8;
+            } else if (block.type === 'image' && block.name) {
+              const dataUrl = _aiImages[block.name];
+              if (dataUrl) {
+                // Load image to get dimensions
+                const img = await new Promise((res, rej) => {
+                  const im = new Image();
+                  im.onload = () => res(im);
+                  im.onerror = () => rej(new Error('Failed to load image: ' + block.name));
+                  im.src = dataUrl;
+                });
+                const format = dataUrl.startsWith('data:image/png') ? 'PNG' : 'JPEG';
+                const pageW = doc.internal.pageSize.getWidth() - 28;
+                const maxW = block.width || pageW;
+                const w = Math.min(maxW, pageW);
+                const aspect = img.naturalHeight / img.naturalWidth;
+                const h = w * aspect;
+                if (y + h > doc.internal.pageSize.getHeight() - 20) {
+                  doc.addPage();
+                  y = 20;
+                }
+                doc.addImage(dataUrl, format, 14, y, w, h);
+                y += h + 8;
+              }
+            }
+          }
+        }
+        const blob = doc.output('blob');
+        const url = URL.createObjectURL(blob);
+        const filename = spec.filename || 'report.pdf';
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        link.className = 'ai-pdf-download';
+        link.textContent = 'Download ' + filename;
+        pre.replaceWith(link);
+      } catch (e) { showBlockError(pre, 'PDF', e); }
+    }
   }
 
   // Run AI analysis
@@ -3016,9 +3397,15 @@ Example — if the user asks "what are the top 5 products by revenue?", write:
 SELECT [product], SUM([revenue]) as total FROM [sales] GROUP BY [product] ORDER BY total DESC LIMIT 5
 \`\`\`
 
+${_richBlockPrompt}
+${_aiImageContext()}
+
 ${dataContext}`;
     } else {
-      systemPrompt = `You are a helpful assistant. No data tables are currently loaded. Answer the user's question to the best of your ability. If the user asks about data analysis, let them know they can open CSV, Excel, or other data files to analyze.`;
+      systemPrompt = `You are a helpful assistant. No data tables are currently loaded. Answer the user's question to the best of your ability. If the user asks about data analysis, let them know they can open CSV, Excel, or other data files to analyze.
+
+${_richBlockPrompt}
+${_aiImageContext()}`;
     }
 
     // Append user message bubble
@@ -3086,6 +3473,9 @@ ${dataContext}`;
         }
 
         _aiConversation.push({ role: 'assistant', content: fullText });
+
+        // Post-process rich blocks (charts, tables, PDFs)
+        await postProcessAIBlocks(aiBubble);
 
         // Extract SQL blocks and execute them
         const sqlBlocks = [];
@@ -3477,6 +3867,47 @@ ${dataContext}`;
     overlay.querySelector('.cancel').addEventListener('click', () => close(false));
     overlay.querySelector('.ok').addEventListener('click', () => close(true));
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
+  }
+
+  // Render image thumbnails in the AI input area
+  function renderImageThumbs() {
+    let strip = document.getElementById('ai-image-strip');
+    if (!strip) {
+      strip = document.createElement('div');
+      strip.id = 'ai-image-strip';
+      const inputRow = document.getElementById('ai-input-row');
+      inputRow.parentNode.insertBefore(strip, inputRow);
+    }
+    const names = Object.keys(_aiImages);
+    if (names.length === 0) { strip.innerHTML = ''; strip.style.display = 'none'; return; }
+    strip.style.display = '';
+    strip.innerHTML = '';
+    for (const name of names) {
+      const thumb = document.createElement('div');
+      thumb.className = 'ai-image-thumb';
+      thumb.innerHTML = `<img src="${_aiImages[name]}" alt="${escHtml(name)}" title="${escHtml(name)}"><span class="ai-image-name">${escHtml(name)}</span><button class="ai-image-remove" title="Remove">&times;</button>`;
+      thumb.querySelector('.ai-image-remove').addEventListener('click', () => {
+        delete _aiImages[name];
+        renderImageThumbs();
+      });
+      strip.appendChild(thumb);
+    }
+  }
+
+  // Read an image file and add to _aiImages
+  function addAIImage(file) {
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (!['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'].includes(ext)) {
+      setAIStatus('Unsupported image format: .' + ext, 'error');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      _aiImages[file.name] = reader.result;
+      renderImageThumbs();
+      setAIStatus(`Image "${file.name}" added`, 'success');
+    };
+    reader.readAsDataURL(file);
   }
 
   function setupAI() {

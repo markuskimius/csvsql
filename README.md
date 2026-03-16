@@ -19,7 +19,7 @@ A browser-based CSV database application. Open CSV, Excel, and compressed files 
 - **Open from URL** — Load data files from any HTTP/HTTPS URL
 - **Save** — Write directly back to the original file (Chrome/Edge) or download. Save As supports CSV, TSV, PSV, Excel, Gzip, and ZIP formats
 - **Virtual scrolling** — Handles large datasets efficiently
-- **AI analysis** *(experimental)* — Natural language data analysis with automatic SQL query execution. Supports WebLLM (in-browser), Ollama (local), Claude, and OpenAI
+- **AI analysis** *(experimental)* — Natural language data analysis with automatic SQL query execution, inline charts, formatted tables, and PDF report generation. Supports WebLLM (in-browser), Ollama (local), Claude, and OpenAI
 
 ## Installation
 
@@ -142,6 +142,8 @@ The AI tab lets you analyze data using natural language. The AI automatically wr
 Type a question and press **Enter** to send. Use **Shift+Enter** for multiline prompts and **Up/Down** arrows for prompt history. Click the gear icon to configure provider, model, and API keys.
 
 The AI receives column statistics and sample rows, then writes SQL queries to get exact answers. Queries are executed automatically and results fed back for up to 5 rounds of analysis.
+
+**Rich output:** The AI can render inline charts (Chart.js), formatted tables, and downloadable PDF reports. Ask for a visualization, a formatted table, or a PDF report and it will appear inline in the chat. Chart.js and jsPDF are loaded on demand when first needed. Drag and drop images (PNG, JPG) onto the AI chat area to upload them for inclusion in PDF reports (e.g., company logos).
 
 ### Saving Files
 

@@ -93,6 +93,8 @@ Version is in `pyproject.toml`.
 - SQL identifiers use bracket-quoting (`[tableName]`) to handle edge cases
 - SELECT INTO is intercepted and handled manually (SQLite doesn't support it natively)
 - AI analysis (experimental) uses a SQL tool-use loop: the AI writes SQL in ```sql code blocks, which are executed against SQLite and results fed back (up to 5 rounds). AI can also be used without any tables loaded (general chat mode)
+- AI rich output: ```chart (Chart.js config JSON), ```table (columns/rows JSON), ```pdf (document spec JSON) blocks are post-processed into inline charts, HTML tables, and PDF download links. Chart.js and jsPDF are lazy-loaded via CDN on first use. PDFs support text, heading, table, chart, and image content blocks
+- AI images: users can drag-and-drop PNG/JPG images onto the AI chat area. Stored in `_aiImages` (name → data URL). Available for inclusion in PDF reports via `{"type":"image","name":"filename.png"}`. Image drop on AI panel is intercepted before the global file-open drop handler
 - AI providers: WebLLM (default, in-browser via WebGPU), Ollama (local), Claude (cloud), OpenAI (cloud)
 - AI settings (provider, model, API keys) are persisted in localStorage under `csvsql_ai_settings`
 - AI conversation history is kept in-memory (`_aiConversation` array) and cleared with the console
