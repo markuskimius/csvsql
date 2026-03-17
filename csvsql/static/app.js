@@ -975,7 +975,10 @@ const app = (() => {
 
     document.addEventListener('mousemove', (e) => {
       if (!dragging) return;
-      const dx = e.clientX - startX, dy = e.clientY - startY;
+      const area = document.getElementById('window-area').getBoundingClientRect();
+      const cx = Math.max(area.left, Math.min(e.clientX, area.right));
+      const cy = Math.max(area.top, Math.min(e.clientY, area.bottom));
+      const dx = cx - startX, dy = cy - startY;
       if (Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
       win.el.style.left = (origX + dx) + 'px';
       win.el.style.top = (origY + dy) + 'px';
@@ -1014,8 +1017,11 @@ const app = (() => {
 
       document.addEventListener('mousemove', (e) => {
         if (!resizing) return;
-        const dx = e.clientX - startX;
-        const dy = e.clientY - startY;
+        const area = document.getElementById('window-area').getBoundingClientRect();
+        const cx = Math.max(area.left, Math.min(e.clientX, area.right));
+        const cy = Math.max(area.top, Math.min(e.clientY, area.bottom));
+        const dx = cx - startX;
+        const dy = cy - startY;
         if (resizeR) win.el.style.width = Math.max(280, origW + dx) + 'px';
         if (resizeB) win.el.style.height = Math.max(160, origH + dy) + 'px';
         if (resizeL) {
@@ -2676,7 +2682,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.9.1 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.9.2 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
