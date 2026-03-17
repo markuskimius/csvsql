@@ -975,7 +975,10 @@ const app = (() => {
 
     document.addEventListener('mousemove', (e) => {
       if (!dragging) return;
-      const dx = e.clientX - startX, dy = e.clientY - startY;
+      const area = document.getElementById('window-area').getBoundingClientRect();
+      const cx = Math.max(area.left, Math.min(e.clientX, area.right));
+      const cy = Math.max(area.top, Math.min(e.clientY, area.bottom));
+      const dx = cx - startX, dy = cy - startY;
       if (Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
       win.el.style.left = (origX + dx) + 'px';
       win.el.style.top = (origY + dy) + 'px';
@@ -1014,8 +1017,11 @@ const app = (() => {
 
       document.addEventListener('mousemove', (e) => {
         if (!resizing) return;
-        const dx = e.clientX - startX;
-        const dy = e.clientY - startY;
+        const area = document.getElementById('window-area').getBoundingClientRect();
+        const cx = Math.max(area.left, Math.min(e.clientX, area.right));
+        const cy = Math.max(area.top, Math.min(e.clientY, area.bottom));
+        const dx = cx - startX;
+        const dy = cy - startY;
         if (resizeR) win.el.style.width = Math.max(280, origW + dx) + 'px';
         if (resizeB) win.el.style.height = Math.max(160, origH + dy) + 'px';
         if (resizeL) {
