@@ -27,19 +27,24 @@ const app = (() => {
   // Excel group counter — tables from the same workbook share an excelGroupId
   let nextExcelGroupId = 1;
 
+  function registerDBFunctions() {
+    db.create_function('regexp', (pattern, value) => {
+      try { return new RegExp(pattern, 'i').test(value) ? 1 : 0; } catch (_) { return 0; }
+    });
+  }
+
   // ---- Init ----
   async function init() {
     const SQL = await initSqlJs({
       locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${file}`
     });
     db = new SQL.Database();
-    db.create_function('regexp', (pattern, value) => {
-      try { return new RegExp(pattern, 'i').test(value) ? 1 : 0; } catch (_) { return 0; }
-    });
+    registerDBFunctions();
     setupConsoleResize();
     setupFileInput();
     setupDragAndDrop();
     setupKeyboard();
+    setupSQLHighlight();
     setupMenuClose();
     setupAI();
     setupBrowserResize();
@@ -1305,15 +1310,34 @@ const app = (() => {
     toolbar.className = 'win-toolbar';
     toolbar.innerHTML = `
       <label>Filter:</label>
-      <input type="text" class="filter-input" placeholder="WHERE clause, e.g. age > 30 AND name LIKE '%Smith%'" value="${escHtml(win.filterText)}">
+      <input type="text" class="filter-input" placeholder="WHERE clause, e.g. age > 30 AND name LIKE '%Smith%'" value="${escHtml(win.filterText)}" spellcheck="false">
       <button class="btn-add-row">+ Row</button>
       <button class="btn-add-col">+ Col</button>
     `;
     body.appendChild(toolbar);
 
     const filterInput = toolbar.querySelector('.filter-input');
+
+    // Wrap filter input with highlight overlay
+    const filterWrap = document.createElement('div');
+    filterWrap.className = 'filter-highlight-wrap';
+    const filterOverlay = document.createElement('div');
+    filterOverlay.className = 'filter-highlight';
+    filterOverlay.setAttribute('aria-hidden', 'true');
+    filterInput.parentNode.insertBefore(filterWrap, filterInput);
+    filterWrap.appendChild(filterOverlay);
+    filterWrap.appendChild(filterInput);
+    function updateFilterHighlight() {
+      filterOverlay.innerHTML = sqlHighlightHTML(filterInput.value);
+    }
+    if (win.filterText) updateFilterHighlight();
+    filterInput.addEventListener('scroll', () => {
+      filterOverlay.scrollLeft = filterInput.scrollLeft;
+    });
+
     let filterTimeout;
     filterInput.addEventListener('input', () => {
+      updateFilterHighlight();
       clearTimeout(filterTimeout);
       filterTimeout = setTimeout(() => {
         win.filterText = filterInput.value;
@@ -2003,6 +2027,115 @@ const app = (() => {
     });
   }
 
+  // SQL syntax highlighting
+  const _sqlKeywords = new Set([
+    'SELECT','FROM','WHERE','INSERT','UPDATE','DELETE','INTO','JOIN','ON','AND','OR','NOT','IN',
+    'LIKE','AS','ORDER','BY','GROUP','HAVING','LIMIT','OFFSET','UNION','ALL','DISTINCT','BETWEEN',
+    'EXISTS','IS','NULL','CREATE','TABLE','DROP','ALTER','SET','VALUES','COUNT','SUM','AVG','MIN',
+    'MAX','CASE','WHEN','THEN','ELSE','END','ASC','DESC','LEFT','RIGHT','INNER','OUTER','CROSS',
+    'NATURAL','FULL','USING','WITH','RECURSIVE','CAST','OVER','PARTITION','WINDOW','ROWS','RANGE',
+    'UNBOUNDED','PRECEDING','FOLLOWING','CURRENT','ROW','IF','REPLACE','BEGIN','COMMIT','ROLLBACK',
+    'TRANSACTION','INDEX','PRIMARY','KEY','FOREIGN','REFERENCES','CONSTRAINT','DEFAULT','CHECK',
+    'UNIQUE','AUTOINCREMENT','TEMP','TEMPORARY','VIEW','TRIGGER','EXPLAIN','PRAGMA','VACUUM',
+    'ATTACH','DETACH','REINDEX','ANALYZE','GLOB','REGEXP','ESCAPE','COLLATE','NOCASE','ABORT',
+    'FAIL','IGNORE','CONFLICT','INSTEAD','OF','EACH','FOR','AFTER','BEFORE','NO','ACTION',
+    'CASCADE','RESTRICT','DEFERRABLE','DEFERRED','IMMEDIATE','INITIALLY','RAISE','EXCEPT',
+    'INTERSECT','COALESCE','IFNULL','NULLIF','TYPEOF','LENGTH','SUBSTR','UPPER','LOWER','TRIM',
+    'LTRIM','RTRIM','INSTR','HEX','QUOTE','RANDOM','ABS','ROUND','TOTAL','GROUP_CONCAT',
+    'REPLACE','ZEROBLOB','UNICODE','CHAR','PRINTF','FORMAT','DATE','TIME','DATETIME','STRFTIME',
+    'JULIANDAY','NOT','BOOLEAN','TRUE','FALSE','INTEGER','REAL','TEXT','BLOB','NUMERIC',
+  ]);
+
+  function sqlHighlightHTML(text) {
+    let out = '';
+    let i = 0;
+    const len = text.length;
+    while (i < len) {
+      const ch = text[i];
+      // Whitespace
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+        out += ch;
+        i++;
+        continue;
+      }
+      // Single-line comment --
+      if (ch === '-' && i + 1 < len && text[i + 1] === '-') {
+        let end = text.indexOf('\n', i);
+        if (end === -1) end = len;
+        out += '<span class="sql-cmt">' + escHtml(text.slice(i, end)) + '</span>';
+        i = end;
+        continue;
+      }
+      // Block comment /* */
+      if (ch === '/' && i + 1 < len && text[i + 1] === '*') {
+        let end = text.indexOf('*/', i + 2);
+        if (end === -1) end = len; else end += 2;
+        out += '<span class="sql-cmt">' + escHtml(text.slice(i, end)) + '</span>';
+        i = end;
+        continue;
+      }
+      // Single-quoted string
+      if (ch === "'") {
+        let j = i + 1;
+        while (j < len) {
+          if (text[j] === "'" && j + 1 < len && text[j + 1] === "'") { j += 2; continue; }
+          if (text[j] === "'") { j++; break; }
+          j++;
+        }
+        out += '<span class="sql-str">' + escHtml(text.slice(i, j)) + '</span>';
+        i = j;
+        continue;
+      }
+      // Bracket-quoted identifier [...]
+      if (ch === '[') {
+        let end = text.indexOf(']', i + 1);
+        if (end === -1) end = len - 1;
+        out += '<span class="sql-brk">' + escHtml(text.slice(i, end + 1)) + '</span>';
+        i = end + 1;
+        continue;
+      }
+      // Numbers
+      if ((ch >= '0' && ch <= '9') || (ch === '.' && i + 1 < len && text[i + 1] >= '0' && text[i + 1] <= '9')) {
+        let j = i;
+        while (j < len && ((text[j] >= '0' && text[j] <= '9') || text[j] === '.')) j++;
+        out += '<span class="sql-num">' + escHtml(text.slice(i, j)) + '</span>';
+        i = j;
+        continue;
+      }
+      // Words (identifiers/keywords)
+      if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch === '_') {
+        let j = i + 1;
+        while (j < len && ((text[j] >= 'a' && text[j] <= 'z') || (text[j] >= 'A' && text[j] <= 'Z') || (text[j] >= '0' && text[j] <= '9') || text[j] === '_')) j++;
+        const word = text.slice(i, j);
+        if (_sqlKeywords.has(word.toUpperCase())) {
+          out += '<span class="sql-kw">' + escHtml(word) + '</span>';
+        } else {
+          out += escHtml(word);
+        }
+        i = j;
+        continue;
+      }
+      // Operators and other characters
+      out += escHtml(ch);
+      i++;
+    }
+    return out;
+  }
+
+  function setupSQLHighlight() {
+    const input = document.getElementById('sql-input');
+    const overlay = document.getElementById('sql-highlight');
+    function update() {
+      overlay.innerHTML = sqlHighlightHTML(input.value) + '\n';
+    }
+    input.addEventListener('input', update);
+    input.addEventListener('scroll', () => {
+      overlay.scrollTop = input.scrollTop;
+      overlay.scrollLeft = input.scrollLeft;
+    });
+    update();
+  }
+
   function autoQuoteSQL(sql) {
     const names = Object.keys(tables).sort((a, b) => b.length - a.length);
     for (const name of names) {
@@ -2117,6 +2250,7 @@ const app = (() => {
 
     // Export current database state for the worker
     const dbData = db.export();
+    registerDBFunctions(); // db.export() destroys custom functions in sql.js
     const t0 = performance.now();
 
     // Show timer and interrupt button
@@ -2231,7 +2365,7 @@ const app = (() => {
         result[0].values = result[0].values.slice(0, MAX_RESULT_ROWS);
       }
       const rows = sqlResultToRows(result);
-      showQueryResult(sql, rows);
+      await showQueryResult(sql, rows);
       const suffix = truncated ? ` (showing first ${MAX_RESULT_ROWS.toLocaleString()} of ${totalRows.toLocaleString()})` : '';
       setStatus(`Query returned ${totalRows.toLocaleString()} row(s) in ${formatElapsed(elapsed)}${suffix}`, 'success');
     } else {
@@ -2260,7 +2394,7 @@ const app = (() => {
     }
   }
 
-  function showQueryResult(sql, resultRows) {
+  async function showQueryResult(sql, resultRows) {
     const rawColumns = Object.keys(resultRows[0]);
     const columns = sanitizeColumns(rawColumns);
     const tableName = '_query_' + nextWinId;
@@ -2272,6 +2406,7 @@ const app = (() => {
       return row;
     });
     tables[tableName] = { columns, rows, filename: null, modified: true };
+    await registerTable(tableName);
 
     createSubwindow(tableName + ' *', (win, body) => {
       win.tableName = tableName;
@@ -2335,6 +2470,7 @@ const app = (() => {
       renderImageThumbs();
     } else {
       document.getElementById('sql-input').value = '';
+      document.getElementById('sql-highlight').innerHTML = '';
     }
     setStatus('');
   }
@@ -2540,7 +2676,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.9.0 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.9.1 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -2598,8 +2734,9 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 </ul>
 
 <h4>SQL Console</h4>
-<p>The SQL Console at the bottom runs queries against all open tables using SQLite syntax. Press <code>Ctrl+Enter</code> / <code>&#8984;+Enter</code> to execute.</p>
+<p>The SQL Console at the bottom runs queries against all open tables using SQLite syntax. Press <code>Ctrl+Enter</code> / <code>&#8984;+Enter</code> to execute. The console and filter inputs feature SQL syntax highlighting for keywords, strings, numbers, comments, and bracket-quoted identifiers.</p>
 <p>Tables are referenced by the name shown in their window title bar. Names are sanitized to <code>[a-zA-Z0-9_]</code> characters.</p>
+<p>Query results open in new windows and are automatically registered as queryable tables &mdash; you can run further SQL queries or use the filter bar on any result set.</p>
 
 <h4>SQL Syntax Reference</h4>
 <p>Standard SQLite syntax is supported. All column values are stored as TEXT.</p>

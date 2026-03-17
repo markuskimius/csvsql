@@ -68,7 +68,10 @@
       </div>
     </div>
     <div id="console-body">
-      <textarea id="sql-input" placeholder="SELECT * FROM tablename WHERE ..." spellcheck="false"></textarea>
+      <div id="sql-highlight-wrap">
+        <div id="sql-highlight" aria-hidden="true"></div>
+        <textarea id="sql-input" placeholder="SELECT * FROM tablename WHERE ..." spellcheck="false"></textarea>
+      </div>
     </div>
     <div id="ai-body" style="display:none">
       <div id="ai-controls">

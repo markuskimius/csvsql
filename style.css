@@ -657,16 +657,89 @@ body {
   border-top: 1px solid var(--border);
 }
 
+#sql-highlight-wrap {
+  position: relative;
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+#sql-highlight {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  padding: 8px 12px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: normal;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow: auto;
+  pointer-events: none;
+  z-index: 0;
+}
+
 #sql-input {
   flex: 1;
-  background: var(--bg);
-  color: var(--text);
+  background: transparent;
+  color: transparent;
+  caret-color: var(--text);
   border: none;
   padding: 8px 12px;
   font-family: inherit;
   font-size: 13px;
   resize: none;
   outline: none;
+  position: relative;
+  z-index: 1;
+}
+
+#sql-input::selection {
+  background: rgba(124,111,247,0.3);
+}
+
+/* SQL syntax highlighting tokens */
+.sql-kw  { color: #9588ff; }
+.sql-str { color: #55cc88; }
+.sql-num { color: #f0c674; }
+.sql-cmt { color: #9999bb; font-style: italic; }
+.sql-brk { color: #cc99ff; }
+.sql-op  { color: #e0e0f0; }
+
+/* Filter input highlight overlay */
+.filter-highlight-wrap {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+
+.filter-highlight {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  padding: 3px 8px;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: normal;
+  white-space: nowrap;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+  border: 1px solid transparent;
+  border-radius: 3px;
+}
+
+.filter-highlight-wrap .filter-input {
+  position: relative;
+  z-index: 1;
+  color: transparent !important;
+  caret-color: var(--text);
+  background: transparent !important;
+  width: 100%;
+}
+
+.filter-highlight-wrap .filter-input::selection {
+  background: rgba(124,111,247,0.3);
 }
 
 #console-status {

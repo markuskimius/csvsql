@@ -91,6 +91,9 @@ Version is in `pyproject.toml`.
 - Test internals are exposed via `app._test` (only used by Playwright tests)
 - Table and column names are sanitized to `[a-zA-Z0-9_]` for SQL compatibility
 - SQL identifiers use bracket-quoting (`[tableName]`) to handle edge cases
+- SQL syntax highlighting uses the overlay technique: a div with highlighted spans behind a transparent textarea/input. Tokenizer is `sqlHighlightHTML()`, setup is `setupSQLHighlight()` for the console and inline in `renderTableView()` for filter inputs
+- Query result tables are registered in SQLite via `registerTable()` so they can be queried and filtered like any other table
+- `db.export()` in sql.js destroys custom functions — `registerDBFunctions()` re-registers them after each export
 - SELECT INTO is intercepted and handled manually (SQLite doesn't support it natively)
 - AI analysis (experimental) uses a SQL tool-use loop: the AI writes SQL in ```sql code blocks, which are executed against SQLite and results fed back (up to 5 rounds). AI can also be used without any tables loaded (general chat mode)
 - AI rich output: ```chart (Chart.js config JSON), ```table (columns/rows JSON), ```pdf (document spec JSON) blocks are post-processed into inline charts, HTML tables, and PDF download links. Chart.js and jsPDF are lazy-loaded via CDN on first use. PDFs support text, heading, table, chart, and image content blocks
