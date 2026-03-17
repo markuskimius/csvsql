@@ -2683,7 +2683,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.9.3 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.9.4 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -3569,10 +3569,11 @@ ${_aiImageContext()}`;
 
     // Cancel any previous request
     if (_aiAbort) _aiAbort.abort();
-    _aiAbort = new AbortController();
-    const signal = _aiAbort.signal;
+    const abort = new AbortController();
+    _aiAbort = abort;
+    const signal = abort.signal;
 
-    showInterruptButton(true, () => { if (_aiAbort) _aiAbort.abort(); });
+    showInterruptButton(true, () => abort.abort());
 
     // Elapsed timer
     const aiTimer = setInterval(() => {
@@ -3669,6 +3670,11 @@ ${_aiImageContext()}`;
     } catch (e) {
       clearInterval(aiTimer);
       showInterruptButton(false);
+      // Remove trailing messages with no paired assistant response to avoid
+      // consecutive same-role messages that some providers reject
+      while (_aiConversation.length > 0 && _aiConversation[_aiConversation.length - 1].role !== 'assistant') {
+        _aiConversation.pop();
+      }
       if (e.name === 'AbortError') {
         setAIStatus('Cancelled', '');
       } else {
@@ -3680,11 +3686,17 @@ ${_aiImageContext()}`;
         respDiv.appendChild(errMsg);
       }
     }
-    _aiAbort = null;
+    if (_aiAbort === abort) _aiAbort = null;
   }
 
   // Ollama streaming
+  let _ollamaReader = null;
   async function generateOllama(messages, onChunk, signal) {
+    // Cancel any previous Ollama stream still running server-side
+    if (_ollamaReader) {
+      try { _ollamaReader.cancel(); } catch (_) {}
+      _ollamaReader = null;
+    }
     const r = await fetch(aiSettings.ollamaUrl + '/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -3693,36 +3705,45 @@ ${_aiImageContext()}`;
     });
     if (!r.ok) throw new Error(`Ollama error: ${r.status} ${r.statusText}`);
     const reader = r.body.getReader();
+    _ollamaReader = reader;
     const decoder = new TextDecoder();
     let buf = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      const lines = buf.split('\n');
-      buf = lines.pop();
-      for (const line of lines) {
-        if (!line.trim()) continue;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const data = JSON.parse(line);
+            if (data.message && data.message.content) onChunk(data.message.content);
+          } catch {}
+        }
+      }
+      // Process remaining buffer
+      if (buf.trim()) {
         try {
-          const data = JSON.parse(line);
+          const data = JSON.parse(buf);
           if (data.message && data.message.content) onChunk(data.message.content);
         } catch {}
       }
-    }
-    // Process remaining buffer
-    if (buf.trim()) {
-      try {
-        const data = JSON.parse(buf);
-        if (data.message && data.message.content) onChunk(data.message.content);
-      } catch {}
+    } finally {
+      _ollamaReader = null;
     }
   }
 
   // WebLLM generation
   async function generateWebLLM(messages, onChunk, signal) {
+    function checkAborted() {
+      if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+    }
     if (!_webllmEngine) {
       setAIStatus('Loading WebLLM engine (first time may download model)...', 'working');
       const webllm = await import('./lib/web-llm.js');
+      checkAborted();
       const model = aiSettings.model || 'Qwen3-8B-q4f16_1-MLC';
       _webllmEngine = await webllm.CreateMLCEngine(model, {
         initProgressCallback: (progress) => {
@@ -3734,17 +3755,35 @@ ${_aiImageContext()}`;
         sliding_window_size: -1,
       });
     }
+    checkAborted();
     const response = await _webllmEngine.chat.completions.create({
       messages,
       stream: true,
     });
-    for await (const chunk of response) {
-      if (signal.aborted) {
-        if (_webllmEngine.interruptGenerate) _webllmEngine.interruptGenerate();
-        throw new DOMException('Aborted', 'AbortError');
+    const iterator = response[Symbol.asyncIterator]();
+    try {
+      while (true) {
+        checkAborted();
+        const { done, value } = await Promise.race([
+          iterator.next(),
+          new Promise((_, reject) => {
+            if (signal.aborted) reject(new DOMException('Aborted', 'AbortError'));
+            signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+          }),
+        ]);
+        if (done) break;
+        const delta = value.choices[0] && value.choices[0].delta && value.choices[0].delta.content;
+        if (delta) onChunk(delta);
       }
-      const delta = chunk.choices[0] && chunk.choices[0].delta && chunk.choices[0].delta.content;
-      if (delta) onChunk(delta);
+    } catch (e) {
+      if (e.name === 'AbortError') {
+        // Destroy engine entirely — interruptGenerate/resetChat aren't reliable
+        if (_webllmEngine) {
+          try { _webllmEngine.unload(); } catch (_) {}
+        }
+        _webllmEngine = null;
+      }
+      throw e;
     }
   }
 
