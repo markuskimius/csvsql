@@ -1,6 +1,6 @@
 # CSVSQL
 
-A browser-based CSV database application. Open CSV, Excel, and compressed files as database tables, run SQL queries, edit data inline, and save — all in a multi-window interface with no server or build step required.
+A browser-based CSV database application. Open CSV, Excel, and compressed files as database tables, run SQL queries, edit data inline, and save — all in a multi-window interface with no server, build step, or internet connection required. Fully self-contained with all dependencies bundled locally.
 
 <!-- Screenshots and video demos — add your own assets to a screenshots/ directory -->
 <!-- ![CSVSQL workspace](screenshots/workspace.png) -->
@@ -41,7 +41,7 @@ csvsql --host 0.0.0.0       # bind to all interfaces
 
 ### Option 2: No install — open directly
 
-No dependencies needed. Clone the repo and open `index.html` in your browser:
+All dependencies are bundled locally — no internet connection needed. Clone the repo and open `index.html` in your browser:
 
 ```sh
 git clone https://github.com/markuskimius/csvsql.git

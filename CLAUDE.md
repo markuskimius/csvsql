@@ -14,14 +14,17 @@ Single-page app with three core files:
 - **style.css** — Dark theme styling, window management visuals, table layout
 - **app.js** — All application logic in a single IIFE (`app` module), exposing methods on the global `app` object
 
-### Key dependencies (loaded via CDN)
+### Key dependencies (bundled in `lib/`)
+
+All dependencies are self-contained in the `lib/` directory — no CDN or internet required at runtime.
 
 - **Papa Parse** — CSV parsing/unparsing
 - **sql.js** — SQLite compiled to WebAssembly; each opened CSV is registered as a SQLite table
 - **SheetJS (XLSX)** — Excel file reading/writing
 - **JSZip** — ZIP archive support
-- **pako** — Gzip compression/decompression
-- **@mlc-ai/web-llm** — In-browser LLM inference via WebGPU (loaded dynamically)
+- **Chart.js** — Inline chart rendering (lazy-loaded on first AI chart)
+- **jsPDF + autotable** — PDF report generation (lazy-loaded on first AI PDF)
+- **@mlc-ai/web-llm** — In-browser LLM inference via WebGPU (lazy-loaded)
 
 ### Data flow
 
@@ -48,7 +51,7 @@ python3 -m http.server 8000
 # Then open http://localhost:8000
 ```
 
-Or just open `index.html` directly — the only external resources are CDN scripts.
+Or just open `index.html` directly — all dependencies are bundled locally.
 
 ## Testing
 
@@ -77,7 +80,8 @@ Test fixtures live in `test/` (e.g., `sample1.csv`, `sample.xlsx`, `sample.zip`)
 Published as `csvsql` on PyPI. The Python package in `csvsql/` serves static files via `cli.py`.
 
 ```bash
-# IMPORTANT: Copy root static files to csvsql/static/ before building
+# IMPORTANT: Copy root static files + lib/ to csvsql/static/ before building
+cp app.js index.html style.css csvsql/static/ && cp lib/* csvsql/static/lib/
 rm -rf dist build *.egg-info && python3 -m build
 python3 -m twine upload dist/*
 ```

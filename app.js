@@ -36,7 +36,7 @@ const app = (() => {
   // ---- Init ----
   async function init() {
     const SQL = await initSqlJs({
-      locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${file}`
+      locateFile: file => `lib/${file}`
     });
     db = new SQL.Database();
     registerDBFunctions();
@@ -2191,11 +2191,12 @@ const app = (() => {
   let _queryTimer = null;
 
   function makeQueryWorker() {
+    const libBase = new URL('lib/', location.href).href;
     const src = `
-      importScripts('https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js');
+      importScripts('${libBase}sql-wasm.js');
       let SQL = null;
       let db = null;
-      initSqlJs({ locateFile: f => 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/' + f }).then((sql) => {
+      initSqlJs({ locateFile: f => '${libBase}' + f }).then((sql) => {
         SQL = sql;
         postMessage({ type: 'ready' });
       });
@@ -2682,7 +2683,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.9.2 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.9.3 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -3166,7 +3167,7 @@ To include an image in a PDF, add a content block: {"type":"image","name":"filen
 You can optionally set "width" (in PDF points, max is page width). Reference images by their exact filename.`;
   }
 
-  // Lazy CDN script loader
+  // Lazy script loader
   const _loadedScripts = {};
   function loadScript(url) {
     if (_loadedScripts[url]) return _loadedScripts[url];
@@ -3182,14 +3183,14 @@ You can optionally set "width" (in PDF points, max is page width). Reference ima
 
   async function ensureChartJs() {
     if (typeof Chart === 'undefined') {
-      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js');
+      await loadScript('lib/chart.umd.js');
     }
   }
 
   async function ensureJsPDF() {
     if (typeof jspdf === 'undefined') {
-      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
-      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.4/jspdf.plugin.autotable.min.js');
+      await loadScript('lib/jspdf.umd.min.js');
+      await loadScript('lib/jspdf.plugin.autotable.min.js');
     }
   }
 
@@ -3721,7 +3722,7 @@ ${_aiImageContext()}`;
   async function generateWebLLM(messages, onChunk, signal) {
     if (!_webllmEngine) {
       setAIStatus('Loading WebLLM engine (first time may download model)...', 'working');
-      const webllm = await import('https://esm.run/@mlc-ai/web-llm');
+      const webllm = await import('./lib/web-llm.js');
       const model = aiSettings.model || 'Qwen3-8B-q4f16_1-MLC';
       _webllmEngine = await webllm.CreateMLCEngine(model, {
         initProgressCallback: (progress) => {
