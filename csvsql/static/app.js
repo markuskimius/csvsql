@@ -2683,7 +2683,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.9.4 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.9.5 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -2990,7 +2990,7 @@ Smaller models, runs entirely in the browser — no install needed.<br>
   // dataset, so this budget is for column stats + sample rows to orient the model.
   function getDataCharBudget() {
     if (_aiProvider === 'claude' || _aiProvider === 'openai') return 500000;
-    if (_aiProvider === 'webllm') return 6000; // 4K token context; leave room for system prompt, conversation, and response
+    if (_aiProvider === 'webllm') return 20000; // 16K token context; leave room for system prompt, conversation, and response
     return 100000; // ollama
   }
 
@@ -3751,7 +3751,7 @@ ${_aiImageContext()}`;
           setAIStatus(`Loading model: ${progress.text || pct}`, 'working');
         },
       }, {
-        context_window_size: 4096,
+        context_window_size: 16384,
         sliding_window_size: -1,
       });
     }
@@ -3759,6 +3759,7 @@ ${_aiImageContext()}`;
     const response = await _webllmEngine.chat.completions.create({
       messages,
       stream: true,
+      max_tokens: 4096,
     });
     const iterator = response[Symbol.asyncIterator]();
     try {
