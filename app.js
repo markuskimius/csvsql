@@ -2990,7 +2990,7 @@ Smaller models, runs entirely in the browser — no install needed.<br>
   // dataset, so this budget is for column stats + sample rows to orient the model.
   function getDataCharBudget() {
     if (_aiProvider === 'claude' || _aiProvider === 'openai') return 500000;
-    if (_aiProvider === 'webllm') return 6000; // 4K token context; leave room for system prompt, conversation, and response
+    if (_aiProvider === 'webllm') return 20000; // 16K token context; leave room for system prompt, conversation, and response
     return 100000; // ollama
   }
 
@@ -3751,7 +3751,7 @@ ${_aiImageContext()}`;
           setAIStatus(`Loading model: ${progress.text || pct}`, 'working');
         },
       }, {
-        context_window_size: 4096,
+        context_window_size: 16384,
         sliding_window_size: -1,
       });
     }
@@ -3759,6 +3759,7 @@ ${_aiImageContext()}`;
     const response = await _webllmEngine.chat.completions.create({
       messages,
       stream: true,
+      max_tokens: 4096,
     });
     const iterator = response[Symbol.asyncIterator]();
     try {
