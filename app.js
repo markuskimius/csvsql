@@ -61,12 +61,17 @@ const app = (() => {
   }
 
   // ---- File Menu ----
+  // Track whether Shift is held — when true, files open without headers (columns become A, B, C, ...)
+  let _shiftOpen = false;
+
   function setupFileInput() {
     document.getElementById('file-input').addEventListener('change', (e) => {
+      const hasHeader = !_shiftOpen;
       for (const file of e.target.files) {
-        openFileByType(file);
+        openFileByType(file, null, undefined, hasHeader);
       }
       e.target.value = '';
+      _shiftOpen = false;
     });
   }
 
@@ -89,7 +94,7 @@ const app = (() => {
       dragCounter--;
       if (dragCounter <= 0) {
         dragCounter = 0;
-        overlay.classList.remove('visible');
+        overlay.classList.remove('visible', 'shift');
       }
     });
 
@@ -101,13 +106,14 @@ const app = (() => {
 
     document.addEventListener('dragover', (e) => {
       e.preventDefault();
+      overlay.classList.toggle('shift', e.shiftKey);
     });
 
     document.addEventListener('drop', async (e) => {
       e.preventDefault();
       dragCounter = 0;
       aiDragCounter = 0;
-      overlay.classList.remove('visible');
+      overlay.classList.remove('visible', 'shift');
       aiBody.classList.remove('ai-drag-over');
 
       // If dropped on AI panel and files are images, handle as AI image upload
@@ -121,18 +127,20 @@ const app = (() => {
       }
 
       closeMenus();
+      const hasHeader = !e.shiftKey;
       const entries = [...e.dataTransfer.items].map(item => ({
         file: item.getAsFile(),
         handlePromise: item.getAsFileSystemHandle ? item.getAsFileSystemHandle().catch(() => null) : Promise.resolve(null),
       }));
       for (const entry of entries) {
         const handle = await entry.handlePromise;
-        if (entry.file) openFileByType(entry.file, handle);
+        if (entry.file) openFileByType(entry.file, handle, undefined, hasHeader);
       }
     });
   }
 
-  async function openFile() {
+  async function openFile(shiftKey) {
+    const hasHeader = !shiftKey;
     if (window.showOpenFilePicker) {
       try {
         const handles = await showOpenFilePicker({
@@ -145,17 +153,18 @@ const app = (() => {
         });
         for (const handle of handles) {
           const file = await handle.getFile();
-          openFileByType(file, handle);
+          openFileByType(file, handle, undefined, hasHeader);
         }
       } catch (e) {
         if (e.name !== 'AbortError') setStatus(`Error opening file: ${e.message}`, 'error');
       }
     } else {
+      _shiftOpen = shiftKey;
       document.getElementById('file-input').click();
     }
   }
 
-  function openURL() {
+  function openURL(noHeader) {
     showPrompt('Open URL', 'Enter URL (http or https):', '', async (url) => {
       if (!url) return;
       url = url.trim();
@@ -173,7 +182,7 @@ const app = (() => {
         if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
         const blob = await resp.blob();
         const file = new File([blob], filename, { type: blob.type });
-        openFileByType(file, null);
+        openFileByType(file, null, undefined, !noHeader);
       } catch (e) {
         setStatus(`Error fetching URL: ${e.message}`, 'error');
       }
@@ -184,25 +193,26 @@ const app = (() => {
   const COMPRESSION_EXTS = new Set(['gz', 'zip', 'bz2', 'xz', 'rar', '7z', 'zst']);
   const DATA_EXTS = new Set(['csv', 'tsv', 'psv', 'txt', 'xlsx', 'xls']);
 
-  function openFileByType(file, fileHandle, compression) {
+  function openFileByType(file, fileHandle, compression, hasHeader) {
+    if (hasHeader === undefined) hasHeader = true;
     const ext = file.name.split('.').pop().toLowerCase();
     if (COMPRESSION_EXTS.has(ext)) {
-      decompressAndOpen(file, fileHandle);
+      decompressAndOpen(file, fileHandle, hasHeader);
     } else if (ext === 'xlsx' || ext === 'xls') {
-      loadExcelFile(file, fileHandle, compression);
+      loadExcelFile(file, fileHandle, compression, hasHeader);
     } else {
-      loadDelimitedFile(file, compression ? compression.fileHandle : fileHandle, compression);
+      loadDelimitedFile(file, compression ? compression.fileHandle : fileHandle, compression, hasHeader);
     }
   }
 
-  async function decompressAndOpen(file, fileHandle) {
+  async function decompressAndOpen(file, fileHandle, hasHeader) {
     const ext = file.name.split('.').pop().toLowerCase();
     setStatus(`Decompressing ${file.name}...`, 'working');
     try {
       if (ext === 'gz') {
-        await decompressGzip(file, fileHandle);
+        await decompressGzip(file, fileHandle, hasHeader);
       } else if (ext === 'zip') {
-        await decompressZip(file, fileHandle);
+        await decompressZip(file, fileHandle, hasHeader);
       } else {
         setStatus(`Unsupported compression format: .${ext} — please decompress the file first and open the decompressed file`, 'error');
       }
@@ -211,17 +221,17 @@ const app = (() => {
     }
   }
 
-  async function decompressGzip(file, fileHandle) {
+  async function decompressGzip(file, fileHandle, hasHeader) {
     const ds = new DecompressionStream('gzip');
     const decompressed = file.stream().pipeThrough(ds);
     const blob = await new Response(decompressed).blob();
     // Inner filename: strip .gz
     const innerName = file.name.replace(/\.gz$/i, '') || 'decompressed.csv';
     const innerFile = new File([blob], innerName, { type: 'application/octet-stream' });
-    openFileByType(innerFile, null, { type: 'gz', compressedFilename: file.name, fileHandle: fileHandle || null });
+    openFileByType(innerFile, null, { type: 'gz', compressedFilename: file.name, fileHandle: fileHandle || null }, hasHeader);
   }
 
-  async function decompressZip(file, fileHandle) {
+  async function decompressZip(file, fileHandle, hasHeader) {
     const zip = await JSZip.loadAsync(file);
     const zipGroupId = nextZipGroupId++;
 
@@ -249,8 +259,19 @@ const app = (() => {
     for (const { name, entry } of dataFiles) {
       const blob = await entry.async('blob');
       const innerFile = new File([blob], name, { type: 'application/octet-stream' });
-      openFileByType(innerFile, null, { type: 'zip', compressedFilename: file.name, fileHandle: fileHandle || null, zipGroupId, innerName: name, zipOriginalCount });
+      openFileByType(innerFile, null, { type: 'zip', compressedFilename: file.name, fileHandle: fileHandle || null, zipGroupId, innerName: name, zipOriginalCount }, hasHeader);
     }
+  }
+
+  // Generate Excel-style column name: 0→A, 1→B, ..., 25→Z, 26→AA, 27→AB, ...
+  function excelColName(index) {
+    let name = '';
+    let n = index;
+    do {
+      name = String.fromCharCode(65 + (n % 26)) + name;
+      n = Math.floor(n / 26) - 1;
+    } while (n >= 0);
+    return name;
   }
 
   function delimiterForExt(filename) {
@@ -260,7 +281,7 @@ const app = (() => {
     return undefined; // let Papa auto-detect (handles csv, txt)
   }
 
-  function loadDelimitedFile(file, fileHandle, compression) {
+  function loadDelimitedFile(file, fileHandle, compression, hasHeader) {
     setStatus(`Loading ${file.name}...`, 'working');
     const t0 = performance.now();
     const delimiter = delimiterForExt(file.name);
@@ -269,20 +290,33 @@ const app = (() => {
     let rawColumns = null;
     let columns = null;
     Papa.parse(file, {
-      header: true,
+      header: hasHeader,
       skipEmptyLines: true,
       dynamicTyping: false,
       delimiter,
       chunk(results) {
-        if (!rawColumns) {
-          rawColumns = results.meta.fields || [];
-          columns = sanitizeColumns(rawColumns);
-          detectedDelimiter = delimiter || results.meta.delimiter || ',';
-        }
-        for (const row of results.data) {
-          const r = { _rownum: allRows.length + 1 };
-          rawColumns.forEach((raw, j) => { r[columns[j]] = row[raw] ?? ''; });
-          allRows.push(r);
+        if (hasHeader) {
+          if (!rawColumns) {
+            rawColumns = results.meta.fields || [];
+            columns = sanitizeColumns(rawColumns);
+            detectedDelimiter = delimiter || results.meta.delimiter || ',';
+          }
+          for (const row of results.data) {
+            const r = { _rownum: allRows.length + 1 };
+            rawColumns.forEach((raw, j) => { r[columns[j]] = row[raw] ?? ''; });
+            allRows.push(r);
+          }
+        } else {
+          if (!columns) {
+            const numCols = results.data[0] ? results.data[0].length : 0;
+            columns = Array.from({ length: numCols }, (_, i) => excelColName(i));
+            detectedDelimiter = delimiter || results.meta.delimiter || ',';
+          }
+          for (const row of results.data) {
+            const r = { _rownum: allRows.length + 1 };
+            columns.forEach((col, j) => { r[col] = row[j] ?? ''; });
+            allRows.push(r);
+          }
         }
         setStatus(`Loading ${file.name}... ${allRows.length.toLocaleString()} rows`, 'working');
       },
@@ -307,7 +341,7 @@ const app = (() => {
     });
   }
 
-  function loadExcelFile(file, fileHandle, compression) {
+  function loadExcelFile(file, fileHandle, compression, hasHeader) {
     setStatus(`Loading ${file.name}...`, 'working');
     const t0 = performance.now();
     const reader = new FileReader();
@@ -317,21 +351,35 @@ const app = (() => {
         const excelGroupId = nextExcelGroupId++;
         const nonEmptySheets = workbook.SheetNames.filter(sn => {
           const s = workbook.Sheets[sn];
-          return XLSX.utils.sheet_to_json(s, { defval: '' }).length > 0;
+          return XLSX.utils.sheet_to_json(s, { header: 1, defval: '' }).some(r => r.length > 0);
         });
         const excelOriginalCount = nonEmptySheets.length;
         for (const sheetName of nonEmptySheets) {
           const sheet = workbook.Sheets[sheetName];
-          const jsonData = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+          let columns, rows;
+          if (hasHeader) {
+            const jsonData = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+            if (jsonData.length === 0) continue;
+            const rawColumns = Object.keys(jsonData[0]);
+            columns = sanitizeColumns(rawColumns);
+            rows = jsonData.map((row, i) => {
+              const r = { _rownum: i + 1 };
+              rawColumns.forEach((raw, j) => { r[columns[j]] = row[raw] != null ? String(row[raw]) : ''; });
+              return r;
+            });
+          } else {
+            const rawData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+            if (rawData.length === 0) continue;
+            const numCols = Math.max(...rawData.map(r => r.length));
+            columns = Array.from({ length: numCols }, (_, i) => excelColName(i));
+            rows = rawData.map((row, i) => {
+              const r = { _rownum: i + 1 };
+              columns.forEach((col, j) => { r[col] = row[j] != null ? String(row[j]) : ''; });
+              return r;
+            });
+          }
           const name = sanitizeTableName(sheetName);
           const uniqueName = getUniqueTableName(name);
-          const rawColumns = Object.keys(jsonData[0]);
-          const columns = sanitizeColumns(rawColumns);
-          const rows = jsonData.map((row, i) => {
-            const r = { _rownum: i + 1 };
-            rawColumns.forEach((raw, j) => { r[columns[j]] = row[raw] != null ? String(row[raw]) : ''; });
-            return r;
-          });
           const excelInfo = { excelGroupId, sheetName, excelOriginalCount, excelFilename: file.name, fileHandle: fileHandle || null };
           tables[uniqueName] = { columns, rows, filename: file.name, modified: false, compression: compression || null, excel: excelInfo };
           await registerTable(uniqueName);
@@ -2026,7 +2074,7 @@ const app = (() => {
       if (!(e.ctrlKey || e.metaKey)) return;
       switch (e.key) {
         case 's': e.preventDefault(); saveActiveTable(); break;
-        case 'o': e.preventDefault(); openFile(); break;
+        case 'o': e.preventDefault(); openFile(e.shiftKey); break;
         case 'n': e.preventDefault(); newTable(); break;
         case 'w': e.preventDefault(); if (activeWinId) closeWindow(activeWinId); break;
       }
@@ -2696,7 +2744,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <p>Install from PyPI with <code>pip install csvsql</code>, then run <code>csvsql</code> to start. If <code>csvsql</code> conflicts with another command on your system, use <code>csvsqlw</code> instead &mdash; it&rsquo;s an identical alias.</p>
 
 <h4>Opening Files</h4>
-<p>Use <strong>File &rarr; Open</strong> (<code>Ctrl+O</code> / <code>&#8984;O</code>), <strong>File &rarr; Open URL</strong>, or drag and drop files onto the window.</p>
+<p>Use <strong>File &rarr; Open</strong> (<code>Ctrl+O</code> / <code>&#8984;O</code>), <strong>File &rarr; Open URL</strong>, or drag and drop files onto the window. Hold <strong>Shift</strong> while opening or dropping to load files without headers &mdash; columns will be named A, B, C, &hellip; Z, AA, AB, etc.</p>
 
 <table>
 <tr><th>Format</th><th>Extensions</th><th>Notes</th></tr>
@@ -4127,6 +4175,7 @@ ${_aiImageContext()}`;
         get tables() { return tables; },
         get windows() { return windows; },
         get db() { return db; },
+        set _shiftOpen(v) { _shiftOpen = v; },
       }
     } : {}),
   };

@@ -26,8 +26,12 @@ async function openApp(page) {
 /**
  * Upload a file via the hidden #file-input element.
  */
-async function uploadFile(page, filePath) {
+async function uploadFile(page, filePath, { hasHeader = true } = {}) {
   const abs = path.resolve(__dirname, filePath);
+  if (!hasHeader) {
+    // Set shift-open flag so file loads without headers (columns become A, B, C, ...)
+    await page.evaluate(() => { app._test._shiftOpen = true; });
+  }
   const fileInput = page.locator('#file-input');
   await fileInput.setInputFiles(abs);
 }
