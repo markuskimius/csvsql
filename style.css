@@ -44,10 +44,14 @@ html, body {
 
 .menu-item {
   position: relative;
-  padding: 0 14px;
   line-height: 30px;
   cursor: pointer;
   font-size: 12px;
+}
+
+.menu-label {
+  display: block;
+  padding: 0 14px;
 }
 
 .menu-item:hover {

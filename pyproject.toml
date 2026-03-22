@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "csvsql"
-version = "0.9.5"
+version = "0.9.6"
 description = "A browser-based CSV database with SQL query support"
 readme = "README.md"
 license = "MIT"
