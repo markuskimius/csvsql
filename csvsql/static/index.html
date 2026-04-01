@@ -15,8 +15,10 @@
     <div class="menu-item" id="menu-file">
       <span class="menu-label">File</span>
       <div class="menu-dropdown">
-        <button onclick="app.openFile()">Open...<span class="shortcut">Ctrl+O</span></button>
+        <button onclick="app.openFile(event.shiftKey)">Open...<span class="shortcut">Ctrl+O</span></button>
+        <button onclick="app.openFile(true)">Open (no header)...</button>
         <button onclick="app.openURL()">Open URL...</button>
+        <button onclick="app.openURL(true)">Open URL (no header)...</button>
         <button id="btn-save" disabled>Save Table<span class="shortcut">Ctrl+S</span></button>
         <button id="btn-save-as" disabled>Save Table As...</button>
         <hr>
@@ -90,7 +92,7 @@
   </div>
 
   <input type="file" id="file-input" accept=".csv,.tsv,.psv,.txt,.xlsx,.xls,.gz,.zip,.bz2,.xz,.rar,.7z,.zst" multiple style="display:none">
-  <div id="drop-overlay">Drop files here</div>
+  <div id="drop-overlay"><span id="drop-label">Drop files here</span><small id="drop-hint">Hold Shift for no headers</small></div>
   <script src="app.js"></script>
 </body>
 </html>
