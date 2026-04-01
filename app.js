@@ -3081,31 +3081,15 @@ Smaller models, runs entirely in the browser — no install needed.<br>
               }
               line += `\n    Percentiles: p25=${pVals[0]}, median=${pVals[1]}, p75=${pVals[2]}`;
             }
-            // 10-bucket histogram
-            if (mn != null && mx != null) {
-              const minVal = Number(mn), maxVal = Number(mx);
-              if (isFinite(minVal) && isFinite(maxVal) && maxVal > minVal) {
-                const bucketWidth = (maxVal - minVal) / 10;
-                const histRes = db.exec(`SELECT CASE WHEN CAST(((CAST([${col}] AS REAL) - ${minVal}) / ${bucketWidth}) AS INTEGER) >= 10 THEN 9 ELSE CAST(((CAST([${col}] AS REAL) - ${minVal}) / ${bucketWidth}) AS INTEGER) END AS bucket, COUNT(*) FROM [${tableName}] WHERE [${col}] GLOB '*[0-9]*' GROUP BY bucket ORDER BY bucket`);
-                if (histRes.length) {
-                  const buckets = histRes[0].values.map(r => {
-                    const b = r[0];
-                    const lo = (minVal + b * bucketWidth).toFixed(2);
-                    const hi = (minVal + (b + 1) * bucketWidth).toFixed(2);
-                    return `[${lo}-${hi}]: ${r[1]}`;
-                  });
-                  line += `\n    Distribution: ${buckets.join(' | ')}`;
-                }
-              }
-            }
           } catch {}
         } else if (distinct <= 1000 && distinct > 0) {
-          // Categorical: all value counts (≤1000 distinct fits easily in budget)
+          // Categorical: top 20 value counts
           try {
-            const topRes = db.exec(`SELECT [${col}], COUNT(*) as cnt FROM [${tableName}] WHERE [${col}] IS NOT NULL AND [${col}] != '' GROUP BY [${col}] ORDER BY cnt DESC`);
+            const topRes = db.exec(`SELECT [${col}], COUNT(*) as cnt FROM [${tableName}] WHERE [${col}] IS NOT NULL AND [${col}] != '' GROUP BY [${col}] ORDER BY cnt DESC LIMIT 20`);
             if (topRes.length) {
               const vals = topRes[0].values.map(r => `${r[0]} (${r[1]})`).join(', ');
-              line += `\n    Value counts: ${vals}`;
+              line += `\n    Top values: ${vals}`;
+              if (distinct > 20) line += ` ... and ${distinct - 20} more`;
             }
           } catch {}
         }
@@ -3127,8 +3111,8 @@ Smaller models, runs entirely in the browser — no install needed.<br>
 
       let info = `Table: ${name}\nColumns: ${t.columns.join(', ')}\nTotal rows: ${t.rows.length}\n\n`;
 
-      // For small tables (<=200 rows), include all rows directly
-      if (t.rows.length <= 200) {
+      // For small tables (<=50 rows), include all rows directly
+      if (t.rows.length <= 50) {
         const header = t.columns.join(' | ');
         const maxCellLen = 100;
         const rowLines = t.rows.map(row =>
@@ -3561,14 +3545,21 @@ You can optionally set "width" (in PDF points, max is page width). Reference ima
     if (selectedTables.length > 0) flushAllSyncs();
     _aiConversation.push({ role: 'user', content: prompt });
 
+    // Cap conversation history to limit token usage
+    const MAX_AI_HISTORY = 20;
+    if (_aiConversation.length > MAX_AI_HISTORY) {
+      _aiConversation = _aiConversation.slice(-MAX_AI_HISTORY);
+    }
+
     let systemPrompt;
+    let systemPromptShort; // lighter prompt for SQL follow-up rounds (omits data context)
     if (selectedTables.length > 0) {
       const dataContext = buildDataContext(selectedTables);
       const tableList = selectedTables.map(n => {
         const t = tables[n];
         return `[${n}] (${t ? t.columns.join(', ') : 'unknown columns'})`;
       }).join(', ');
-      systemPrompt = `You are a data analyst. You have full access to a SQLite database containing the user's data.
+      const coreInstructions = `You are a data analyst. You have full access to a SQLite database containing the user's data.
 
 IMPORTANT: To answer questions, you MUST write SQL queries. Write them in \`\`\`sql code blocks and they will be executed automatically. The results will be returned to you. Then use the results to answer the user's question.
 
@@ -3587,14 +3578,18 @@ SELECT [product], SUM([revenue]) as total FROM [sales] GROUP BY [product] ORDER 
 \`\`\`
 
 ${_richBlockPrompt}
-${_aiImageContext()}
+${_aiImageContext()}`;
+
+      systemPrompt = `${coreInstructions}
 
 ${dataContext}`;
+      systemPromptShort = coreInstructions;
     } else {
       systemPrompt = `You are a helpful assistant. No data tables are currently loaded. Answer the user's question to the best of your ability. If the user asks about data analysis, let them know they can open CSV, Excel, or other data files to analyze.
 
 ${_richBlockPrompt}
 ${_aiImageContext()}`;
+      systemPromptShort = systemPrompt;
     }
 
     // Append user message bubble
@@ -3631,7 +3626,7 @@ ${_aiImageContext()}`;
     try {
       for (let round = 0; round <= MAX_SQL_ROUNDS; round++) {
         const messages = [
-          { role: 'system', content: systemPrompt },
+          { role: 'system', content: round === 0 ? systemPrompt : systemPromptShort },
           ..._aiConversation,
         ];
 
@@ -3684,10 +3679,10 @@ ${_aiImageContext()}`;
               for (const r of results) {
                 const header = r.columns.join(' | ');
                 const rows = r.values.map(row => row.map(v => String(v ?? 'NULL')).join(' | '));
-                // Limit to 200 result rows to stay within budget
-                const shown = rows.slice(0, 200);
+                // Limit to 50 result rows to stay within token budget
+                const shown = rows.slice(0, 50);
                 resultsText += `Query: ${sql}\n${header}\n${shown.join('\n')}`;
-                if (rows.length > 200) resultsText += `\n... (${rows.length - 200} more rows)`;
+                if (rows.length > 50) resultsText += `\n... (${rows.length - 50} more rows)`;
                 resultsText += '\n\n';
               }
             }
