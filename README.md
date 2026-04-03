@@ -2,6 +2,8 @@
 
 A browser-based CSV database application. Open CSV, Excel, and compressed files as database tables, run SQL queries, edit data inline, and save — all in a multi-window interface with no server, build step, or internet connection required. Fully self-contained with all dependencies bundled locally.
 
+**[Try the live version](https://app.cbreak.org/csvsql/)**
+
 <!-- Screenshots and video demos — add your own assets to a screenshots/ directory -->
 <!-- ![CSVSQL workspace](screenshots/workspace.png) -->
 

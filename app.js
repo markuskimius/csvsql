@@ -2873,6 +2873,9 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <p><strong>Images:</strong> Drag and drop PNG or JPG images onto the AI chat area to upload them. Uploaded images appear as thumbnails above the input field and can be included in PDF reports (e.g., as a logo). Click &times; to remove an image.</p>
 <p>The AI queries your data with SQL first, then uses the results to build the rich output. Chart.js and jsPDF libraries are loaded on demand when first needed.</p>
 <p>Click the gear icon &#9881; to configure the provider, model, and API keys.</p>
+
+<h4>Links</h4>
+<p><a href="https://github.com/markuskimius/csvsql" target="_blank">GitHub</a></p>
     `);
   }
 
