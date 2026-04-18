@@ -1805,11 +1805,17 @@ const app = (() => {
       document.addEventListener('mouseup', onDragEnd);
     });
 
-    // Long-press a cell to enter edit mode. enterEditMode must run inside the
-    // end-gesture handler so iOS/Android open the virtual keyboard. We listen
-    // on both touch and pointer events so this works regardless of which event
-    // family the browser delivers first; whichever fires first claims the
-    // interaction via `_touchLongPress` and the other no-ops.
+    // Long-press a cell to enter edit mode. We listen on both touch and pointer
+    // events so this works regardless of which event family the browser delivers
+    // first; whichever fires first claims the interaction via `_touchLongPress`
+    // and the other no-ops.
+    //
+    // iOS opens the virtual keyboard only when a native tap/click lands on an
+    // already-editable element — a programmatic focus() inside our handlers is
+    // not recognized as a user gesture for keyboard purposes. So we flip
+    // contenteditable on when the long-press timer fires, then DON'T
+    // preventDefault on touchend: the browser's synthesized click then lands on
+    // the now-editable cell and iOS opens the keyboard natively.
     const startCellLongPress = (td, clientX, clientY) => {
       if (_touchLongPress) return;
       if (td.getAttribute('contenteditable') === 'true') return;
@@ -1819,6 +1825,7 @@ const app = (() => {
         state.fired = true;
         td.classList.add('long-press-active');
         if (navigator.vibrate) navigator.vibrate(15);
+        td.setAttribute('contenteditable', 'true');
       }, LONG_PRESS_MS);
       _touchLongPress = state;
     };
@@ -1839,10 +1846,10 @@ const app = (() => {
       _touchLongPress = null;
       clearTimeout(state.timer);
       state.td.classList.remove('long-press-active');
-      if (state.fired && state.td.isConnected) {
-        if (e.cancelable) e.preventDefault();
-        enterEditMode(state.td);
-      }
+      // If the long-press timer fired, the cell is already contenteditable.
+      // Don't preventDefault — the browser will synthesize a click on the
+      // editable cell, which iOS treats as a user gesture and opens the
+      // keyboard. The synthesized click places the caret where the finger was.
     };
 
     table.addEventListener('touchstart', (e) => {
@@ -3251,7 +3258,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.10.3 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.10.4 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
