@@ -11,10 +11,14 @@ const app = (() => {
   let db = null;    // sql.js Database instance
   let _activeConsoleTab = 'sql';
 
-  // Touch gesture state (shared across tables)
+  // Touch gesture state (shared across tables / windows)
   let _touchLongPress = null;              // cell long-press (→ enter edit mode)
   let _touchHeaderDrag = null;             // header 1.5-tap drag (→ reorder column)
+  let _touchCellDrag = null;               // cell 1.5-tap drag (→ multi-cell select)
+  let _touchWinDrag = null;                // titlebar 1.5-tap drag (→ move window)
   let _lastHeaderTap = { tableName: null, col: null, time: 0 };
+  let _lastCellTap = { winId: null, rownum: null, col: null, time: 0 };
+  let _lastTitleTap = { winId: null, time: 0 };
   const LONG_PRESS_MS = 600;               // hold to enter cell edit mode
   const DOUBLE_TAP_WINDOW_MS = 500;        // tap 1 → tap 2 window for 1.5-tap drag
 
@@ -1049,6 +1053,66 @@ const app = (() => {
         titlebar.style.cursor = 'grab';
       }
     });
+
+    // Touch: 1.5-tap (tap once, then tap-and-pan) to move the window. A single
+    // tap is reserved for normal taps on titlebar children (focus, buttons).
+    titlebar.addEventListener('touchstart', (e) => {
+      if (e.touches.length !== 1) return;
+      if (e.target.tagName === 'BUTTON') return;
+      const touch = e.touches[0];
+      const now = Date.now();
+      const prev = _lastTitleTap;
+      const isSecondTap = prev.winId === win.id &&
+                          (now - prev.time) < DOUBLE_TAP_WINDOW_MS;
+      if (!isSecondTap) {
+        _lastTitleTap = { winId: win.id, time: now };
+        return;
+      }
+      _lastTitleTap = { winId: null, time: 0 };
+      focusWindow(win.id);
+      _touchWinDrag = {
+        win,
+        startX: touch.clientX, startY: touch.clientY,
+        origX: parseInt(win.el.style.left),
+        origY: parseInt(win.el.style.top),
+        dragging: false,
+      };
+    }, { passive: true });
+
+    titlebar.addEventListener('touchmove', (e) => {
+      if (!_touchWinDrag || _touchWinDrag.win !== win) return;
+      const touch = e.touches[0];
+      if (!touch) return;
+      const dx = touch.clientX - _touchWinDrag.startX;
+      const dy = touch.clientY - _touchWinDrag.startY;
+      if (!_touchWinDrag.dragging && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) {
+        _touchWinDrag.dragging = true;
+        titlebar.style.cursor = 'grabbing';
+        if (navigator.vibrate) navigator.vibrate(10);
+      }
+      if (_touchWinDrag.dragging) {
+        if (e.cancelable) e.preventDefault();
+        const area = document.getElementById('window-area').getBoundingClientRect();
+        const cx = Math.max(area.left, Math.min(touch.clientX, area.right));
+        const cy = Math.max(area.top, Math.min(touch.clientY, area.bottom));
+        const ax = cx - _touchWinDrag.startX;
+        const ay = cy - _touchWinDrag.startY;
+        win.el.style.left = (_touchWinDrag.origX + ax) + 'px';
+        win.el.style.top = (_touchWinDrag.origY + ay) + 'px';
+        if (win.maximized) win.maximized = false;
+      }
+    }, { passive: false });
+
+    const endWinTouch = (e) => {
+      if (!_touchWinDrag || _touchWinDrag.win !== win) return;
+      const state = _touchWinDrag;
+      _touchWinDrag = null;
+      if (!state.dragging) return;
+      titlebar.style.cursor = 'grab';
+      if (e.cancelable) e.preventDefault();
+    };
+    titlebar.addEventListener('touchend', endWinTouch);
+    titlebar.addEventListener('touchcancel', endWinTouch);
   }
 
   function setupWindowResize(win) {
@@ -1852,24 +1916,131 @@ const app = (() => {
       // keyboard. The synthesized click places the caret where the finger was.
     };
 
+    // Cell touch handling combines two gestures:
+    //  - long-press (600 ms hold) → enter edit mode
+    //  - 1.5-tap (quick tap, then tap-and-pan) → extend the cell selection
+    //    rectangle from the anchor to the panned cell, like a mouse drag-select.
+    // The 1.5-tap is detected on touchstart by comparing against `_lastCellTap`.
+    // Second tap cancels any pending long-press so the two gestures don't race.
+    const getCellCoords = (clientX, clientY) => {
+      const el = document.elementFromPoint(clientX, clientY);
+      const td = el && el.closest && el.closest('td.data-cell');
+      if (!td || !table.contains(td)) return null;
+      const tr = td.parentElement;
+      const di = parseInt(tr.dataset.displayIdx, 10);
+      const ci = parseInt(td.dataset.colIdx, 10);
+      if (isNaN(di) || isNaN(ci)) return null;
+      return { di, ci };
+    };
+
     table.addEventListener('touchstart', (e) => {
       if (e.touches.length !== 1) return;
       const touch = e.touches[0];
       const td = e.target.closest && e.target.closest('td.data-cell');
       if (!td || !table.contains(td)) return;
+      if (td.getAttribute('contenteditable') === 'true') return;
+
+      const tr = td.parentElement;
+      const di = parseInt(tr.dataset.displayIdx, 10);
+      const ci = parseInt(td.dataset.colIdx, 10);
+      const row = !isNaN(di) ? win._displayRows[di] : null;
+      const col = !isNaN(ci) ? win._columns[ci] : null;
+
+      const now = Date.now();
+      const prev = _lastCellTap;
+      const isSecondTap = prev.winId === win.id &&
+                          (now - prev.time) < DOUBLE_TAP_WINDOW_MS;
+      if (isSecondTap) {
+        // Second tap: enter drag-pending mode. Cancel any long-press so we
+        // don't fire edit-mode mid-drag. Seed the anchor from the first-tap
+        // cell so the drag-select rectangle starts there (a real device gets
+        // this for free via the synthesized click → focusin, but we set it
+        // explicitly to be robust across browsers/test environments).
+        if (prev.rownum != null && prev.col != null) {
+          win.anchorCell = { rownum: prev.rownum, col: prev.col };
+        }
+        _lastCellTap = { winId: null, rownum: null, col: null, time: 0 };
+        if (_touchLongPress) {
+          clearTimeout(_touchLongPress.timer);
+          _touchLongPress.td.classList.remove('long-press-active');
+          _touchLongPress = null;
+        }
+        _touchCellDrag = {
+          win,
+          startX: touch.clientX, startY: touch.clientY,
+          dragging: false,
+          lastDi: isNaN(di) ? -1 : di,
+          lastCi: isNaN(ci) ? -1 : ci,
+        };
+        return;
+      }
+
+      // First tap: record the cell identity for a potential second tap, then
+      // start the long-press timer.
+      _lastCellTap = {
+        winId: win.id,
+        rownum: row ? row._rownum : null,
+        col,
+        time: now,
+      };
       startCellLongPress(td, touch.clientX, touch.clientY);
     }, { passive: true });
 
     table.addEventListener('touchmove', (e) => {
       const touch = e.touches[0];
-      if (touch) moveCellLongPress(touch.clientX, touch.clientY);
-    }, { passive: true });
+      if (!touch) return;
+      if (_touchCellDrag && _touchCellDrag.win === win) {
+        const dx = touch.clientX - _touchCellDrag.startX;
+        const dy = touch.clientY - _touchCellDrag.startY;
+        if (!_touchCellDrag.dragging && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) {
+          _touchCellDrag.dragging = true;
+          table.classList.add('drag-selecting');
+          const sel = window.getSelection && window.getSelection();
+          if (sel && sel.removeAllRanges) sel.removeAllRanges();
+          if (navigator.vibrate) navigator.vibrate(10);
+        }
+        if (_touchCellDrag.dragging) {
+          if (e.cancelable) e.preventDefault();
+          const c = getCellCoords(touch.clientX, touch.clientY);
+          if (c && (c.di !== _touchCellDrag.lastDi || c.ci !== _touchCellDrag.lastCi)) {
+            _touchCellDrag.lastDi = c.di;
+            _touchCellDrag.lastCi = c.ci;
+            rebuildSelectionRect(win, c.di, c.ci);
+            applyCellHighlights(win);
+          }
+        }
+        return;
+      }
+      moveCellLongPress(touch.clientX, touch.clientY);
+    }, { passive: false });
 
-    table.addEventListener('touchend', endCellLongPress);
-    table.addEventListener('touchcancel', endCellLongPress);
+    const endCellDrag = (e) => {
+      if (!_touchCellDrag || _touchCellDrag.win !== win) return false;
+      const state = _touchCellDrag;
+      _touchCellDrag = null;
+      if (!state.dragging) return false;
+      table.classList.remove('drag-selecting');
+      // Suppress the synthesized click so the focusin handler doesn't collapse
+      // the selection back to the tapped cell.
+      if (e.cancelable) e.preventDefault();
+      if (state.lastDi >= 0 && state.lastCi >= 0) {
+        focusCellAt(win, state.lastDi, state.lastCi);
+      }
+      return true;
+    };
+
+    table.addEventListener('touchend', (e) => {
+      if (endCellDrag(e)) return;
+      endCellLongPress(e);
+    });
+    table.addEventListener('touchcancel', (e) => {
+      if (endCellDrag(e)) return;
+      endCellLongPress(e);
+    });
 
     table.addEventListener('pointerdown', (e) => {
       if (e.pointerType === 'mouse') return;
+      if (_touchCellDrag) return;  // cell drag-select is handled via touch events
       const td = e.target.closest && e.target.closest('td.data-cell');
       if (!td || !table.contains(td)) return;
       startCellLongPress(td, e.clientX, e.clientY);
@@ -1877,15 +2048,18 @@ const app = (() => {
 
     table.addEventListener('pointermove', (e) => {
       if (e.pointerType === 'mouse') return;
+      if (_touchCellDrag) return;
       moveCellLongPress(e.clientX, e.clientY);
     });
 
     table.addEventListener('pointerup', (e) => {
       if (e.pointerType === 'mouse') return;
+      if (_touchCellDrag) return;
       endCellLongPress(e);
     });
     table.addEventListener('pointercancel', (e) => {
       if (e.pointerType === 'mouse') return;
+      if (_touchCellDrag) return;
       endCellLongPress(e);
     });
 
@@ -3258,7 +3432,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.10.4 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.11.0 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -3312,7 +3486,9 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <h4>Touch Gestures</h4>
 <ul>
 <li><strong>Edit a cell:</strong> Press and hold a cell for about half a second to enter edit mode.</li>
+<li><strong>Select a rectangle of cells:</strong> Tap a cell, then tap and pan from any cell to draw a selection rectangle from the first cell to the panned cell.</li>
 <li><strong>Reorder a column:</strong> Tap a column header, then tap-and-hold the same header and pan to the target position.</li>
+<li><strong>Move a window:</strong> Tap the window's title bar, then tap the title bar again and pan to move the window.</li>
 </ul>
 
 <h4>Sorting &amp; Filtering</h4>

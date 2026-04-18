@@ -158,6 +158,107 @@ test.describe('Touch gestures', () => {
     expect(after).toEqual(['email', 'name']);
   });
 
+  test('1.5-tap on a cell extends the selection rectangle', async ({ page }) => {
+    // Two rows × two cols of data; pick a start and end cell to define a rect.
+    const startCell = page.locator('.subwindow table tbody tr').nth(0).locator('td.data-cell').nth(0);
+    const endCell = page.locator('.subwindow table tbody tr').nth(2).locator('td.data-cell').nth(1);
+
+    const startBox = await startCell.boundingBox();
+    const startCtr = { x: startBox.x + startBox.width / 2, y: startBox.y + startBox.height / 2 };
+    const endBox = await endCell.boundingBox();
+    const endCtr = { x: endBox.x + endBox.width / 2, y: endBox.y + endBox.height / 2 };
+
+    // Tap 1: brief tap on the anchor cell.
+    {
+      const h = await startCell.elementHandle();
+      await dispatchTouch(page, h, 'touchstart', startCtr.x, startCtr.y);
+      await page.waitForTimeout(50);
+      await dispatchTouch(page, h, 'touchend', startCtr.x, startCtr.y);
+      await startCell.dispatchEvent('click');
+    }
+
+    // Tap 2: tap-and-pan across to a different cell to build the rectangle.
+    await page.waitForTimeout(100);
+    {
+      const h = await startCell.elementHandle();
+      await dispatchTouch(page, h, 'touchstart', startCtr.x, startCtr.y);
+      await dispatchTouch(page, h, 'touchmove', startCtr.x + 15, startCtr.y);
+      await dispatchTouch(page, h, 'touchmove', endCtr.x, endCtr.y);
+      await dispatchTouch(page, h, 'touchend', endCtr.x, endCtr.y);
+    }
+
+    await page.waitForTimeout(200);
+    const selected = await page.evaluate(() => {
+      const win = app._test.windows[0];
+      return win.selectedCells ? [...win.selectedCells].sort() : [];
+    });
+    // 2 cols × 3 rows = 6 cells
+    expect(selected.length).toBe(6);
+    expect(selected).toContain('1:name');
+    expect(selected).toContain('1:email');
+    expect(selected).toContain('2:name');
+    expect(selected).toContain('2:email');
+    expect(selected).toContain('3:name');
+    expect(selected).toContain('3:email');
+  });
+
+  test('1.5-tap on titlebar moves the window', async ({ page }) => {
+    const titlebar = page.locator('.subwindow .win-titlebar').first();
+    const before = await page.evaluate(() => {
+      const el = document.querySelector('.subwindow');
+      return { left: parseInt(el.style.left), top: parseInt(el.style.top) };
+    });
+    const box = await titlebar.boundingBox();
+    const startX = box.x + 30;
+    const startY = box.y + box.height / 2;
+
+    const h = await titlebar.elementHandle();
+    // Tap 1: brief tap
+    await dispatchTouch(page, h, 'touchstart', startX, startY);
+    await page.waitForTimeout(50);
+    await dispatchTouch(page, h, 'touchend', startX, startY);
+
+    // Tap 2: tap-and-pan
+    await page.waitForTimeout(100);
+    await dispatchTouch(page, h, 'touchstart', startX, startY);
+    await dispatchTouch(page, h, 'touchmove', startX + 20, startY);
+    await dispatchTouch(page, h, 'touchmove', startX + 80, startY + 40);
+    await dispatchTouch(page, h, 'touchend', startX + 80, startY + 40);
+
+    await page.waitForTimeout(150);
+    const after = await page.evaluate(() => {
+      const el = document.querySelector('.subwindow');
+      return { left: parseInt(el.style.left), top: parseInt(el.style.top) };
+    });
+    expect(after.left).toBeGreaterThan(before.left + 40);
+    expect(after.top).toBeGreaterThan(before.top + 20);
+  });
+
+  test('single touch on titlebar does not move the window', async ({ page }) => {
+    const titlebar = page.locator('.subwindow .win-titlebar').first();
+    const before = await page.evaluate(() => {
+      const el = document.querySelector('.subwindow');
+      return { left: parseInt(el.style.left), top: parseInt(el.style.top) };
+    });
+    const box = await titlebar.boundingBox();
+    const startX = box.x + 30;
+    const startY = box.y + box.height / 2;
+
+    const h = await titlebar.elementHandle();
+    // Single tap-and-pan — no prior tap, so should NOT move the window.
+    await dispatchTouch(page, h, 'touchstart', startX, startY);
+    await dispatchTouch(page, h, 'touchmove', startX + 80, startY + 40);
+    await dispatchTouch(page, h, 'touchend', startX + 80, startY + 40);
+
+    await page.waitForTimeout(150);
+    const after = await page.evaluate(() => {
+      const el = document.querySelector('.subwindow');
+      return { left: parseInt(el.style.left), top: parseInt(el.style.top) };
+    });
+    expect(after.left).toBe(before.left);
+    expect(after.top).toBe(before.top);
+  });
+
   test('tap without follow-up does not enter drag mode', async ({ page }) => {
     const before = (await getTableData(page, 'sample1')).columns;
     expect(before).toEqual(['name', 'email']);
