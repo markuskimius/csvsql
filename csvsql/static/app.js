@@ -913,6 +913,9 @@ const app = (() => {
       prevBounds: null,
       sortCols: [],   // [{col, dir:'asc'|'desc'}, ...]
       filterText: '',
+      selectedCol: null, // column name currently highlighted (target for Ctrl+Arrow reorder)
+      selectedCells: new Set(), // keys "rownum:colName" for cells highlighted by selection
+      anchorCell: null, // { rownum, col } — fixed corner for Ctrl+Shift+Arrow extension
     };
     windows.push(winObj);
 
@@ -1507,9 +1510,10 @@ const app = (() => {
         if (win.sortCols.length > 1) arrow.textContent += (sortIdx + 1);
         th.appendChild(arrow);
       }
-      // Ctrl/Cmd+drag to reorder columns, Ctrl/Cmd+click to rename
+      if (win.selectedCol === col) th.classList.add('col-selected');
+      // Drag to reorder columns; click to sort/select; Ctrl/Cmd+click to rename
       th.addEventListener('mousedown', (e) => {
-        if (!(e.ctrlKey || e.metaKey) || e.button !== 0) return;
+        if (e.button !== 0 || th._renaming) return;
         e.preventDefault();
         const startX = e.clientX;
         const startY = e.clientY;
@@ -1570,12 +1574,13 @@ const app = (() => {
       });
       th.addEventListener('click', (e) => {
         if (th._renaming) return;
+        if (th._didDrag) { th._didDrag = false; return; }
         if (e.ctrlKey || e.metaKey) {
           e.stopPropagation();
-          if (th._didDrag) { th._didDrag = false; return; }
           startColumnRename(win, th, col);
           return;
         }
+        win.selectedCol = col;
         const existing = win.sortCols.findIndex(s => s.col === col);
         if (e.shiftKey) {
           if (existing !== -1) {
@@ -1614,14 +1619,15 @@ const app = (() => {
     // Event delegation on table — replaces per-cell listeners
     table.addEventListener('blur', (e) => {
       const td = e.target;
-      if (td.tagName !== 'TD' || !td.getAttribute('contenteditable')) return;
+      if (td.tagName !== 'TD' || !td.classList.contains('data-cell')) return;
+      if (td.getAttribute('contenteditable') !== 'true') return;
       const tr = td.parentElement;
       const displayIdx = parseInt(tr.dataset.displayIdx, 10);
       const colIdx = parseInt(td.dataset.colIdx, 10);
       if (isNaN(displayIdx) || isNaN(colIdx)) return;
       const row = win._displayRows[displayIdx];
       const col = win._columns[colIdx];
-      if (!row || col == null) return;
+      if (!row || col == null) { exitEditMode(td); return; }
       const newVal = td.textContent;
       if (newVal !== String(row[col] ?? '')) {
         row[col] = newVal;
@@ -1634,36 +1640,155 @@ const app = (() => {
         }
         debouncedSync(win.tableName);
       }
+      exitEditMode(td);
     }, true); // capture phase for blur
+
+    table.addEventListener('focusin', (e) => {
+      const td = e.target;
+      if (td.tagName !== 'TD' || !td.classList.contains('data-cell')) return;
+      if (win._programmaticFocus) return;
+      const tr = td.parentElement;
+      const di = parseInt(tr.dataset.displayIdx, 10);
+      const ci = parseInt(td.dataset.colIdx, 10);
+      if (isNaN(di) || isNaN(ci)) return;
+      const row = win._displayRows[di];
+      if (!row) return;
+      const col = win._columns[ci];
+      win.anchorCell = { rownum: row._rownum, col };
+      win.selectedCells = new Set([`${row._rownum}:${col}`]);
+      applyCellHighlights(win);
+    });
+
+    // Mouse multi-select: Shift+click extends; plain mousedown+drag sweeps a rectangle.
+    let dragState = null;
+    const onDragMove = (ev) => {
+      if (!dragState) return;
+      const el = document.elementFromPoint(ev.clientX, ev.clientY);
+      const td = el && el.closest && el.closest('td.data-cell');
+      if (!td || !table.contains(td)) return;
+      const di = parseInt(td.parentElement.dataset.displayIdx, 10);
+      const ci = parseInt(td.dataset.colIdx, 10);
+      if (isNaN(di) || isNaN(ci)) return;
+      if (di === dragState.lastDi && ci === dragState.lastCi) return;
+      if (!dragState.isDragging && (di !== dragState.startDi || ci !== dragState.startCi)) {
+        dragState.isDragging = true;
+        table.classList.add('drag-selecting');
+      }
+      if (dragState.isDragging) {
+        const sel = window.getSelection && window.getSelection();
+        if (sel && sel.removeAllRanges) sel.removeAllRanges();
+        rebuildSelectionRect(win, di, ci);
+        applyCellHighlights(win);
+      }
+      dragState.lastDi = di;
+      dragState.lastCi = ci;
+    };
+    const onDragEnd = () => {
+      if (dragState && dragState.isDragging) {
+        table.classList.remove('drag-selecting');
+        focusCellAt(win, dragState.lastDi, dragState.lastCi);
+      }
+      dragState = null;
+      document.removeEventListener('mousemove', onDragMove);
+      document.removeEventListener('mouseup', onDragEnd);
+    };
+    table.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      const td = e.target.closest && e.target.closest('td.data-cell');
+      if (!td || !table.contains(td)) return;
+      // Click on a cell already in edit mode: let the native click place the caret.
+      if (td.getAttribute('contenteditable') === 'true') return;
+      const tr = td.parentElement;
+      const di = parseInt(tr.dataset.displayIdx, 10);
+      const ci = parseInt(td.dataset.colIdx, 10);
+      if (isNaN(di) || isNaN(ci)) return;
+      if (e.shiftKey && win.anchorCell) {
+        e.preventDefault();
+        rebuildSelectionRect(win, di, ci);
+        focusCellAt(win, di, ci);
+        applyCellHighlights(win);
+        return;
+      }
+      dragState = { startDi: di, startCi: ci, lastDi: di, lastCi: ci, isDragging: false };
+      document.addEventListener('mousemove', onDragMove);
+      document.addEventListener('mouseup', onDragEnd);
+    });
 
     table.addEventListener('keydown', (e) => {
       const td = e.target;
-      if (td.tagName !== 'TD' || !td.getAttribute('contenteditable')) return;
+      if (td.tagName !== 'TD' || !td.classList.contains('data-cell')) return;
       const tr = td.parentElement;
+      const inEdit = td.getAttribute('contenteditable') === 'true';
+      const isArrow = e.key === 'ArrowUp' || e.key === 'ArrowDown' ||
+                      e.key === 'ArrowLeft' || e.key === 'ArrowRight';
+
+      // F2 or Ctrl/Cmd+U: enter edit mode (select mode only)
+      if (!inEdit && (e.key === 'F2' ||
+          ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'u' || e.key === 'U')))) {
+        e.preventDefault();
+        enterEditMode(td);
+        return;
+      }
+
+      // Select-mode arrow key handling
+      if (!inEdit && isArrow) {
+        const plain = !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
+        const shiftOnly = e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey;
+        const ctrlOnly = (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey;
+        if (plain) {
+          e.preventDefault();
+          moveSingleCellSelection(win, tr, td, e.key);
+          return;
+        }
+        if (shiftOnly) {
+          e.preventDefault();
+          extendCellSelection(win, tr, td, e.key);
+          return;
+        }
+        if (ctrlOnly && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+          e.preventDefault();
+          moveSelectionColumns(win, tr, td, e.key);
+          return;
+        }
+      }
+
       if (e.key === 'Tab') {
         e.preventDefault();
-        const cells = [...tr.querySelectorAll('td[contenteditable]')];
+        const cells = [...tr.querySelectorAll('td.data-cell')];
         const idx = cells.indexOf(td);
         const next = e.shiftKey ? cells[idx - 1] : cells[idx + 1];
         if (next) next.focus();
       } else if (e.key === 'Enter' && !e.shiftKey) {
+        if (!inEdit) return;
         e.preventDefault();
         td.blur();
         const nextTr = tr.nextElementSibling;
         if (nextTr && !nextTr.classList.contains('virtual-pad')) {
           const colIdx = [...tr.children].indexOf(td);
           const nextTd = nextTr.children[colIdx];
-          if (nextTd && nextTd.getAttribute('contenteditable')) nextTd.focus();
+          if (nextTd && nextTd.classList.contains('data-cell')) nextTd.focus();
         }
       } else if (e.key === 'Escape') {
-        const displayIdx = parseInt(tr.dataset.displayIdx, 10);
-        const colIdx = parseInt(td.dataset.colIdx, 10);
-        if (!isNaN(displayIdx) && !isNaN(colIdx)) {
-          const row = win._displayRows[displayIdx];
-          const col = win._columns[colIdx];
-          if (row && col != null) td.textContent = row[col] ?? '';
+        e.preventDefault();
+        if (inEdit) {
+          // Revert edit, exit edit mode, keep selection and focus on this cell.
+          const displayIdx = parseInt(tr.dataset.displayIdx, 10);
+          const colIdx = parseInt(td.dataset.colIdx, 10);
+          if (!isNaN(displayIdx) && !isNaN(colIdx)) {
+            const row = win._displayRows[displayIdx];
+            const col = win._columns[colIdx];
+            if (row && col != null) td.textContent = row[col] ?? '';
+          }
+          exitEditMode(td);
+          win._programmaticFocus = true;
+          td.focus();
+          win._programmaticFocus = false;
+        } else {
+          td.blur();
+          win.selectedCells = new Set();
+          win.anchorCell = null;
+          applyCellHighlights(win);
         }
-        td.blur();
       }
     });
 
@@ -1772,7 +1897,8 @@ const app = (() => {
       for (let c = 0; c < columns.length; c++) {
         const td = document.createElement('td');
         td.textContent = row[columns[c]] ?? '';
-        td.setAttribute('contenteditable', 'true');
+        td.className = 'data-cell';
+        td.tabIndex = 0;
         td.dataset.colIdx = c;
         tr.appendChild(td);
       }
@@ -1792,6 +1918,206 @@ const app = (() => {
 
     tbody.innerHTML = '';
     tbody.appendChild(fragment);
+
+    applyCellHighlights(win);
+  }
+
+  function rebuildSelectionRect(win, leadDisplay, leadCol) {
+    if (!win.anchorCell) {
+      const row = win._displayRows[leadDisplay];
+      if (row) win.anchorCell = { rownum: row._rownum, col: win._columns[leadCol] };
+    }
+    const anchorDisplay = win.anchorCell
+      ? win._displayRows.findIndex(r => r._rownum === win.anchorCell.rownum)
+      : -1;
+    const anchorCol = win.anchorCell ? win._columns.indexOf(win.anchorCell.col) : -1;
+    const next = new Set();
+    if (anchorDisplay === -1 || anchorCol === -1) {
+      const row = win._displayRows[leadDisplay];
+      if (row) {
+        const col = win._columns[leadCol];
+        win.anchorCell = { rownum: row._rownum, col };
+        next.add(`${row._rownum}:${col}`);
+      }
+    } else {
+      const r1 = Math.min(anchorDisplay, leadDisplay);
+      const r2 = Math.max(anchorDisplay, leadDisplay);
+      const c1 = Math.min(anchorCol, leadCol);
+      const c2 = Math.max(anchorCol, leadCol);
+      for (let r = r1; r <= r2; r++) {
+        const row = win._displayRows[r];
+        if (!row) continue;
+        for (let c = c1; c <= c2; c++) {
+          next.add(`${row._rownum}:${win._columns[c]}`);
+        }
+      }
+    }
+    win.selectedCells = next;
+  }
+
+  function focusMiddleCell(win) {
+    const container = win._container;
+    const table = win._table;
+    const tbody = win._tbody;
+    const displayRows = win._displayRows;
+    if (!container || !table || !tbody || !displayRows || !displayRows.length) return false;
+    const rect = container.getBoundingClientRect();
+    const thead = table.querySelector('thead');
+    const theadH = thead ? thead.offsetHeight : 0;
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + theadH + (rect.height - theadH) / 2;
+    const el = document.elementFromPoint(cx, cy);
+    const td = el && el.closest && el.closest('td.data-cell');
+    if (td && table.contains(td)) {
+      td.focus();
+      return true;
+    }
+    return false;
+  }
+
+  function enterEditMode(td) {
+    td.setAttribute('contenteditable', 'true');
+    td.focus();
+    const range = document.createRange();
+    range.selectNodeContents(td);
+    range.collapse(false); // caret at end
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+  function exitEditMode(td) {
+    if (td.getAttribute('contenteditable') === 'true') {
+      td.removeAttribute('contenteditable');
+    }
+  }
+
+  function moveSelectionColumns(win, tr, td, key) {
+    const t = tables[win.tableName];
+    if (!t) return;
+    const leadCi = parseInt(td.dataset.colIdx, 10);
+    const displayIdx = parseInt(tr.dataset.displayIdx, 10);
+    if (isNaN(leadCi) || isNaN(displayIdx)) return;
+    const anchorCi = win.anchorCell ? t.columns.indexOf(win.anchorCell.col) : leadCi;
+    const c1 = Math.min(anchorCi, leadCi);
+    const c2 = Math.max(anchorCi, leadCi);
+    const focusedCol = win._columns[leadCi];
+    const refocus = () => {
+      const newCi = tables[win.tableName].columns.indexOf(focusedCol);
+      if (newCi >= 0) focusCellAt(win, displayIdx, newCi);
+    };
+    if (key === 'ArrowLeft') {
+      if (c1 === 0) return;
+      reorderColumn(win, c1 - 1, c2 + 1).then(refocus);
+    } else {
+      if (c2 >= t.columns.length - 1) return;
+      reorderColumn(win, c2 + 1, c1).then(refocus);
+    }
+  }
+
+  function extendCellSelection(win, tr, td, key) {
+    const displayIdx = parseInt(tr.dataset.displayIdx, 10);
+    const colIdx = parseInt(td.dataset.colIdx, 10);
+    if (isNaN(displayIdx) || isNaN(colIdx)) return;
+    const maxDisplay = win._displayRows.length - 1;
+    const maxCol = win._columns.length - 1;
+    let newDisplay = displayIdx;
+    let newCol = colIdx;
+    if (key === 'ArrowUp') newDisplay = Math.max(0, displayIdx - 1);
+    else if (key === 'ArrowDown') newDisplay = Math.min(maxDisplay, displayIdx + 1);
+    else if (key === 'ArrowLeft') newCol = Math.max(0, colIdx - 1);
+    else if (key === 'ArrowRight') newCol = Math.min(maxCol, colIdx + 1);
+    if (newDisplay === displayIdx && newCol === colIdx) return; // at edge
+    rebuildSelectionRect(win, newDisplay, newCol);
+    focusCellAt(win, newDisplay, newCol);
+    applyCellHighlights(win);
+  }
+
+  function moveSingleCellSelection(win, tr, td, key) {
+    const displayIdx = parseInt(tr.dataset.displayIdx, 10);
+    const colIdx = parseInt(td.dataset.colIdx, 10);
+    if (isNaN(displayIdx) || isNaN(colIdx)) return;
+    const maxDisplay = win._displayRows.length - 1;
+    const maxCol = win._columns.length - 1;
+    let newDisplay = displayIdx;
+    let newCol = colIdx;
+    if (key === 'ArrowUp') newDisplay = Math.max(0, displayIdx - 1);
+    else if (key === 'ArrowDown') newDisplay = Math.min(maxDisplay, displayIdx + 1);
+    else if (key === 'ArrowLeft') newCol = Math.max(0, colIdx - 1);
+    else if (key === 'ArrowRight') newCol = Math.min(maxCol, colIdx + 1);
+    if (newDisplay === displayIdx && newCol === colIdx) return; // at edge
+    const row = win._displayRows[newDisplay];
+    const col = win._columns[newCol];
+    if (!row || col == null) return;
+    win.anchorCell = { rownum: row._rownum, col };
+    win.selectedCells = new Set([`${row._rownum}:${col}`]);
+    focusCellAt(win, newDisplay, newCol);
+    applyCellHighlights(win);
+  }
+
+  function focusCellAt(win, displayIdx, colIdx) {
+    const container = win._container;
+    const thead = win._table?.querySelector('thead');
+    if (!container) return;
+    const theadH = thead ? thead.offsetHeight : 0;
+    const cellTop = displayIdx * ROW_HEIGHT;
+    const cellBottom = cellTop + ROW_HEIGHT;
+    const viewTop = Math.max(0, container.scrollTop - theadH);
+    const viewBottom = viewTop + container.clientHeight - theadH;
+    if (cellTop < viewTop) {
+      container.scrollTop = cellTop;
+    } else if (cellBottom > viewBottom) {
+      container.scrollTop = cellBottom - (container.clientHeight - theadH);
+    }
+    // Force render of the target cell before focusing
+    win._renderStart = -1; win._renderEnd = -1;
+    renderVisibleRows(win);
+    const tr = win._tbody.querySelector(`tr[data-display-idx="${displayIdx}"]`);
+    if (!tr) return;
+    const td = tr.children[colIdx + 1]; // +1 for row-num column
+    if (!td) return;
+    win._programmaticFocus = true;
+    td.focus();
+    win._programmaticFocus = false;
+  }
+
+  function applyCellHighlights(win) {
+    const tbody = win._tbody;
+    const table = win._table;
+    if (!tbody || !table) return;
+    const thead = table.querySelector('thead tr');
+    const selected = win.selectedCells || new Set();
+    const hiRows = new Set();
+    const hiCols = new Set();
+    for (const key of selected) {
+      const sep = key.indexOf(':');
+      if (sep < 0) continue;
+      hiRows.add(parseInt(key.slice(0, sep), 10));
+      hiCols.add(key.slice(sep + 1));
+    }
+    if (thead) {
+      for (const th of thead.querySelectorAll('th')) {
+        const ci = parseInt(th.dataset.colIdx, 10);
+        if (isNaN(ci)) continue;
+        const name = win._columns[ci];
+        th.classList.toggle('col-highlight', hiCols.has(name));
+      }
+    }
+    for (const tr of tbody.querySelectorAll('tr')) {
+      if (tr.classList.contains('virtual-pad')) continue;
+      const di = parseInt(tr.dataset.displayIdx, 10);
+      if (isNaN(di)) continue;
+      const row = win._displayRows[di];
+      if (!row) continue;
+      tr.classList.toggle('row-highlight', hiRows.has(row._rownum));
+      for (const td of tr.children) {
+        const ci = parseInt(td.dataset.colIdx, 10);
+        if (isNaN(ci)) continue;
+        const name = win._columns[ci];
+        td.classList.toggle('col-highlight', hiCols.has(name));
+        td.classList.toggle('cell-selected', selected.has(`${row._rownum}:${name}`));
+      }
+    }
   }
 
   function rebuildTable(win) {
@@ -1856,6 +2182,7 @@ const app = (() => {
     for (const s of win.sortCols) {
       if (s.col === oldCol) s.col = newCol;
     }
+    if (win.selectedCol === oldCol) win.selectedCol = newCol;
     markModified(tableName);
     try { db.run(`ALTER TABLE [${tableName}] RENAME COLUMN [${oldCol}] TO [${newCol}]`); } catch (_) {}
     rebuildTable(win);
@@ -2071,12 +2398,40 @@ const app = (() => {
     });
 
     document.addEventListener('keydown', (e) => {
+      // Plain arrow key on an active data window with no cell selected: focus the cell in the middle of the view.
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey &&
+          (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        const tgt = e.target;
+        if (tgt && tgt.matches && tgt.matches('input, textarea, [contenteditable="true"]')) return;
+        const win = getActiveDataWindow();
+        if (!win || win.anchorCell) return;
+        if (focusMiddleCell(win)) e.preventDefault();
+        return;
+      }
       if (!(e.ctrlKey || e.metaKey)) return;
       switch (e.key) {
         case 's': e.preventDefault(); saveActiveTable(); break;
         case 'o': e.preventDefault(); openFile(e.shiftKey); break;
         case 'n': e.preventDefault(); newTable(); break;
         case 'w': e.preventDefault(); if (activeWinId) closeWindow(activeWinId); break;
+        case 'ArrowLeft':
+        case 'ArrowRight': {
+          const tgt = e.target;
+          if (tgt && tgt.matches && tgt.matches('input, textarea, [contenteditable="true"], td.data-cell')) return;
+          const win = getActiveDataWindow();
+          if (!win || !win.selectedCol) return;
+          const t = tables[win.tableName];
+          if (!t) return;
+          const idx = t.columns.indexOf(win.selectedCol);
+          if (idx === -1) return;
+          const dir = e.key === 'ArrowLeft' ? -1 : 1;
+          const target = idx + dir;
+          if (target < 0 || target >= t.columns.length) return;
+          e.preventDefault();
+          const toIdx = dir === -1 ? target : target + 1;
+          reorderColumn(win, idx, toIdx);
+          break;
+        }
       }
     });
   }
@@ -2728,7 +3083,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.9.6 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.10.0 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -2768,12 +3123,14 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 <h4>Editing</h4>
 <ul>
-<li><strong>Edit cells:</strong> Click any cell to edit. Press <code>Tab</code>/<code>Shift+Tab</code> to move between cells, <code>Enter</code> to move down, <code>Escape</code> to cancel.</li>
+<li><strong>Edit cells:</strong> Click a cell to select it; press <code>F2</code> or <code>Ctrl</code>/<code>&#8984;</code>+<code>U</code> to enter edit mode. <code>Tab</code>/<code>Shift+Tab</code> moves between cells, <code>Enter</code> saves and moves down, <code>Escape</code> reverts the edit (and clears the selection when not editing).</li>
+<li><strong>Highlight row &amp; column:</strong> Clicking a cell also highlights its row and column. Move the selection with plain arrow keys; extend to a rectangle of cells with <code>Shift</code>+arrow, <code>Shift</code>+click on another cell, or click-and-drag across cells &mdash; every selected cell's row and column is highlighted so you can see what lines up with what. Pressing an arrow key with no cell selected focuses the cell in the middle of the current view. <code>Esc</code> clears the selection.</li>
 <li><strong>Add rows:</strong> Click <code>+ Row</code> in the toolbar, or right-click a row number to insert above.</li>
 <li><strong>Delete rows:</strong> Right-click a row number and choose Delete Row.</li>
 <li><strong>Add columns:</strong> Click <code>+ Col</code> in the toolbar.</li>
 <li><strong>Rename columns:</strong> <code>Ctrl</code>/<code>&#8984;</code>+click a column header.</li>
-<li><strong>Reorder columns:</strong> <code>Ctrl</code>/<code>&#8984;</code>+drag a column header to a new position.</li>
+<li><strong>Select a column:</strong> Click a column header to select it (highlighted) and sort it. Selection is the target for Ctrl+&larr;/&rarr;.</li>
+<li><strong>Reorder columns:</strong> Drag a column header to a new position. With a column selected by clicking its header, press <code>Ctrl</code>/<code>&#8984;</code>+<code>&larr;</code>/<code>&rarr;</code> to nudge it. With cells selected (in select mode, not editing), <code>Ctrl</code>/<code>&#8984;</code>+<code>&larr;</code>/<code>&rarr;</code> moves the columns spanned by the selection.</li>
 <li><strong>Rename tables:</strong> <code>Ctrl</code>/<code>&#8984;</code>+click the window title.</li>
 </ul>
 
@@ -2845,6 +3202,11 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <tr><td><code>Ctrl+S</code> / <code>&#8984;S</code></td><td>Save table</td></tr>
 <tr><td><code>Ctrl+N</code> / <code>&#8984;N</code></td><td>New table</td></tr>
 <tr><td><code>Ctrl+W</code> / <code>&#8984;W</code></td><td>Close window</td></tr>
+<tr><td><code>Ctrl+&larr;</code> / <code>Ctrl+&rarr;</code> (or <code>&#8984;</code>+arrow)</td><td>Move selected header column, or cell-selection's columns, left / right</td></tr>
+<tr><td><code>F2</code> or <code>Ctrl</code>/<code>&#8984;</code>+<code>U</code></td><td>Enter edit mode on the selected cell</td></tr>
+<tr><td>Arrow keys (no cell selected)</td><td>Focus the cell in the middle of the visible table</td></tr>
+<tr><td>Arrow keys (cell selected, not editing)</td><td>Move selection to the adjacent cell</td></tr>
+<tr><td><code>Shift+</code>arrow</td><td>Extend cell selection (highlights row &amp; column of every selected cell)</td></tr>
 <tr><td><code>Ctrl+Enter</code></td><td>Execute SQL query</td></tr>
 <tr><td><code>Enter</code></td><td>Send AI prompt</td></tr>
 <tr><td><code>Shift+Enter</code></td><td>Newline in AI prompt</td></tr>
@@ -2873,6 +3235,9 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <p><strong>Images:</strong> Drag and drop PNG or JPG images onto the AI chat area to upload them. Uploaded images appear as thumbnails above the input field and can be included in PDF reports (e.g., as a logo). Click &times; to remove an image.</p>
 <p>The AI queries your data with SQL first, then uses the results to build the rich output. Chart.js and jsPDF libraries are loaded on demand when first needed.</p>
 <p>Click the gear icon &#9881; to configure the provider, model, and API keys.</p>
+
+<h4>Links</h4>
+<p><a href="https://github.com/markuskimius/csvsql" target="_blank">GitHub</a></p>
     `);
   }
 
@@ -3081,31 +3446,15 @@ Smaller models, runs entirely in the browser — no install needed.<br>
               }
               line += `\n    Percentiles: p25=${pVals[0]}, median=${pVals[1]}, p75=${pVals[2]}`;
             }
-            // 10-bucket histogram
-            if (mn != null && mx != null) {
-              const minVal = Number(mn), maxVal = Number(mx);
-              if (isFinite(minVal) && isFinite(maxVal) && maxVal > minVal) {
-                const bucketWidth = (maxVal - minVal) / 10;
-                const histRes = db.exec(`SELECT CASE WHEN CAST(((CAST([${col}] AS REAL) - ${minVal}) / ${bucketWidth}) AS INTEGER) >= 10 THEN 9 ELSE CAST(((CAST([${col}] AS REAL) - ${minVal}) / ${bucketWidth}) AS INTEGER) END AS bucket, COUNT(*) FROM [${tableName}] WHERE [${col}] GLOB '*[0-9]*' GROUP BY bucket ORDER BY bucket`);
-                if (histRes.length) {
-                  const buckets = histRes[0].values.map(r => {
-                    const b = r[0];
-                    const lo = (minVal + b * bucketWidth).toFixed(2);
-                    const hi = (minVal + (b + 1) * bucketWidth).toFixed(2);
-                    return `[${lo}-${hi}]: ${r[1]}`;
-                  });
-                  line += `\n    Distribution: ${buckets.join(' | ')}`;
-                }
-              }
-            }
           } catch {}
         } else if (distinct <= 1000 && distinct > 0) {
-          // Categorical: all value counts (≤1000 distinct fits easily in budget)
+          // Categorical: top 20 value counts
           try {
-            const topRes = db.exec(`SELECT [${col}], COUNT(*) as cnt FROM [${tableName}] WHERE [${col}] IS NOT NULL AND [${col}] != '' GROUP BY [${col}] ORDER BY cnt DESC`);
+            const topRes = db.exec(`SELECT [${col}], COUNT(*) as cnt FROM [${tableName}] WHERE [${col}] IS NOT NULL AND [${col}] != '' GROUP BY [${col}] ORDER BY cnt DESC LIMIT 20`);
             if (topRes.length) {
               const vals = topRes[0].values.map(r => `${r[0]} (${r[1]})`).join(', ');
-              line += `\n    Value counts: ${vals}`;
+              line += `\n    Top values: ${vals}`;
+              if (distinct > 20) line += ` ... and ${distinct - 20} more`;
             }
           } catch {}
         }
@@ -3127,8 +3476,8 @@ Smaller models, runs entirely in the browser — no install needed.<br>
 
       let info = `Table: ${name}\nColumns: ${t.columns.join(', ')}\nTotal rows: ${t.rows.length}\n\n`;
 
-      // For small tables (<=200 rows), include all rows directly
-      if (t.rows.length <= 200) {
+      // For small tables (<=50 rows), include all rows directly
+      if (t.rows.length <= 50) {
         const header = t.columns.join(' | ');
         const maxCellLen = 100;
         const rowLines = t.rows.map(row =>
@@ -3561,14 +3910,21 @@ You can optionally set "width" (in PDF points, max is page width). Reference ima
     if (selectedTables.length > 0) flushAllSyncs();
     _aiConversation.push({ role: 'user', content: prompt });
 
+    // Cap conversation history to limit token usage
+    const MAX_AI_HISTORY = 20;
+    if (_aiConversation.length > MAX_AI_HISTORY) {
+      _aiConversation = _aiConversation.slice(-MAX_AI_HISTORY);
+    }
+
     let systemPrompt;
+    let systemPromptShort; // lighter prompt for SQL follow-up rounds (omits data context)
     if (selectedTables.length > 0) {
       const dataContext = buildDataContext(selectedTables);
       const tableList = selectedTables.map(n => {
         const t = tables[n];
         return `[${n}] (${t ? t.columns.join(', ') : 'unknown columns'})`;
       }).join(', ');
-      systemPrompt = `You are a data analyst. You have full access to a SQLite database containing the user's data.
+      const coreInstructions = `You are a data analyst. You have full access to a SQLite database containing the user's data.
 
 IMPORTANT: To answer questions, you MUST write SQL queries. Write them in \`\`\`sql code blocks and they will be executed automatically. The results will be returned to you. Then use the results to answer the user's question.
 
@@ -3587,14 +3943,18 @@ SELECT [product], SUM([revenue]) as total FROM [sales] GROUP BY [product] ORDER 
 \`\`\`
 
 ${_richBlockPrompt}
-${_aiImageContext()}
+${_aiImageContext()}`;
+
+      systemPrompt = `${coreInstructions}
 
 ${dataContext}`;
+      systemPromptShort = coreInstructions;
     } else {
       systemPrompt = `You are a helpful assistant. No data tables are currently loaded. Answer the user's question to the best of your ability. If the user asks about data analysis, let them know they can open CSV, Excel, or other data files to analyze.
 
 ${_richBlockPrompt}
 ${_aiImageContext()}`;
+      systemPromptShort = systemPrompt;
     }
 
     // Append user message bubble
@@ -3631,7 +3991,7 @@ ${_aiImageContext()}`;
     try {
       for (let round = 0; round <= MAX_SQL_ROUNDS; round++) {
         const messages = [
-          { role: 'system', content: systemPrompt },
+          { role: 'system', content: round === 0 ? systemPrompt : systemPromptShort },
           ..._aiConversation,
         ];
 
@@ -3684,10 +4044,10 @@ ${_aiImageContext()}`;
               for (const r of results) {
                 const header = r.columns.join(' | ');
                 const rows = r.values.map(row => row.map(v => String(v ?? 'NULL')).join(' | '));
-                // Limit to 200 result rows to stay within budget
-                const shown = rows.slice(0, 200);
+                // Limit to 50 result rows to stay within token budget
+                const shown = rows.slice(0, 50);
                 resultsText += `Query: ${sql}\n${header}\n${shown.join('\n')}`;
-                if (rows.length > 200) resultsText += `\n... (${rows.length - 200} more rows)`;
+                if (rows.length > 50) resultsText += `\n... (${rows.length - 50} more rows)`;
                 resultsText += '\n\n';
               }
             }

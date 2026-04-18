@@ -8,18 +8,27 @@ test.describe('Table Editing', () => {
     await waitForWindow(page, 'sample1');
   });
 
-  test('cells are contenteditable', async ({ page }) => {
-    const cell = page.locator('.subwindow table tbody td[contenteditable]').first();
+  test('cells are selectable but not editable until F2', async ({ page }) => {
+    const cell = page.locator('.subwindow table tbody td.data-cell').first();
     await expect(cell).toBeVisible();
+    await cell.click();
+    // Clicking selects, does not enter edit mode.
+    await expect(cell).not.toHaveAttribute('contenteditable', 'true');
+    await page.keyboard.press('F2');
+    await expect(cell).toHaveAttribute('contenteditable', 'true');
+    // Escape reverts and exits edit mode.
+    await page.keyboard.press('Escape');
+    await expect(cell).not.toHaveAttribute('contenteditable', 'true');
   });
 
   test('editing a cell updates the table data', async ({ page }) => {
     const before = await getTableData(page, 'sample1');
     const col = before.columns[0];
 
-    // Click to focus the first editable cell and change its content
-    const cell = page.locator('.subwindow table tbody td[contenteditable]').first();
+    // Click to select, F2 to enter edit mode, then type.
+    const cell = page.locator('.subwindow table tbody td.data-cell').first();
     await cell.click();
+    await page.keyboard.press('F2');
     await cell.fill('EDITED_VALUE');
     // Blur to trigger the save
     await page.locator('#sql-input').click();
@@ -27,6 +36,13 @@ test.describe('Table Editing', () => {
 
     const after = await getTableData(page, 'sample1');
     expect(after.rows[0][col]).toBe('EDITED_VALUE');
+  });
+
+  test('Ctrl+U also enters edit mode', async ({ page }) => {
+    const cell = page.locator('.subwindow table tbody td.data-cell').first();
+    await cell.click();
+    await page.keyboard.press('Control+u');
+    await expect(cell).toHaveAttribute('contenteditable', 'true');
   });
 
   test('add row via context menu', async ({ page }) => {

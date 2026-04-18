@@ -390,6 +390,10 @@ body {
   border-right: 2px solid var(--accent-hover);
 }
 
+.data-table th.col-selected {
+  box-shadow: inset 0 -2px 0 var(--accent-hover);
+}
+
 .col-drag-ghost {
   position: fixed;
   transform: translateX(-50%) translateY(-50%);
@@ -427,12 +431,13 @@ body {
   user-select: none;
 }
 
-.data-table td[contenteditable="true"] {
-  cursor: text;
+.data-table td.data-cell {
+  cursor: cell;
   outline: none;
 }
 
-.data-table td[contenteditable="true"]:focus {
+.data-table td.data-cell[contenteditable="true"] {
+  cursor: text;
   background: var(--cell-edit);
   outline: 2px solid var(--accent);
   outline-offset: -2px;
@@ -453,6 +458,31 @@ body {
 
 .data-table td.modified {
   background: rgba(85,204,136,0.1) !important;
+}
+
+.data-table tr.row-highlight td:not(.row-num) {
+  background: rgba(124,111,247,0.10);
+}
+.data-table tr.row-highlight td.row-num {
+  background: rgba(124,111,247,0.25);
+  color: var(--text);
+}
+.data-table td.col-highlight {
+  background: rgba(124,111,247,0.10);
+}
+.data-table tr.row-highlight td.col-highlight {
+  background: rgba(124,111,247,0.20);
+}
+.data-table th.col-highlight {
+  background: rgba(124,111,247,0.25);
+}
+.data-table td.cell-selected {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.data-table.drag-selecting, .data-table.drag-selecting td {
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .win-statusbar {
