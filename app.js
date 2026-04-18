@@ -1805,18 +1805,15 @@ const app = (() => {
       document.addEventListener('mouseup', onDragEnd);
     });
 
-    // Touch: long-press a cell to enter edit mode. enterEditMode must run inside
-    // the touchend user gesture so the virtual keyboard opens on iOS/Android.
-    table.addEventListener('touchstart', (e) => {
-      if (e.touches.length !== 1) return;
-      const touch = e.touches[0];
-      const td = e.target.closest && e.target.closest('td.data-cell');
-      if (!td || !table.contains(td)) return;
+    // Long-press a cell to enter edit mode. enterEditMode must run inside the
+    // end-gesture handler so iOS/Android open the virtual keyboard. We listen
+    // on both touch and pointer events so this works regardless of which event
+    // family the browser delivers first; whichever fires first claims the
+    // interaction via `_touchLongPress` and the other no-ops.
+    const startCellLongPress = (td, clientX, clientY) => {
+      if (_touchLongPress) return;
       if (td.getAttribute('contenteditable') === 'true') return;
-      const state = {
-        td, startX: touch.clientX, startY: touch.clientY,
-        timer: null, fired: false,
-      };
+      const state = { td, startX: clientX, startY: clientY, timer: null, fired: false };
       state.timer = setTimeout(() => {
         if (_touchLongPress !== state) return;
         state.fired = true;
@@ -1824,21 +1821,19 @@ const app = (() => {
         if (navigator.vibrate) navigator.vibrate(15);
       }, LONG_PRESS_MS);
       _touchLongPress = state;
-    }, { passive: true });
+    };
 
-    table.addEventListener('touchmove', (e) => {
+    const moveCellLongPress = (clientX, clientY) => {
       if (!_touchLongPress) return;
-      const touch = e.touches[0];
-      if (!touch) return;
-      if (Math.abs(touch.clientX - _touchLongPress.startX) > 10 ||
-          Math.abs(touch.clientY - _touchLongPress.startY) > 10) {
+      if (Math.abs(clientX - _touchLongPress.startX) > 10 ||
+          Math.abs(clientY - _touchLongPress.startY) > 10) {
         clearTimeout(_touchLongPress.timer);
         _touchLongPress.td.classList.remove('long-press-active');
         _touchLongPress = null;
       }
-    }, { passive: true });
+    };
 
-    const endCellTouch = (e) => {
+    const endCellLongPress = (e) => {
       if (!_touchLongPress) return;
       const state = _touchLongPress;
       _touchLongPress = null;
@@ -1846,12 +1841,46 @@ const app = (() => {
       state.td.classList.remove('long-press-active');
       if (state.fired && state.td.isConnected) {
         if (e.cancelable) e.preventDefault();
-        state.td.focus();
         enterEditMode(state.td);
       }
     };
-    table.addEventListener('touchend', endCellTouch);
-    table.addEventListener('touchcancel', endCellTouch);
+
+    table.addEventListener('touchstart', (e) => {
+      if (e.touches.length !== 1) return;
+      const touch = e.touches[0];
+      const td = e.target.closest && e.target.closest('td.data-cell');
+      if (!td || !table.contains(td)) return;
+      startCellLongPress(td, touch.clientX, touch.clientY);
+    }, { passive: true });
+
+    table.addEventListener('touchmove', (e) => {
+      const touch = e.touches[0];
+      if (touch) moveCellLongPress(touch.clientX, touch.clientY);
+    }, { passive: true });
+
+    table.addEventListener('touchend', endCellLongPress);
+    table.addEventListener('touchcancel', endCellLongPress);
+
+    table.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'mouse') return;
+      const td = e.target.closest && e.target.closest('td.data-cell');
+      if (!td || !table.contains(td)) return;
+      startCellLongPress(td, e.clientX, e.clientY);
+    });
+
+    table.addEventListener('pointermove', (e) => {
+      if (e.pointerType === 'mouse') return;
+      moveCellLongPress(e.clientX, e.clientY);
+    });
+
+    table.addEventListener('pointerup', (e) => {
+      if (e.pointerType === 'mouse') return;
+      endCellLongPress(e);
+    });
+    table.addEventListener('pointercancel', (e) => {
+      if (e.pointerType === 'mouse') return;
+      endCellLongPress(e);
+    });
 
     table.addEventListener('keydown', (e) => {
       const td = e.target;
@@ -3222,7 +3251,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.10.1 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.10.2 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);

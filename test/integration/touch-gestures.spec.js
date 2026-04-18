@@ -27,6 +27,22 @@ async function dispatchTouch(page, elementHandle, type, clientX, clientY) {
   }, { type, x: clientX, y: clientY });
 }
 
+// Dispatch a pointer event on an element at the given viewport coordinates.
+async function dispatchPointer(page, elementHandle, type, clientX, clientY, pointerType = 'touch') {
+  await elementHandle.evaluate((el, args) => {
+    const evt = new PointerEvent(args.type, {
+      cancelable: true,
+      bubbles: true,
+      pointerType: args.pointerType,
+      isPrimary: true,
+      pointerId: 1,
+      clientX: args.x,
+      clientY: args.y,
+    });
+    el.dispatchEvent(evt);
+  }, { type, x: clientX, y: clientY, pointerType });
+}
+
 async function centerOf(locator) {
   const box = await locator.boundingBox();
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
@@ -61,6 +77,32 @@ test.describe('Touch gestures', () => {
     await page.waitForTimeout(100);
     await dispatchTouch(page, handle, 'touchend', x, y);
     await page.waitForTimeout(200);
+
+    await expect(cell).not.toHaveAttribute('contenteditable', 'true');
+  });
+
+  test('long-press via pointer events also enters edit mode', async ({ page }) => {
+    // Some browsers / devtools modes deliver pointer events but not touch events;
+    // the handler should work in either path.
+    const cell = page.locator('.subwindow table tbody td.data-cell').first();
+    const handle = await cell.elementHandle();
+    const { x, y } = await centerOf(cell);
+
+    await dispatchPointer(page, handle, 'pointerdown', x, y);
+    await page.waitForTimeout(750);
+    await dispatchPointer(page, handle, 'pointerup', x, y);
+
+    await expect(cell).toHaveAttribute('contenteditable', 'true');
+  });
+
+  test('pointer long-press ignores mouse input', async ({ page }) => {
+    const cell = page.locator('.subwindow table tbody td.data-cell').first();
+    const handle = await cell.elementHandle();
+    const { x, y } = await centerOf(cell);
+
+    await dispatchPointer(page, handle, 'pointerdown', x, y, 'mouse');
+    await page.waitForTimeout(750);
+    await dispatchPointer(page, handle, 'pointerup', x, y, 'mouse');
 
     await expect(cell).not.toHaveAttribute('contenteditable', 'true');
   });
