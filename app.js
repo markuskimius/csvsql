@@ -12,15 +12,13 @@ const app = (() => {
   let _activeConsoleTab = 'sql';
 
   // Touch gesture state (shared across tables / windows)
-  let _touchLongPress = null;              // cell long-press (→ enter edit mode)
   let _touchHeaderDrag = null;             // header 1.5-tap drag (→ reorder column)
-  let _touchCellDrag = null;               // cell 1.5-tap drag (→ multi-cell select)
+  let _touchCellDrag = null;               // cell second-tap interaction (→ double-tap edit or 1.5-tap multi-select)
   let _touchWinDrag = null;                // titlebar 1.5-tap drag (→ move window)
   let _lastHeaderTap = { tableName: null, col: null, time: 0 };
   let _lastCellTap = { winId: null, rownum: null, col: null, time: 0 };
   let _lastTitleTap = { winId: null, time: 0 };
-  const LONG_PRESS_MS = 600;               // hold to enter cell edit mode
-  const DOUBLE_TAP_WINDOW_MS = 500;        // tap 1 → tap 2 window for 1.5-tap drag
+  const DOUBLE_TAP_WINDOW_MS = 500;        // tap 1 → tap 2 window for double-tap / 1.5-tap
 
   // Virtual scrolling constants
   const ROW_HEIGHT = 26;
@@ -1869,59 +1867,20 @@ const app = (() => {
       document.addEventListener('mouseup', onDragEnd);
     });
 
-    // Long-press a cell to enter edit mode. We listen on both touch and pointer
-    // events so this works regardless of which event family the browser delivers
-    // first; whichever fires first claims the interaction via `_touchLongPress`
-    // and the other no-ops.
+    // Cell touch handling — two gestures, both starting from a second tap
+    // within DOUBLE_TAP_WINDOW_MS of the first:
+    //  - Double-tap (quick two taps, no pan) → enter edit mode on the tapped cell
+    //  - 1.5-tap (tap, then tap-and-pan) → extend the cell selection rectangle
+    //    from the anchor cell to the panned cell (like a mouse drag-select)
+    // The two are disambiguated at touchend: if the second tap moved >5 px we
+    // already switched into drag mode; otherwise we treat it as a double-tap.
     //
-    // iOS opens the virtual keyboard only when a native tap/click lands on an
-    // already-editable element — a programmatic focus() inside our handlers is
-    // not recognized as a user gesture for keyboard purposes. So we flip
-    // contenteditable on when the long-press timer fires, then DON'T
-    // preventDefault on touchend: the browser's synthesized click then lands on
-    // the now-editable cell and iOS opens the keyboard natively.
-    const startCellLongPress = (td, clientX, clientY) => {
-      if (_touchLongPress) return;
-      if (td.getAttribute('contenteditable') === 'true') return;
-      const state = { td, startX: clientX, startY: clientY, timer: null, fired: false };
-      state.timer = setTimeout(() => {
-        if (_touchLongPress !== state) return;
-        state.fired = true;
-        td.classList.add('long-press-active');
-        if (navigator.vibrate) navigator.vibrate(15);
-        td.setAttribute('contenteditable', 'true');
-      }, LONG_PRESS_MS);
-      _touchLongPress = state;
-    };
-
-    const moveCellLongPress = (clientX, clientY) => {
-      if (!_touchLongPress) return;
-      if (Math.abs(clientX - _touchLongPress.startX) > 10 ||
-          Math.abs(clientY - _touchLongPress.startY) > 10) {
-        clearTimeout(_touchLongPress.timer);
-        _touchLongPress.td.classList.remove('long-press-active');
-        _touchLongPress = null;
-      }
-    };
-
-    const endCellLongPress = (e) => {
-      if (!_touchLongPress) return;
-      const state = _touchLongPress;
-      _touchLongPress = null;
-      clearTimeout(state.timer);
-      state.td.classList.remove('long-press-active');
-      // If the long-press timer fired, the cell is already contenteditable.
-      // Don't preventDefault — the browser will synthesize a click on the
-      // editable cell, which iOS treats as a user gesture and opens the
-      // keyboard. The synthesized click places the caret where the finger was.
-    };
-
-    // Cell touch handling combines two gestures:
-    //  - long-press (600 ms hold) → enter edit mode
-    //  - 1.5-tap (quick tap, then tap-and-pan) → extend the cell selection
-    //    rectangle from the anchor to the panned cell, like a mouse drag-select.
-    // The 1.5-tap is detected on touchstart by comparing against `_lastCellTap`.
-    // Second tap cancels any pending long-press so the two gestures don't race.
+    // For edit mode, iOS opens the virtual keyboard only when a native
+    // tap/click lands on an already-editable element — programmatic focus()
+    // inside a touch handler doesn't count. So touchend sets
+    // contenteditable="true" synchronously and does NOT preventDefault: the
+    // browser's synthesized click then lands on the now-editable cell and iOS
+    // opens the keyboard natively.
     const getCellCoords = (clientX, clientY) => {
       const el = document.elementFromPoint(clientX, clientY);
       const td = el && el.closest && el.closest('td.data-cell');
@@ -1951,22 +1910,17 @@ const app = (() => {
       const isSecondTap = prev.winId === win.id &&
                           (now - prev.time) < DOUBLE_TAP_WINDOW_MS;
       if (isSecondTap) {
-        // Second tap: enter drag-pending mode. Cancel any long-press so we
-        // don't fire edit-mode mid-drag. Seed the anchor from the first-tap
-        // cell so the drag-select rectangle starts there (a real device gets
-        // this for free via the synthesized click → focusin, but we set it
-        // explicitly to be robust across browsers/test environments).
+        // Seed the anchor from the first-tap cell so if the second tap pans
+        // into a drag-select, the rectangle starts from tap 1. Real devices
+        // get this for free via the synthesized click → focusin; we set it
+        // explicitly to be robust across browsers and test environments.
         if (prev.rownum != null && prev.col != null) {
           win.anchorCell = { rownum: prev.rownum, col: prev.col };
         }
         _lastCellTap = { winId: null, rownum: null, col: null, time: 0 };
-        if (_touchLongPress) {
-          clearTimeout(_touchLongPress.timer);
-          _touchLongPress.td.classList.remove('long-press-active');
-          _touchLongPress = null;
-        }
         _touchCellDrag = {
           win,
+          td,
           startX: touch.clientX, startY: touch.clientY,
           dragging: false,
           lastDi: isNaN(di) ? -1 : di,
@@ -1975,93 +1929,64 @@ const app = (() => {
         return;
       }
 
-      // First tap: record the cell identity for a potential second tap, then
-      // start the long-press timer.
+      // First tap: record the cell identity for a potential second tap.
       _lastCellTap = {
         winId: win.id,
         rownum: row ? row._rownum : null,
         col,
         time: now,
       };
-      startCellLongPress(td, touch.clientX, touch.clientY);
     }, { passive: true });
 
     table.addEventListener('touchmove', (e) => {
+      if (!_touchCellDrag || _touchCellDrag.win !== win) return;
       const touch = e.touches[0];
       if (!touch) return;
-      if (_touchCellDrag && _touchCellDrag.win === win) {
-        const dx = touch.clientX - _touchCellDrag.startX;
-        const dy = touch.clientY - _touchCellDrag.startY;
-        if (!_touchCellDrag.dragging && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) {
-          _touchCellDrag.dragging = true;
-          table.classList.add('drag-selecting');
-          const sel = window.getSelection && window.getSelection();
-          if (sel && sel.removeAllRanges) sel.removeAllRanges();
-          if (navigator.vibrate) navigator.vibrate(10);
-        }
-        if (_touchCellDrag.dragging) {
-          if (e.cancelable) e.preventDefault();
-          const c = getCellCoords(touch.clientX, touch.clientY);
-          if (c && (c.di !== _touchCellDrag.lastDi || c.ci !== _touchCellDrag.lastCi)) {
-            _touchCellDrag.lastDi = c.di;
-            _touchCellDrag.lastCi = c.ci;
-            rebuildSelectionRect(win, c.di, c.ci);
-            applyCellHighlights(win);
-          }
-        }
-        return;
+      const dx = touch.clientX - _touchCellDrag.startX;
+      const dy = touch.clientY - _touchCellDrag.startY;
+      if (!_touchCellDrag.dragging && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) {
+        _touchCellDrag.dragging = true;
+        table.classList.add('drag-selecting');
+        const sel = window.getSelection && window.getSelection();
+        if (sel && sel.removeAllRanges) sel.removeAllRanges();
+        if (navigator.vibrate) navigator.vibrate(10);
       }
-      moveCellLongPress(touch.clientX, touch.clientY);
+      if (_touchCellDrag.dragging) {
+        if (e.cancelable) e.preventDefault();
+        const c = getCellCoords(touch.clientX, touch.clientY);
+        if (c && (c.di !== _touchCellDrag.lastDi || c.ci !== _touchCellDrag.lastCi)) {
+          _touchCellDrag.lastDi = c.di;
+          _touchCellDrag.lastCi = c.ci;
+          rebuildSelectionRect(win, c.di, c.ci);
+          applyCellHighlights(win);
+        }
+      }
     }, { passive: false });
 
-    const endCellDrag = (e) => {
-      if (!_touchCellDrag || _touchCellDrag.win !== win) return false;
+    const endCellInteraction = (e) => {
+      if (!_touchCellDrag || _touchCellDrag.win !== win) return;
       const state = _touchCellDrag;
       _touchCellDrag = null;
-      if (!state.dragging) return false;
-      table.classList.remove('drag-selecting');
-      // Suppress the synthesized click so the focusin handler doesn't collapse
-      // the selection back to the tapped cell.
-      if (e.cancelable) e.preventDefault();
-      if (state.lastDi >= 0 && state.lastCi >= 0) {
-        focusCellAt(win, state.lastDi, state.lastCi);
+      if (state.dragging) {
+        // Drag-select: finalize the rectangle and focus the panned cell.
+        // preventDefault suppresses the synthesized click so the focusin
+        // handler doesn't collapse the selection back to a single cell.
+        table.classList.remove('drag-selecting');
+        if (e.cancelable) e.preventDefault();
+        if (state.lastDi >= 0 && state.lastCi >= 0) {
+          focusCellAt(win, state.lastDi, state.lastCi);
+        }
+      } else {
+        // Double-tap without pan → enter edit mode. Setting contenteditable
+        // synchronously (and NOT calling preventDefault) lets the synthesized
+        // click on the now-editable cell open the iOS virtual keyboard.
+        if (state.td && state.td.isConnected) {
+          state.td.setAttribute('contenteditable', 'true');
+        }
       }
-      return true;
     };
-
-    table.addEventListener('touchend', (e) => {
-      if (endCellDrag(e)) return;
-      endCellLongPress(e);
-    });
-    table.addEventListener('touchcancel', (e) => {
-      if (endCellDrag(e)) return;
-      endCellLongPress(e);
-    });
-
-    table.addEventListener('pointerdown', (e) => {
-      if (e.pointerType === 'mouse') return;
-      if (_touchCellDrag) return;  // cell drag-select is handled via touch events
-      const td = e.target.closest && e.target.closest('td.data-cell');
-      if (!td || !table.contains(td)) return;
-      startCellLongPress(td, e.clientX, e.clientY);
-    });
-
-    table.addEventListener('pointermove', (e) => {
-      if (e.pointerType === 'mouse') return;
-      if (_touchCellDrag) return;
-      moveCellLongPress(e.clientX, e.clientY);
-    });
-
-    table.addEventListener('pointerup', (e) => {
-      if (e.pointerType === 'mouse') return;
-      if (_touchCellDrag) return;
-      endCellLongPress(e);
-    });
-    table.addEventListener('pointercancel', (e) => {
-      if (e.pointerType === 'mouse') return;
-      if (_touchCellDrag) return;
-      endCellLongPress(e);
-    });
+    table.addEventListener('touchend', endCellInteraction);
+    table.addEventListener('touchcancel', endCellInteraction);
 
     table.addEventListener('keydown', (e) => {
       const td = e.target;
@@ -3432,7 +3357,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.11.0 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.12.0 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -3485,7 +3410,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 <h4>Touch Gestures</h4>
 <ul>
-<li><strong>Edit a cell:</strong> Press and hold a cell for about half a second to enter edit mode.</li>
+<li><strong>Edit a cell:</strong> Double-tap the cell to enter edit mode.</li>
 <li><strong>Select a rectangle of cells:</strong> Tap a cell, then tap and pan from any cell to draw a selection rectangle from the first cell to the panned cell.</li>
 <li><strong>Reorder a column:</strong> Tap a column header, then tap-and-hold the same header and pan to the target position.</li>
 <li><strong>Move a window:</strong> Tap the window's title bar, then tap the title bar again and pan to move the window.</li>

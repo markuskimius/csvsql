@@ -89,7 +89,7 @@ Use **File > Open** (Ctrl+O / Cmd+O), **File > Open URL**, or drag and drop file
 
 ### Touch Gestures
 
-- **Edit a cell** — Press and hold a cell for about half a second
+- **Edit a cell** — Double-tap the cell
 - **Select a rectangle of cells** — Tap a cell, then tap and pan to draw a selection rectangle from the first cell to the panned cell
 - **Reorder a column** — Tap a column header, then tap-and-hold the same header and pan to the target position
 - **Move a window** — Tap the title bar, then tap the title bar again and pan to drag the window
