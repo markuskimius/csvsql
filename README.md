@@ -87,6 +87,11 @@ Use **File > Open** (Ctrl+O / Cmd+O), **File > Open URL**, or drag and drop file
 - **Rename tables** — Ctrl/Cmd+click the window title
 - **Highlight row & column** — Clicking a cell highlights its row and column. Move the selection with plain arrow keys; extend to a rectangle with Shift+arrow, Shift+click, or click-and-drag. Esc clears the selection
 
+### Touch Gestures
+
+- **Edit a cell** — Press and hold a cell for about half a second
+- **Reorder a column** — Tap a column header, then tap-and-hold the same header and pan to the target position
+
 <!-- ![Inline editing](screenshots/editing.png) -->
 
 ### Sorting and Filtering

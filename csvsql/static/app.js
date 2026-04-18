@@ -11,6 +11,13 @@ const app = (() => {
   let db = null;    // sql.js Database instance
   let _activeConsoleTab = 'sql';
 
+  // Touch gesture state (shared across tables)
+  let _touchLongPress = null;              // cell long-press (→ enter edit mode)
+  let _touchHeaderDrag = null;             // header 1.5-tap drag (→ reorder column)
+  let _lastHeaderTap = { tableName: null, col: null, time: 0 };
+  const LONG_PRESS_MS = 600;               // hold to enter cell edit mode
+  const DOUBLE_TAP_WINDOW_MS = 500;        // tap 1 → tap 2 window for 1.5-tap drag
+
   // Virtual scrolling constants
   const ROW_HEIGHT = 26;
   const OVERSCAN = 10;
@@ -1572,6 +1579,90 @@ const app = (() => {
         document.addEventListener('mousemove', onMove);
         document.addEventListener('mouseup', onUp);
       });
+
+      // Touch: 1.5-tap-to-drag (tap once, then tap-and-hold + pan) to reorder
+      th.addEventListener('touchstart', (e) => {
+        if (e.touches.length !== 1 || th._renaming) return;
+        const touch = e.touches[0];
+        const now = Date.now();
+        const prev = _lastHeaderTap;
+        const isSecondTap = prev.tableName === win.tableName && prev.col === col &&
+                            (now - prev.time) < DOUBLE_TAP_WINDOW_MS;
+        if (!isSecondTap) {
+          // First tap — let native click/sort happen; just record for a potential second tap.
+          _lastHeaderTap = { tableName: win.tableName, col, time: now };
+          return;
+        }
+        // Second tap: enter drag-pending mode; drag visuals start on first movement.
+        _lastHeaderTap = { tableName: null, col: null, time: 0 };
+        _touchHeaderDrag = {
+          th, col, colIdx,
+          startX: touch.clientX, startY: touch.clientY,
+          dragging: false, ghost: null,
+        };
+        th._didDrag = false;
+      }, { passive: true });
+
+      th.addEventListener('touchmove', (e) => {
+        if (!_touchHeaderDrag || _touchHeaderDrag.th !== th) return;
+        const touch = e.touches[0];
+        if (!touch) return;
+        const dx = touch.clientX - _touchHeaderDrag.startX;
+        const dy = touch.clientY - _touchHeaderDrag.startY;
+        if (!_touchHeaderDrag.dragging && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) {
+          _touchHeaderDrag.dragging = true;
+          th._didDrag = true;
+          th.classList.add('col-dragging');
+          const ghost = document.createElement('div');
+          ghost.className = 'col-drag-ghost';
+          ghost.textContent = col;
+          ghost.style.left = touch.clientX + 'px';
+          ghost.style.top = touch.clientY + 'px';
+          document.body.appendChild(ghost);
+          _touchHeaderDrag.ghost = ghost;
+          if (navigator.vibrate) navigator.vibrate(10);
+        }
+        if (_touchHeaderDrag.dragging) {
+          e.preventDefault();
+          _touchHeaderDrag.ghost.style.left = touch.clientX + 'px';
+          _touchHeaderDrag.ghost.style.top = touch.clientY + 'px';
+          const ths = headerRow.querySelectorAll('th:not(.row-num-header)');
+          ths.forEach(h => h.classList.remove('col-drop-left', 'col-drop-right'));
+          const el = document.elementFromPoint(touch.clientX, touch.clientY);
+          const targetTh = el && el.closest && el.closest('th');
+          if (targetTh && headerRow.contains(targetTh) && !targetTh.classList.contains('row-num-header')) {
+            const rect = targetTh.getBoundingClientRect();
+            const mid = rect.left + rect.width / 2;
+            targetTh.classList.add(touch.clientX < mid ? 'col-drop-left' : 'col-drop-right');
+          }
+        }
+      }, { passive: false });
+
+      const endHeaderTouch = (e) => {
+        if (!_touchHeaderDrag || _touchHeaderDrag.th !== th) return;
+        const state = _touchHeaderDrag;
+        _touchHeaderDrag = null;
+        if (!state.dragging) return;
+        th.classList.remove('col-dragging');
+        if (state.ghost) state.ghost.remove();
+        const ths = headerRow.querySelectorAll('th:not(.row-num-header)');
+        ths.forEach(h => h.classList.remove('col-drop-left', 'col-drop-right'));
+        const last = (e.changedTouches && e.changedTouches[0]) || null;
+        if (!last) return;
+        let dropIdx = colIdx;
+        const el = document.elementFromPoint(last.clientX, last.clientY);
+        const targetTh = el && el.closest && el.closest('th');
+        if (targetTh && headerRow.contains(targetTh) && !targetTh.classList.contains('row-num-header')) {
+          const rect = targetTh.getBoundingClientRect();
+          const mid = rect.left + rect.width / 2;
+          dropIdx = parseInt(targetTh.dataset.colIdx);
+          if (last.clientX >= mid && dropIdx < columns.length - 1) dropIdx++;
+        }
+        if (dropIdx !== colIdx) reorderColumn(win, colIdx, dropIdx);
+      };
+      th.addEventListener('touchend', endHeaderTouch);
+      th.addEventListener('touchcancel', endHeaderTouch);
+
       th.addEventListener('click', (e) => {
         if (th._renaming) return;
         if (th._didDrag) { th._didDrag = false; return; }
@@ -1713,6 +1804,54 @@ const app = (() => {
       document.addEventListener('mousemove', onDragMove);
       document.addEventListener('mouseup', onDragEnd);
     });
+
+    // Touch: long-press a cell to enter edit mode. enterEditMode must run inside
+    // the touchend user gesture so the virtual keyboard opens on iOS/Android.
+    table.addEventListener('touchstart', (e) => {
+      if (e.touches.length !== 1) return;
+      const touch = e.touches[0];
+      const td = e.target.closest && e.target.closest('td.data-cell');
+      if (!td || !table.contains(td)) return;
+      if (td.getAttribute('contenteditable') === 'true') return;
+      const state = {
+        td, startX: touch.clientX, startY: touch.clientY,
+        timer: null, fired: false,
+      };
+      state.timer = setTimeout(() => {
+        if (_touchLongPress !== state) return;
+        state.fired = true;
+        td.classList.add('long-press-active');
+        if (navigator.vibrate) navigator.vibrate(15);
+      }, LONG_PRESS_MS);
+      _touchLongPress = state;
+    }, { passive: true });
+
+    table.addEventListener('touchmove', (e) => {
+      if (!_touchLongPress) return;
+      const touch = e.touches[0];
+      if (!touch) return;
+      if (Math.abs(touch.clientX - _touchLongPress.startX) > 10 ||
+          Math.abs(touch.clientY - _touchLongPress.startY) > 10) {
+        clearTimeout(_touchLongPress.timer);
+        _touchLongPress.td.classList.remove('long-press-active');
+        _touchLongPress = null;
+      }
+    }, { passive: true });
+
+    const endCellTouch = (e) => {
+      if (!_touchLongPress) return;
+      const state = _touchLongPress;
+      _touchLongPress = null;
+      clearTimeout(state.timer);
+      state.td.classList.remove('long-press-active');
+      if (state.fired && state.td.isConnected) {
+        if (e.cancelable) e.preventDefault();
+        state.td.focus();
+        enterEditMode(state.td);
+      }
+    };
+    table.addEventListener('touchend', endCellTouch);
+    table.addEventListener('touchcancel', endCellTouch);
 
     table.addEventListener('keydown', (e) => {
       const td = e.target;
@@ -3083,7 +3222,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.10.0 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.10.1 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -3132,6 +3271,12 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <li><strong>Select a column:</strong> Click a column header to select it (highlighted) and sort it. Selection is the target for Ctrl+&larr;/&rarr;.</li>
 <li><strong>Reorder columns:</strong> Drag a column header to a new position. With a column selected by clicking its header, press <code>Ctrl</code>/<code>&#8984;</code>+<code>&larr;</code>/<code>&rarr;</code> to nudge it. With cells selected (in select mode, not editing), <code>Ctrl</code>/<code>&#8984;</code>+<code>&larr;</code>/<code>&rarr;</code> moves the columns spanned by the selection.</li>
 <li><strong>Rename tables:</strong> <code>Ctrl</code>/<code>&#8984;</code>+click the window title.</li>
+</ul>
+
+<h4>Touch Gestures</h4>
+<ul>
+<li><strong>Edit a cell:</strong> Press and hold a cell for about half a second to enter edit mode.</li>
+<li><strong>Reorder a column:</strong> Tap a column header, then tap-and-hold the same header and pan to the target position.</li>
 </ul>
 
 <h4>Sorting &amp; Filtering</h4>
