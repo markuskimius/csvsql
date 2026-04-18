@@ -1483,6 +1483,21 @@ const app = (() => {
       }, 200);
     });
 
+    // Escape returns focus from the filter to the selected cell (or middle cell).
+    filterInput.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      const displayIdx = win.anchorCell
+        ? win._displayRows.findIndex(r => r._rownum === win.anchorCell.rownum)
+        : -1;
+      const colIdx = win.anchorCell ? win._columns.indexOf(win.anchorCell.col) : -1;
+      if (displayIdx >= 0 && colIdx >= 0) {
+        focusCellAt(win, displayIdx, colIdx);
+      } else {
+        focusMiddleCell(win);
+      }
+    });
+
     toolbar.querySelector('.btn-add-row').addEventListener('click', () => {
       addRow(win.tableName);
       rebuildTable(win);
@@ -1993,15 +2008,32 @@ const app = (() => {
       if (td.tagName !== 'TD' || !td.classList.contains('data-cell')) return;
       const tr = td.parentElement;
       const inEdit = td.getAttribute('contenteditable') === 'true';
-      const isArrow = e.key === 'ArrowUp' || e.key === 'ArrowDown' ||
-                      e.key === 'ArrowLeft' || e.key === 'ArrowRight';
+      // Vim h/j/k/l in select mode map to arrow-key equivalents.
+      const vimMap = { h: 'ArrowLeft', j: 'ArrowDown', k: 'ArrowUp', l: 'ArrowRight' };
+      const navKey = (!inEdit && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1)
+        ? (vimMap[e.key.toLowerCase()] || e.key)
+        : e.key;
+      const isArrow = navKey === 'ArrowUp' || navKey === 'ArrowDown' ||
+                      navKey === 'ArrowLeft' || navKey === 'ArrowRight';
 
-      // F2 or Ctrl/Cmd+U: enter edit mode (select mode only)
+      // F2, Enter, i, or Ctrl/Cmd+U: enter edit mode (select mode only)
+      const noMods = !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
       if (!inEdit && (e.key === 'F2' ||
+          (noMods && (e.key === 'Enter' || e.key === 'i')) ||
           ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'u' || e.key === 'U')))) {
         e.preventDefault();
         enterEditMode(td);
         return;
+      }
+
+      // "/" in select mode → jump to this window's filter input
+      if (!inEdit && noMods && e.key === '/') {
+        const filterInput = win.el.querySelector('.filter-input');
+        if (filterInput) {
+          e.preventDefault();
+          filterInput.focus();
+          return;
+        }
       }
 
       // Select-mode arrow key handling
@@ -2011,18 +2043,45 @@ const app = (() => {
         const ctrlOnly = (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey;
         if (plain) {
           e.preventDefault();
-          moveSingleCellSelection(win, tr, td, e.key);
+          moveSingleCellSelection(win, tr, td, navKey);
           return;
         }
         if (shiftOnly) {
           e.preventDefault();
-          extendCellSelection(win, tr, td, e.key);
+          extendCellSelection(win, tr, td, navKey);
           return;
         }
-        if (ctrlOnly && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        if (ctrlOnly && (navKey === 'ArrowLeft' || navKey === 'ArrowRight')) {
           e.preventDefault();
-          moveSelectionColumns(win, tr, td, e.key);
+          moveSelectionColumns(win, tr, td, navKey);
           return;
+        }
+      }
+
+      // Select-mode Tab / Shift+Tab: cycle table windows.
+      // Edit-mode Tab still moves between cells in the row.
+      if (e.key === 'Tab' && !inEdit && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        cycleTableWindow(win, e.shiftKey ? -1 : 1);
+        return;
+      }
+      // Ctrl/Cmd (+Shift) + H/J/K/L in select mode:
+      //   +Shift L/H → cycle next / previous table window
+      //   plain H/J/K/L → nudge the window 5 px in the vim direction
+      if (!inEdit && (e.ctrlKey || e.metaKey) && !e.altKey && e.key.length === 1) {
+        const k = e.key.toLowerCase();
+        if (e.shiftKey && (k === 'l' || k === 'h')) {
+          e.preventDefault();
+          cycleTableWindow(win, k === 'l' ? 1 : -1);
+          return;
+        }
+        if (!e.shiftKey) {
+          const nudgeMap = { h: [-5, 0], j: [0, 5], k: [0, -5], l: [5, 0] };
+          if (nudgeMap[k]) {
+            e.preventDefault();
+            nudgeWindow(win, nudgeMap[k][0], nudgeMap[k][1]);
+            return;
+          }
         }
       }
 
@@ -2353,6 +2412,32 @@ const app = (() => {
     win._programmaticFocus = true;
     td.focus();
     win._programmaticFocus = false;
+  }
+
+  function cycleTableWindow(currentWin, dir) {
+    const list = windows.filter(w =>
+      w.tableName && tables[w.tableName] && !w.el.classList.contains('minimized')
+    );
+    if (list.length < 2) return false;
+    const idx = list.indexOf(currentWin);
+    if (idx === -1) return false;
+    const next = list[(idx + dir + list.length) % list.length];
+    focusWindow(next.id);
+    const dIdx = next.anchorCell
+      ? next._displayRows.findIndex(r => r._rownum === next.anchorCell.rownum)
+      : -1;
+    const cIdx = next.anchorCell ? next._columns.indexOf(next.anchorCell.col) : -1;
+    if (dIdx >= 0 && cIdx >= 0) focusCellAt(next, dIdx, cIdx);
+    else focusMiddleCell(next);
+    return true;
+  }
+
+  function nudgeWindow(win, dx, dy) {
+    const left = parseInt(win.el.style.left) || 0;
+    const top = parseInt(win.el.style.top) || 0;
+    win.el.style.left = Math.max(0, left + dx) + 'px';
+    win.el.style.top = Math.max(0, top + dy) + 'px';
+    if (win.maximized) win.maximized = false;
   }
 
   function applyCellHighlights(win) {
@@ -3357,7 +3442,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.12.0 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.13.0 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -3397,8 +3482,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 <h4>Editing</h4>
 <ul>
-<li><strong>Edit cells:</strong> Click a cell to select it; press <code>F2</code> or <code>Ctrl</code>/<code>&#8984;</code>+<code>U</code> to enter edit mode. <code>Tab</code>/<code>Shift+Tab</code> moves between cells, <code>Enter</code> saves and moves down, <code>Escape</code> reverts the edit (and clears the selection when not editing).</li>
-<li><strong>Highlight row &amp; column:</strong> Clicking a cell also highlights its row and column. Move the selection with plain arrow keys; extend to a rectangle of cells with <code>Shift</code>+arrow, <code>Shift</code>+click on another cell, or click-and-drag across cells &mdash; every selected cell's row and column is highlighted so you can see what lines up with what. Pressing an arrow key with no cell selected focuses the cell in the middle of the current view. <code>Esc</code> clears the selection.</li>
+<li><strong>Edit cells:</strong> Click a cell to select it; press <code>Enter</code>, <code>i</code>, <code>F2</code>, or <code>Ctrl</code>/<code>&#8984;</code>+<code>U</code> to enter edit mode. <code>Tab</code>/<code>Shift+Tab</code> moves between cells, <code>Enter</code> saves and moves down, <code>Escape</code> reverts the edit (and clears the selection when not editing).</li>
+<li><strong>Highlight row &amp; column:</strong> Clicking a cell also highlights its row and column. Move the selection with arrow keys or vim-style <code>h</code>/<code>j</code>/<code>k</code>/<code>l</code>; extend to a rectangle of cells with <code>Shift</code>+arrow (or <code>Shift</code>+<code>H</code>/<code>J</code>/<code>K</code>/<code>L</code>), <code>Shift</code>+click on another cell, or click-and-drag across cells &mdash; every selected cell's row and column is highlighted so you can see what lines up with what. Pressing an arrow key with no cell selected focuses the cell in the middle of the current view. <code>Esc</code> clears the selection.</li>
 <li><strong>Add rows:</strong> Click <code>+ Row</code> in the toolbar, or right-click a row number to insert above.</li>
 <li><strong>Delete rows:</strong> Right-click a row number and choose Delete Row.</li>
 <li><strong>Add columns:</strong> Click <code>+ Col</code> in the toolbar.</li>
@@ -3485,10 +3570,14 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <tr><td><code>Ctrl+N</code> / <code>&#8984;N</code></td><td>New table</td></tr>
 <tr><td><code>Ctrl+W</code> / <code>&#8984;W</code></td><td>Close window</td></tr>
 <tr><td><code>Ctrl+&larr;</code> / <code>Ctrl+&rarr;</code> (or <code>&#8984;</code>+arrow)</td><td>Move selected header column, or cell-selection's columns, left / right</td></tr>
-<tr><td><code>F2</code> or <code>Ctrl</code>/<code>&#8984;</code>+<code>U</code></td><td>Enter edit mode on the selected cell</td></tr>
+<tr><td><code>Enter</code>, <code>i</code>, <code>F2</code>, or <code>Ctrl</code>/<code>&#8984;</code>+<code>U</code></td><td>Enter edit mode on the selected cell</td></tr>
+<tr><td><code>/</code> (cell selected, not editing)</td><td>Jump to the window's filter input</td></tr>
+<tr><td><code>Escape</code> (in filter input)</td><td>Return focus to the selected cell</td></tr>
 <tr><td>Arrow keys (no cell selected)</td><td>Focus the cell in the middle of the visible table</td></tr>
-<tr><td>Arrow keys (cell selected, not editing)</td><td>Move selection to the adjacent cell</td></tr>
-<tr><td><code>Shift+</code>arrow</td><td>Extend cell selection (highlights row &amp; column of every selected cell)</td></tr>
+<tr><td>Arrow keys or <code>h</code>/<code>j</code>/<code>k</code>/<code>l</code> (cell selected, not editing)</td><td>Move selection to the adjacent cell</td></tr>
+<tr><td><code>Shift+</code>arrow or <code>Shift+H</code>/<code>J</code>/<code>K</code>/<code>L</code></td><td>Extend cell selection (highlights row &amp; column of every selected cell)</td></tr>
+<tr><td><code>Tab</code>/<code>Shift+Tab</code> or <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>L</code>/<code>H</code> (cell selected, not editing)</td><td>Switch to next / previous table window</td></tr>
+<tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>H</code>/<code>J</code>/<code>K</code>/<code>L</code> (cell selected, not editing)</td><td>Nudge the active window 5 px left / down / up / right</td></tr>
 <tr><td><code>Ctrl+Enter</code></td><td>Execute SQL query</td></tr>
 <tr><td><code>Enter</code></td><td>Send AI prompt</td></tr>
 <tr><td><code>Shift+Enter</code></td><td>Newline in AI prompt</td></tr>

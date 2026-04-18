@@ -12,11 +12,11 @@ A browser-based CSV database application. Open CSV, Excel, and compressed files 
 - **Multiple file formats** — CSV, TSV, PSV, Excel (.xlsx/.xls), Gzip (.csv.gz), and ZIP archives
 - **SQL queries** — Full SQLite syntax from the built-in console, including joins, subqueries, aggregates, UNION, CASE, and REGEXP. Query results are queryable tables too
 - **SQL syntax highlighting** — Keywords, strings, numbers, comments, and identifiers are color-coded in the SQL console and filter inputs
-- **Inline editing** — Click a cell to select it; press F2 or Ctrl/Cmd+U to edit. Tab/Enter to navigate, Escape to revert
+- **Inline editing** — Click a cell to select it; press Enter, i, F2, or Ctrl/Cmd+U to edit. Tab/Enter to navigate, Escape to revert
 - **Sort and filter** — Click column headers to sort (multi-column with Shift+click). Filter with SQL WHERE expressions including REGEXP
 - **Multi-window workspace** — Draggable, resizable subwindows. Tile, Grid, or Cascade layouts
 - **Row and column management** — Add/delete rows, insert at position (right-click), add/rename/reorder columns (drag or keyboard)
-- **Cell selection** — Click a cell to highlight its row, column, and row number. Move the selection with plain arrow keys, extend to a rectangle with Shift+arrow, Shift+click, or click-and-drag. With no cell selected, any arrow key focuses the cell in the middle of the view. Ctrl+←/→ moves the selected columns as a block
+- **Cell selection** — Click a cell to highlight its row, column, and row number. Move the selection with arrow keys or vim-style h/j/k/l, extend to a rectangle with Shift+arrow (or Shift+H/J/K/L), Shift+click, or click-and-drag. With no cell selected, any arrow key focuses the cell in the middle of the view. Ctrl+←/→ moves the selected columns as a block
 - **SELECT INTO** — Create new tables from query results (`SELECT ... INTO tablename ...`)
 - **CREATE TABLE** — New tables created via SQL auto-open as editable windows
 - **Drag and drop** — Drop files directly onto the window to open them
@@ -77,7 +77,7 @@ Use **File > Open** (Ctrl+O / Cmd+O), **File > Open URL**, or drag and drop file
 
 ### Editing
 
-- **Edit cells** — Click a cell to select it; press F2 or Ctrl/Cmd+U to enter edit mode
+- **Edit cells** — Click a cell to select it; press Enter, i, F2, or Ctrl/Cmd+U to enter edit mode
 - **Navigate** — Tab/Shift+Tab between cells, Enter to save and move down, Escape to revert the edit (or clear the selection when not editing)
 - **Add rows** — Click `+ Row` in the toolbar, or right-click a row number to insert above
 - **Delete rows** — Right-click a row number and choose Delete Row
@@ -85,7 +85,7 @@ Use **File > Open** (Ctrl+O / Cmd+O), **File > Open URL**, or drag and drop file
 - **Rename columns** — Ctrl/Cmd+click a column header
 - **Reorder columns** — Drag a column header to a new position. With a header selected, press Ctrl/Cmd+←/→ to nudge it. With cells selected, Ctrl/Cmd+←/→ moves the columns spanned by the selection
 - **Rename tables** — Ctrl/Cmd+click the window title
-- **Highlight row & column** — Clicking a cell highlights its row and column. Move the selection with plain arrow keys; extend to a rectangle with Shift+arrow, Shift+click, or click-and-drag. Esc clears the selection
+- **Highlight row & column** — Clicking a cell highlights its row and column. Move the selection with arrow keys or vim h/j/k/l; extend to a rectangle with Shift+arrow (or Shift+H/J/K/L), Shift+click, or click-and-drag. Esc clears the selection
 
 ### Touch Gestures
 
@@ -185,15 +185,19 @@ The AI receives column statistics and sample rows, then writes SQL queries to ge
 | Ctrl+N / Cmd+N | New table |
 | Ctrl+W / Cmd+W | Close window |
 | Ctrl+← / Ctrl+→ (or Cmd+arrow on Mac) | Move selected header column, or cell-selection's columns, left / right |
-| F2 or Ctrl+U / Cmd+U | Enter edit mode on the selected cell |
+| Enter, i, F2, or Ctrl+U / Cmd+U | Enter edit mode on the selected cell |
+| / (cell selected, not editing) | Jump to the window's filter input |
+| Escape (in filter input) | Return focus to the selected cell |
+| Tab / Shift+Tab or Ctrl+Shift+L / Ctrl+Shift+H (cell selected, not editing) | Switch to next / previous table window |
+| Ctrl+H / J / K / L (cell selected, not editing) | Nudge the active window 5 px left / down / up / right |
 | Arrow keys (no cell selected) | Focus the cell in the middle of the view |
-| Arrow keys (cell selected, not editing) | Move selection to the adjacent cell |
-| Shift+arrow | Extend cell selection — highlights each selected cell's row & column |
+| Arrow keys or h/j/k/l (cell selected, not editing) | Move selection to the adjacent cell |
+| Shift+arrow or Shift+H/J/K/L | Extend cell selection — highlights each selected cell's row & column |
 | Ctrl+Enter / Cmd+Enter | Execute SQL query |
 | Enter (AI tab) | Send AI prompt |
 | Shift+Enter (AI tab) | Newline in AI prompt |
 | Up / Down (AI tab) | AI prompt history |
-| Tab / Shift+Tab | Navigate between cells |
+| Tab / Shift+Tab (cell being edited) | Navigate between cells |
 | Enter | Move to next row |
 | Escape | Cancel cell edit |
 
