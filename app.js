@@ -27,6 +27,10 @@ const app = (() => {
   // Debounced sync timers
   const syncTimers = {};
 
+  // Plugin state
+  let plugins = [];
+  let _columnTransformCache = {};
+
   // Sort optimization
   const collator = new Intl.Collator(undefined, { sensitivity: 'base' });
 
@@ -58,6 +62,8 @@ const app = (() => {
     setupAI();
     setupBrowserResize();
     fixShortcutLabels();
+    loadPersistedPlugins();
+    updatePluginMenu();
     window._appReady = true;
   }
 
@@ -462,6 +468,7 @@ const app = (() => {
         await new Promise(r => setTimeout(r, 0));
       }
     }
+    rebuildTransformCacheForTable(tableName);
   }
 
   async function saveActiveTable() {
@@ -957,6 +964,7 @@ const app = (() => {
         if (!confirm(`Table "${win.tableName}" has unsaved changes. Close anyway?`)) return;
       }
       try { db.run(`DROP TABLE IF EXISTS [${win.tableName}]`); } catch (e) {}
+      delete _columnTransformCache[win.tableName];
       delete tables[win.tableName];
     }
     win.el.remove();
@@ -1555,10 +1563,9 @@ const app = (() => {
           const na = Number(va), nb = Number(vb);
           if (!isNaN(na) && !isNaN(nb) && va !== '' && vb !== '') {
             if (na !== nb) return (na - nb) * m;
-          } else {
-            const cmp = collator.compare(String(va), String(vb));
-            if (cmp !== 0) return cmp * m;
           }
+          const cmp = collator.compare(String(va), String(vb));
+          if (cmp !== 0) return cmp * m;
         }
         return 0;
       });
@@ -1809,6 +1816,9 @@ const app = (() => {
         debouncedSync(win.tableName);
       }
       exitEditMode(td);
+      if (win.tableName && col && hasDisplayTransform(win.tableName, col)) {
+        td.textContent = getDisplayValue(win.tableName, col, row);
+      }
     }, true); // capture phase for blur
 
     table.addEventListener('focusin', (e) => {
@@ -2110,7 +2120,12 @@ const app = (() => {
           if (!isNaN(displayIdx) && !isNaN(colIdx)) {
             const row = win._displayRows[displayIdx];
             const col = win._columns[colIdx];
-            if (row && col != null) td.textContent = row[col] ?? '';
+            if (row && col != null) {
+              td.textContent = row[col] ?? '';
+              if (win.tableName && hasDisplayTransform(win.tableName, col)) {
+                td.textContent = getDisplayValue(win.tableName, col, row);
+              }
+            }
           }
           exitEditMode(td);
           win._programmaticFocus = true;
@@ -2229,7 +2244,7 @@ const app = (() => {
 
       for (let c = 0; c < columns.length; c++) {
         const td = document.createElement('td');
-        td.textContent = row[columns[c]] ?? '';
+        td.textContent = getDisplayValue(win.tableName, columns[c], row);
         td.className = 'data-cell';
         td.tabIndex = 0;
         td.dataset.colIdx = c;
@@ -2309,6 +2324,20 @@ const app = (() => {
   }
 
   function enterEditMode(td) {
+    const tr = td.parentElement;
+    const winEl = td.closest('.subwindow');
+    const win = winEl && windows.find(w => w.el === winEl);
+    if (win && win.tableName) {
+      const colIdx = parseInt(td.dataset.colIdx, 10);
+      const displayIdx = parseInt(tr.dataset.displayIdx, 10);
+      if (!isNaN(colIdx) && !isNaN(displayIdx) && win._columns && win._displayRows) {
+        const col = win._columns[colIdx];
+        if (col && hasDisplayTransform(win.tableName, col)) {
+          const row = win._displayRows[displayIdx];
+          if (row) td.textContent = row[col] ?? '';
+        }
+      }
+    }
     td.setAttribute('contenteditable', 'true');
     td.focus();
     const range = document.createRange();
@@ -2544,6 +2573,7 @@ const app = (() => {
     if (win.selectedCol === oldCol) win.selectedCol = newCol;
     markModified(tableName);
     try { db.run(`ALTER TABLE [${tableName}] RENAME COLUMN [${oldCol}] TO [${newCol}]`); } catch (_) {}
+    rebuildTransformCacheForTable(tableName);
     rebuildTable(win);
   }
 
@@ -3303,6 +3333,8 @@ const app = (() => {
     document.getElementById('btn-cascade').addEventListener('click', () => layoutCascade());
     document.getElementById('btn-minimize-all').addEventListener('click', () => minimizeAll());
     document.getElementById('btn-restore-all').addEventListener('click', () => restoreAll());
+    document.getElementById('btn-load-plugin').addEventListener('click', () => loadPluginFromFile());
+    document.getElementById('btn-expr-ref').addEventListener('click', () => showExpressionReference());
 
     function updateMenuState() {
       const hasActive = !!activeWinId;
@@ -3442,7 +3474,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.13.0 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.14.0 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -3606,6 +3638,38 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <p><strong>Images:</strong> Drag and drop PNG or JPG images onto the AI chat area to upload them. Uploaded images appear as thumbnails above the input field and can be included in PDF reports (e.g., as a logo). Click &times; to remove an image.</p>
 <p>The AI queries your data with SQL first, then uses the results to build the rich output. Chart.js and jsPDF libraries are loaded on demand when first needed.</p>
 <p>Click the gear icon &#9881; to configure the provider, model, and API keys.</p>
+
+<h4>Plugins</h4>
+<p>Plugins customize how cell values are displayed. A plugin is a JSON config file that maps table and column name patterns to display expressions written in the CSVSQL expression language.</p>
+
+<p><strong>Loading &amp; unloading:</strong> Use <strong>Plugins &rarr; Load Plugin</strong> to open a <code>.json</code> plugin file. Loaded plugins appear in the Plugins menu with an &times; button to unload them. Plugins persist across page reloads.</p>
+
+<p><strong>How matching works:</strong> Each plugin has a <code>table</code> regex matched against table names, and column rules with a <code>match</code> regex matched against column names. Multiple plugins can be loaded simultaneously and stack on the same table &mdash; each column is governed by the <em>last-loaded</em> plugin with a matching rule. Unloading a plugin reveals any earlier plugin&rsquo;s rule that was shadowed.</p>
+
+<p><strong>Plugin config format:</strong></p>
+<pre>{
+  "name": "Plugin Name",
+  "description": "Optional description",
+  "table": "regex for table names",
+  "columns": [
+    {
+      "match": "regex for column names",
+      "display": "expression"
+    }
+  ]
+}</pre>
+
+<p><strong>Editing:</strong> When you enter edit mode on a cell with a display transform, the raw value is shown so you edit the actual data. The formatted display returns when you finish editing.</p>
+
+<p><strong>Saving, SQL, filtering, sorting:</strong> All operate on raw values, not the plugin&rsquo;s display output.</p>
+
+<p><strong>Expression language:</strong> See <strong>Help &rarr; Plugin Expression Reference</strong> for the full language reference, or the <a href="https://github.com/markuskimius/csvsql" target="_blank">README</a> for a quick overview. Common examples:</p>
+<pre>date(value, 'locale')                           Locale-format a date
+'$' + fixed(num(value), 2)                      Currency
+choose(value, 'A', 'Active', 'I', 'Inactive')   Value mapping
+value || 'N/A'                                   Default for empty</pre>
+
+<p>Bundled example plugins are available in the <code>plugins/</code> directory.</p>
 
 <h4>Links</h4>
 <p><a href="https://github.com/markuskimius/csvsql" target="_blank">GitHub</a></p>
@@ -4875,6 +4939,620 @@ ${_aiImageContext()}`;
     document.getElementById('ai-settings-btn').addEventListener('click', showAISettings);
   }
 
+  // ---- Expression Language ----
+
+  function exprTokenize(src) {
+    const tokens = [];
+    let i = 0;
+    while (i < src.length) {
+      if (src[i] === ' ' || src[i] === '\t' || src[i] === '\r' || src[i] === '\n') { i++; continue; }
+      if (src[i] === "'" || src[i] === '"') {
+        const q = src[i]; let s = ''; i++;
+        while (i < src.length && src[i] !== q) {
+          if (src[i] === '\\' && i + 1 < src.length) {
+            i++;
+            if (src[i] === 'n') s += '\n'; else if (src[i] === 't') s += '\t'; else s += src[i];
+            i++;
+          } else { s += src[i]; i++; }
+        }
+        if (i < src.length) i++;
+        tokens.push({ type: 'string', value: s }); continue;
+      }
+      if ((src[i] >= '0' && src[i] <= '9') || (src[i] === '.' && i + 1 < src.length && src[i + 1] >= '0' && src[i + 1] <= '9')) {
+        let n = '';
+        while (i < src.length && ((src[i] >= '0' && src[i] <= '9') || src[i] === '.')) { n += src[i]; i++; }
+        tokens.push({ type: 'number', value: parseFloat(n) }); continue;
+      }
+      if ((src[i] >= 'a' && src[i] <= 'z') || (src[i] >= 'A' && src[i] <= 'Z') || src[i] === '_') {
+        let id = '';
+        while (i < src.length && ((src[i] >= 'a' && src[i] <= 'z') || (src[i] >= 'A' && src[i] <= 'Z') || (src[i] >= '0' && src[i] <= '9') || src[i] === '_')) { id += src[i]; i++; }
+        if (id === 'true') tokens.push({ type: 'boolean', value: true });
+        else if (id === 'false') tokens.push({ type: 'boolean', value: false });
+        else if (id === 'null') tokens.push({ type: 'null', value: null });
+        else tokens.push({ type: 'ident', value: id });
+        continue;
+      }
+      const two = src.substring(i, i + 2);
+      if (two === '==' || two === '!=' || two === '<=' || two === '>=' || two === '&&' || two === '||') {
+        tokens.push({ type: 'op', value: two }); i += 2; continue;
+      }
+      const ch = src[i];
+      if ('+-*/%!<>?.,:()'.includes(ch)) {
+        tokens.push({ type: 'op', value: ch }); i++; continue;
+      }
+      throw new Error(`Unexpected character '${ch}' at position ${i}`);
+    }
+    tokens.push({ type: 'eof' });
+    return tokens;
+  }
+
+  function exprParse(tokens) {
+    let pos = 0;
+    function peek() { return tokens[pos]; }
+    function eat(type, value) {
+      const t = tokens[pos];
+      if (type && t.type !== type) throw new Error(`Expected ${type} but got ${t.type} '${t.value}'`);
+      if (value !== undefined && t.value !== value) throw new Error(`Expected '${value}' but got '${t.value}'`);
+      pos++; return t;
+    }
+    function match(type, value) {
+      const t = tokens[pos];
+      if (t.type === type && (value === undefined || t.value === value)) { pos++; return t; }
+      return null;
+    }
+
+    function parseExpr() { return parseTernary(); }
+
+    function parseTernary() {
+      let node = parseOr();
+      if (match('op', '?')) {
+        const then = parseExpr();
+        eat('op', ':');
+        const els = parseExpr();
+        node = { type: 'ternary', cond: node, then, els };
+      }
+      return node;
+    }
+
+    function parseOr() {
+      let node = parseAnd();
+      while (match('op', '||')) { node = { type: 'binary', op: '||', left: node, right: parseAnd() }; }
+      return node;
+    }
+
+    function parseAnd() {
+      let node = parseEquality();
+      while (match('op', '&&')) { node = { type: 'binary', op: '&&', left: node, right: parseEquality() }; }
+      return node;
+    }
+
+    function parseEquality() {
+      let node = parseComparison();
+      while (peek().type === 'op' && (peek().value === '==' || peek().value === '!=')) {
+        const op = eat('op').value;
+        node = { type: 'binary', op, left: node, right: parseComparison() };
+      }
+      return node;
+    }
+
+    function parseComparison() {
+      let node = parseAddition();
+      if (peek().type === 'op' && (peek().value === '<' || peek().value === '>' || peek().value === '<=' || peek().value === '>=')) {
+        const op = eat('op').value;
+        node = { type: 'binary', op, left: node, right: parseAddition() };
+      }
+      return node;
+    }
+
+    function parseAddition() {
+      let node = parseMultiplication();
+      while (peek().type === 'op' && (peek().value === '+' || peek().value === '-')) {
+        const op = eat('op').value;
+        node = { type: 'binary', op, left: node, right: parseMultiplication() };
+      }
+      return node;
+    }
+
+    function parseMultiplication() {
+      let node = parseUnary();
+      while (peek().type === 'op' && (peek().value === '*' || peek().value === '/' || peek().value === '%')) {
+        const op = eat('op').value;
+        node = { type: 'binary', op, left: node, right: parseUnary() };
+      }
+      return node;
+    }
+
+    function parseUnary() {
+      if (match('op', '!')) return { type: 'unary', op: '!', operand: parseUnary() };
+      if (match('op', '-')) return { type: 'unary', op: '-', operand: parseUnary() };
+      return parsePostfix();
+    }
+
+    function parsePostfix() {
+      let node = parseAtom();
+      while (match('op', '.')) {
+        const prop = eat('ident').value;
+        node = { type: 'member', object: node, property: prop };
+      }
+      return node;
+    }
+
+    function parseAtom() {
+      const t = peek();
+      if (t.type === 'number') { eat('number'); return { type: 'literal', value: t.value }; }
+      if (t.type === 'string') { eat('string'); return { type: 'literal', value: t.value }; }
+      if (t.type === 'boolean') { eat('boolean'); return { type: 'literal', value: t.value }; }
+      if (t.type === 'null') { eat('null'); return { type: 'literal', value: null }; }
+      if (t.type === 'ident') {
+        eat('ident');
+        if (match('op', '(')) {
+          const args = [];
+          if (peek().value !== ')') {
+            args.push(parseExpr());
+            while (match('op', ',')) args.push(parseExpr());
+          }
+          eat('op', ')');
+          return { type: 'call', name: t.value, args };
+        }
+        return { type: 'var', name: t.value };
+      }
+      if (match('op', '(')) {
+        const node = parseExpr();
+        eat('op', ')');
+        return node;
+      }
+      throw new Error(`Unexpected token '${t.value}' at position ${pos}`);
+    }
+
+    const ast = parseExpr();
+    if (peek().type !== 'eof') throw new Error(`Unexpected token '${peek().value}' after expression`);
+    return ast;
+  }
+
+  function exprCompile(src) {
+    return exprParse(exprTokenize(src));
+  }
+
+  const _exprFunctions = {
+    upper(s) { return String(s ?? '').toUpperCase(); },
+    lower(s) { return String(s ?? '').toLowerCase(); },
+    trim(s) { return String(s ?? '').trim(); },
+    len(s) { return String(s ?? '').length; },
+    substr(s, start, length) {
+      s = String(s ?? '');
+      return length === undefined ? s.substring(start) : s.substring(start, start + length);
+    },
+    replace(s, search, repl) { return String(s ?? '').replace(String(search), String(repl ?? '')); },
+    replaceAll(s, search, repl) { return String(s ?? '').split(String(search)).join(String(repl ?? '')); },
+    startsWith(s, prefix) { return String(s ?? '').startsWith(String(prefix ?? '')); },
+    endsWith(s, suffix) { return String(s ?? '').endsWith(String(suffix ?? '')); },
+    contains(s, sub) { return String(s ?? '').includes(String(sub ?? '')); },
+    padLeft(s, width, ch) { return String(s ?? '').padStart(width, String(ch ?? ' ')); },
+    padRight(s, width, ch) { return String(s ?? '').padEnd(width, String(ch ?? ' ')); },
+    concat(...args) { return args.map(a => String(a ?? '')).join(''); },
+    repeat(s, count) { return String(s ?? '').repeat(Math.max(0, Math.floor(count) || 0)); },
+
+    num(s) { const n = Number(s); return isNaN(n) ? null : n; },
+    fixed(n, d) { n = Number(n); return isNaN(n) ? '' : n.toFixed(d ?? 0); },
+    round(n, d) { n = Number(n); if (isNaN(n)) return null; if (d === undefined) return Math.round(n); const f = Math.pow(10, d); return Math.round(n * f) / f; },
+    floor(n) { n = Number(n); return isNaN(n) ? null : Math.floor(n); },
+    ceil(n) { n = Number(n); return isNaN(n) ? null : Math.ceil(n); },
+    abs(n) { n = Number(n); return isNaN(n) ? null : Math.abs(n); },
+    min(a, b) { return Math.min(Number(a), Number(b)); },
+    max(a, b) { return Math.max(Number(a), Number(b)); },
+    commas(n) { n = Number(n); return isNaN(n) ? '' : n.toLocaleString(); },
+
+    date(s, fmt) {
+      if (!s) return '';
+      const sStr = String(s);
+      let d, nanoFrac = '';
+      d = new Date(sStr);
+      if (isNaN(d.getTime())) {
+        if (/^\d+\.\d+$/.test(sStr)) {
+          const dotIdx = sStr.indexOf('.');
+          const secPart = sStr.slice(0, dotIdx);
+          const fracPart = sStr.slice(dotIdx + 1).padEnd(9, '0').slice(0, 9);
+          nanoFrac = fracPart;
+          d = new Date(parseInt(secPart) * 1000 + parseInt(fracPart.slice(0, 3)));
+        } else if (/^\d+$/.test(sStr)) {
+          d = new Date(Number(sStr));
+        }
+      }
+      if (isNaN(d.getTime())) return sStr;
+      if (fmt === 'full') {
+        const y = String(d.getFullYear());
+        const mo = String(d.getMonth() + 1).padStart(2, '0');
+        const dy = String(d.getDate()).padStart(2, '0');
+        const h = String(d.getHours()).padStart(2, '0');
+        const mi = String(d.getMinutes()).padStart(2, '0');
+        const sc = String(d.getSeconds()).padStart(2, '0');
+        const frac = nanoFrac || String(d.getMilliseconds()).padStart(3, '0') + '000000';
+        return y + '-' + mo + '-' + dy + ' ' + h + ':' + mi + ':' + sc + '.' + frac;
+      }
+      if (!fmt || fmt === 'locale') return d.toLocaleDateString();
+      if (fmt === 'iso') return d.toISOString().substring(0, 10);
+      if (fmt === 'time') return d.toLocaleTimeString();
+      if (fmt === 'datetime') return d.toLocaleString();
+      const yyyy = String(d.getFullYear());
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return fmt.replace('YYYY', yyyy).replace('MM', mm).replace('DD', dd);
+    },
+
+    'if': function(cond, then, els) { return cond ? then : els; },
+    choose(val, ...pairs) {
+      const sv = String(val ?? '');
+      const hasDefault = pairs.length % 2 === 1;
+      const limit = hasDefault ? pairs.length - 1 : pairs.length;
+      for (let i = 0; i < limit; i += 2) {
+        if (sv === String(pairs[i] ?? '')) return pairs[i + 1];
+      }
+      return hasDefault ? pairs[pairs.length - 1] : val;
+    },
+    coalesce(...args) {
+      for (const a of args) { if (a !== null && a !== undefined && a !== '') return a; }
+      return args.length ? args[args.length - 1] : null;
+    },
+    isEmpty(s) { return s === null || s === undefined || s === ''; },
+    isNum(s) { return s !== null && s !== undefined && s !== '' && !isNaN(Number(s)); },
+  };
+
+  const _exprBlockedProps = new Set(['constructor', '__proto__', 'prototype', '__defineGetter__', '__defineSetter__', '__lookupGetter__', '__lookupSetter__']);
+
+  function exprEval(node, env) {
+    switch (node.type) {
+      case 'literal': return node.value;
+      case 'var':
+        if (node.name === 'value') return env.value;
+        if (node.name === 'column') return env.column;
+        if (node.name === 'table') return env.table;
+        if (node.name === 'row') return env.row;
+        throw new Error(`Unknown variable '${node.name}'`);
+      case 'member': {
+        const obj = exprEval(node.object, env);
+        if (obj === null || obj === undefined) return null;
+        if (_exprBlockedProps.has(node.property)) return null;
+        if (typeof obj === 'object' && Object.prototype.hasOwnProperty.call(obj, node.property)) return obj[node.property];
+        return null;
+      }
+      case 'unary':
+        if (node.op === '!') { const v = exprEval(node.operand, env); return !v; }
+        if (node.op === '-') { return -Number(exprEval(node.operand, env)); }
+        return null;
+      case 'binary': {
+        if (node.op === '||') { const l = exprEval(node.left, env); return l ? l : exprEval(node.right, env); }
+        if (node.op === '&&') { const l = exprEval(node.left, env); return l ? exprEval(node.right, env) : l; }
+        const left = exprEval(node.left, env);
+        const right = exprEval(node.right, env);
+        switch (node.op) {
+          case '+': {
+            if (typeof left === 'number' && typeof right === 'number') return left + right;
+            return String(left ?? '') + String(right ?? '');
+          }
+          case '-': return Number(left) - Number(right);
+          case '*': return Number(left) * Number(right);
+          case '/': { const d = Number(right); return d === 0 ? null : Number(left) / d; }
+          case '%': { const d = Number(right); return d === 0 ? null : Number(left) % d; }
+          case '==': return String(left ?? '') === String(right ?? '');
+          case '!=': return String(left ?? '') !== String(right ?? '');
+          case '<': {
+            const nl = Number(left), nr = Number(right);
+            if (!isNaN(nl) && !isNaN(nr)) return nl < nr;
+            return String(left ?? '') < String(right ?? '');
+          }
+          case '>': {
+            const nl = Number(left), nr = Number(right);
+            if (!isNaN(nl) && !isNaN(nr)) return nl > nr;
+            return String(left ?? '') > String(right ?? '');
+          }
+          case '<=': {
+            const nl = Number(left), nr = Number(right);
+            if (!isNaN(nl) && !isNaN(nr)) return nl <= nr;
+            return String(left ?? '') <= String(right ?? '');
+          }
+          case '>=': {
+            const nl = Number(left), nr = Number(right);
+            if (!isNaN(nl) && !isNaN(nr)) return nl >= nr;
+            return String(left ?? '') >= String(right ?? '');
+          }
+        }
+        return null;
+      }
+      case 'ternary': return exprEval(node.cond, env) ? exprEval(node.then, env) : exprEval(node.els, env);
+      case 'call': {
+        const fn = _exprFunctions[node.name];
+        if (!fn) throw new Error(`Unknown function '${node.name}'`);
+        const args = node.args.map(a => exprEval(a, env));
+        return fn(...args);
+      }
+    }
+    return null;
+  }
+
+  function exprEvalToString(ast, env) {
+    try {
+      const result = exprEval(ast, env);
+      if (result === null || result === undefined) return '';
+      if (typeof result === 'boolean') return result ? 'true' : 'false';
+      return String(result);
+    } catch (e) {
+      console.warn('Plugin expression error:', e.message);
+      return String(env.value ?? '');
+    }
+  }
+
+  // ---- Plugin System ----
+
+  function validatePlugin(config) {
+    const errors = [];
+    if (!config || typeof config !== 'object') { errors.push('Plugin must be a JSON object'); return errors; }
+    if (typeof config.name !== 'string' || !config.name.trim()) errors.push('Plugin "name" is required');
+    if (typeof config.table !== 'string') errors.push('Plugin "table" regex is required');
+    else { try { new RegExp(config.table); } catch (e) { errors.push(`Invalid table regex: ${e.message}`); } }
+    if (!Array.isArray(config.columns) || config.columns.length === 0) errors.push('Plugin "columns" must be a non-empty array');
+    else {
+      config.columns.forEach((col, i) => {
+        if (typeof col.match !== 'string') errors.push(`columns[${i}].match is required`);
+        else { try { new RegExp(col.match); } catch (e) { errors.push(`columns[${i}].match invalid regex: ${e.message}`); } }
+        if (typeof col.display !== 'string') errors.push(`columns[${i}].display expression is required`);
+      });
+    }
+    return errors;
+  }
+
+  function compilePlugin(config) {
+    let tableRe;
+    try { tableRe = new RegExp('^(?:' + config.table + ')$'); } catch (e) { return null; }
+    const columns = [];
+    for (const col of config.columns) {
+      try {
+        const matchRe = new RegExp('^(?:' + col.match + ')$');
+        const displayAst = exprCompile(col.display);
+        columns.push({ matchRe, displayAst });
+      } catch (e) {
+        console.warn(`Plugin "${config.name}": skipping column rule "${col.match}": ${e.message}`);
+      }
+    }
+    return { tableRe, columns };
+  }
+
+  function rebuildTransformCache() {
+    _columnTransformCache = {};
+    for (const tableName of Object.keys(tables)) {
+      rebuildTransformCacheForTable(tableName);
+    }
+  }
+
+  function rebuildTransformCacheForTable(tableName) {
+    const t = tables[tableName];
+    if (!t) { delete _columnTransformCache[tableName]; return; }
+    const colMap = {};
+    for (let pi = 0; pi < plugins.length; pi++) {
+      const compiled = plugins[pi]._compiled;
+      if (!compiled || !compiled.tableRe.test(tableName)) continue;
+      for (const colName of t.columns) {
+        for (const rule of compiled.columns) {
+          if (rule.matchRe.test(colName)) {
+            colMap[colName] = { displayAst: rule.displayAst, pluginIdx: pi };
+            break;
+          }
+        }
+      }
+    }
+    if (Object.keys(colMap).length > 0) _columnTransformCache[tableName] = colMap;
+    else delete _columnTransformCache[tableName];
+  }
+
+  function getDisplayValue(tableName, column, row) {
+    const tableCache = _columnTransformCache[tableName];
+    if (!tableCache) return row[column] ?? '';
+    const entry = tableCache[column];
+    if (!entry) return row[column] ?? '';
+    return exprEvalToString(entry.displayAst, { value: row[column] ?? '', column, row, table: tableName });
+  }
+
+  function hasDisplayTransform(tableName, column) {
+    const tableCache = _columnTransformCache[tableName];
+    return !!(tableCache && tableCache[column]);
+  }
+
+  async function loadPluginFromFile() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.addEventListener('change', async () => {
+      if (!input.files || !input.files[0]) return;
+      const file = input.files[0];
+      try {
+        const text = await file.text();
+        const config = JSON.parse(text);
+        const errors = validatePlugin(config);
+        if (errors.length > 0) { alert('Plugin validation errors:\n' + errors.join('\n')); return; }
+        const compiled = compilePlugin(config);
+        if (!compiled || compiled.columns.length === 0) { alert('Plugin has no valid column rules after compilation.'); return; }
+        config._compiled = compiled;
+        config._filename = file.name;
+        plugins.push(config);
+        rebuildTransformCache();
+        rerenderAllWindows();
+        persistPlugins();
+        updatePluginMenu();
+      } catch (e) {
+        alert('Failed to load plugin: ' + e.message);
+      }
+    });
+    input.click();
+  }
+
+  function unloadPlugin(index) {
+    if (index < 0 || index >= plugins.length) return;
+    plugins.splice(index, 1);
+    rebuildTransformCache();
+    rerenderAllWindows();
+    persistPlugins();
+    updatePluginMenu();
+  }
+
+  function rerenderAllWindows() {
+    for (const win of windows) {
+      if (win.tableName && tables[win.tableName]) {
+        rebuildTable(win);
+      }
+    }
+  }
+
+  function persistPlugins() {
+    const configs = plugins.map(p => {
+      const { _compiled, ...rest } = p;
+      return rest;
+    });
+    localStorage.setItem('csvsql_plugins', JSON.stringify(configs));
+  }
+
+  function loadPersistedPlugins() {
+    try {
+      const data = JSON.parse(localStorage.getItem('csvsql_plugins') || 'null');
+      if (!Array.isArray(data)) return;
+      for (const config of data) {
+        const errors = validatePlugin(config);
+        if (errors.length > 0) continue;
+        const compiled = compilePlugin(config);
+        if (!compiled || compiled.columns.length === 0) continue;
+        config._compiled = compiled;
+        plugins.push(config);
+      }
+      if (plugins.length > 0) rebuildTransformCache();
+    } catch (e) {
+      console.warn('Failed to load persisted plugins:', e.message);
+    }
+  }
+
+  function updatePluginMenu() {
+    const area = document.getElementById('plugin-list-area');
+    const unloadBtn = document.getElementById('btn-unload-plugin');
+    if (!area) return;
+    if (plugins.length === 0) {
+      area.innerHTML = '<span class="menu-hint">No plugins loaded</span>';
+      if (unloadBtn) unloadBtn.disabled = true;
+      return;
+    }
+    if (unloadBtn) unloadBtn.disabled = false;
+    area.innerHTML = '';
+    plugins.forEach((p, i) => {
+      const btn = document.createElement('button');
+      btn.textContent = '✕ ' + (p.name || p._filename || 'Plugin ' + (i + 1));
+      btn.title = p.description || '';
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        unloadPlugin(i);
+      });
+      area.appendChild(btn);
+    });
+  }
+
+  function showExpressionReference() {
+    showHelpWindow('Plugin Expression Reference', `
+<h4>Overview</h4>
+<p>Plugin display expressions use the CSVSQL expression language &mdash; a safe, sandboxed language with no access to JavaScript globals, the DOM, or browser APIs.</p>
+
+<h4>Variables</h4>
+<table>
+<tr><th>Variable</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>value</code></td><td>String</td><td>The raw cell value</td></tr>
+<tr><td><code>column</code></td><td>String</td><td>The column name</td></tr>
+<tr><td><code>table</code></td><td>String</td><td>The table name</td></tr>
+<tr><td><code>row</code></td><td>Object</td><td>The full row &mdash; access fields with <code>row.fieldname</code></td></tr>
+</table>
+
+<h4>Data Types</h4>
+<p>String (<code>'hello'</code>, <code>"world"</code>), Number (<code>42</code>, <code>3.14</code>), Boolean (<code>true</code>, <code>false</code>), Null (<code>null</code>). All values coerce to string for final output.</p>
+
+<h4>Operators (by precedence, lowest first)</h4>
+<table>
+<tr><th>Operator</th><th>Description</th><th>Example</th></tr>
+<tr><td><code>? :</code></td><td>Ternary conditional</td><td><code>value == '' ? 'N/A' : value</code></td></tr>
+<tr><td><code>||</code></td><td>Logical OR (short-circuit, returns first truthy)</td><td><code>value || 'default'</code></td></tr>
+<tr><td><code>&&</code></td><td>Logical AND (short-circuit)</td><td><code>value && upper(value)</code></td></tr>
+<tr><td><code>== !=</code></td><td>Equality (string comparison)</td><td><code>value == 'yes'</code></td></tr>
+<tr><td><code>&lt; &gt; &lt;= &gt;=</code></td><td>Comparison (numeric if both parse as numbers, else string)</td><td><code>num(value) &gt; 100</code></td></tr>
+<tr><td><code>+ -</code></td><td>Add/concatenate, subtract</td><td><code>'$' + value</code></td></tr>
+<tr><td><code>* / %</code></td><td>Multiply, divide, modulo</td><td><code>num(value) * 100</code></td></tr>
+<tr><td><code>! -</code></td><td>Logical NOT, numeric negation</td><td><code>!isEmpty(value)</code></td></tr>
+<tr><td><code>.</code></td><td>Property access</td><td><code>row.last_name</code></td></tr>
+</table>
+<p><strong><code>+</code></strong>: concatenation if either operand is a string, addition if both are numbers. <strong><code>||</code></strong>: falsy values are <code>null</code>, <code>false</code>, <code>''</code>, <code>0</code>.</p>
+
+<h4>String Functions</h4>
+<table>
+<tr><th>Function</th><th>Description</th><th>Example</th></tr>
+<tr><td><code>upper(s)</code></td><td>Uppercase</td><td><code>upper('hello')</code> &rarr; <code>'HELLO'</code></td></tr>
+<tr><td><code>lower(s)</code></td><td>Lowercase</td><td><code>lower('Hello')</code> &rarr; <code>'hello'</code></td></tr>
+<tr><td><code>trim(s)</code></td><td>Strip whitespace</td><td><code>trim(' hi ')</code> &rarr; <code>'hi'</code></td></tr>
+<tr><td><code>len(s)</code></td><td>String length</td><td><code>len('abc')</code> &rarr; <code>3</code></td></tr>
+<tr><td><code>substr(s, start)</code></td><td>Substring from start</td><td><code>substr('hello', 2)</code> &rarr; <code>'llo'</code></td></tr>
+<tr><td><code>substr(s, start, len)</code></td><td>Substring with length</td><td><code>substr('hello', 1, 3)</code> &rarr; <code>'ell'</code></td></tr>
+<tr><td><code>replace(s, search, repl)</code></td><td>Replace first occurrence</td><td><code>replace('a-b-c', '-', '/')</code> &rarr; <code>'a/b-c'</code></td></tr>
+<tr><td><code>replaceAll(s, search, repl)</code></td><td>Replace all occurrences</td><td><code>replaceAll('a-b-c', '-', '/')</code> &rarr; <code>'a/b/c'</code></td></tr>
+<tr><td><code>startsWith(s, prefix)</code></td><td>Test prefix</td><td><code>startsWith('hello', 'he')</code> &rarr; <code>true</code></td></tr>
+<tr><td><code>endsWith(s, suffix)</code></td><td>Test suffix</td><td><code>endsWith('hello', 'lo')</code> &rarr; <code>true</code></td></tr>
+<tr><td><code>contains(s, sub)</code></td><td>Test substring</td><td><code>contains('hello', 'ell')</code> &rarr; <code>true</code></td></tr>
+<tr><td><code>padLeft(s, width, char)</code></td><td>Left-pad to width</td><td><code>padLeft('42', 5, '0')</code> &rarr; <code>'00042'</code></td></tr>
+<tr><td><code>padRight(s, width, char)</code></td><td>Right-pad to width</td><td><code>padRight('hi', 5, '.')</code> &rarr; <code>'hi...'</code></td></tr>
+<tr><td><code>concat(s1, s2, ...)</code></td><td>Concatenate</td><td><code>concat('a', 'b', 'c')</code> &rarr; <code>'abc'</code></td></tr>
+<tr><td><code>repeat(s, n)</code></td><td>Repeat string</td><td><code>repeat('*', 3)</code> &rarr; <code>'***'</code></td></tr>
+</table>
+
+<h4>Number Functions</h4>
+<table>
+<tr><th>Function</th><th>Description</th><th>Example</th></tr>
+<tr><td><code>num(s)</code></td><td>Parse to number (null if NaN)</td><td><code>num('42.5')</code> &rarr; <code>42.5</code></td></tr>
+<tr><td><code>fixed(n, decimals)</code></td><td>Format with fixed decimals</td><td><code>fixed(3.1, 2)</code> &rarr; <code>'3.10'</code></td></tr>
+<tr><td><code>round(n)</code> / <code>round(n, d)</code></td><td>Round</td><td><code>round(3.456, 2)</code> &rarr; <code>3.46</code></td></tr>
+<tr><td><code>floor(n)</code></td><td>Round down</td><td><code>floor(3.9)</code> &rarr; <code>3</code></td></tr>
+<tr><td><code>ceil(n)</code></td><td>Round up</td><td><code>ceil(3.1)</code> &rarr; <code>4</code></td></tr>
+<tr><td><code>abs(n)</code></td><td>Absolute value</td><td><code>abs(-5)</code> &rarr; <code>5</code></td></tr>
+<tr><td><code>min(a, b)</code></td><td>Minimum</td><td><code>min(3, 7)</code> &rarr; <code>3</code></td></tr>
+<tr><td><code>max(a, b)</code></td><td>Maximum</td><td><code>max(3, 7)</code> &rarr; <code>7</code></td></tr>
+<tr><td><code>commas(n)</code></td><td>Format with thousand separators</td><td><code>commas(1234567)</code> &rarr; <code>'1,234,567'</code></td></tr>
+</table>
+
+<h4>Date Functions</h4>
+<table>
+<tr><th>Function</th><th>Description</th><th>Example</th></tr>
+<tr><td><code>date(s, format)</code></td><td>Parse &amp; format date</td><td><code>date('2024-01-15', 'locale')</code></td></tr>
+</table>
+<p>Format strings: <code>'locale'</code>, <code>'iso'</code>, <code>'time'</code>, <code>'datetime'</code>, <code>'full'</code>, or a pattern with <code>YYYY</code>, <code>MM</code>, <code>DD</code> (e.g. <code>'YYYY/MM/DD'</code>). Returns the original value if unparseable.</p>
+<p><code>'full'</code> shows local date and time with sub-second precision: <code>2026-06-07 13:07:06.123456789</code>. Decimal-seconds timestamps (e.g. <code>1780862826.123456789</code>) are auto-detected and the fractional part is preserved at full precision (up to 9 digits). Integer timestamps (milliseconds) are also supported.</p>
+
+<h4>Logic / Utility Functions</h4>
+<table>
+<tr><th>Function</th><th>Description</th><th>Example</th></tr>
+<tr><td><code>if(cond, then, else)</code></td><td>Conditional</td><td><code>if(value == '1', 'Yes', 'No')</code></td></tr>
+<tr><td><code>choose(val, k1, v1, ...)</code></td><td>Map value via key-value pairs</td><td><code>choose(value, 'A', 'Active', 'I', 'Inactive')</code></td></tr>
+<tr><td><code>coalesce(a, b, ...)</code></td><td>First non-empty argument</td><td><code>coalesce(row.nickname, row.name, 'Anon')</code></td></tr>
+<tr><td><code>isEmpty(s)</code></td><td>True if null or <code>''</code></td><td><code>isEmpty(value) ? 'N/A' : value</code></td></tr>
+<tr><td><code>isNum(s)</code></td><td>True if parseable as number</td><td><code>isNum(value) ? fixed(num(value), 2) : value</code></td></tr>
+</table>
+
+<h4>choose() Details</h4>
+<p><code>choose(val, key1, result1, key2, result2, ..., default?)</code> &mdash; compares val against each key (string comparison). Returns the matching result. If no match: returns the trailing default if argument count is even (val + odd args), otherwise returns val unchanged.</p>
+<pre>choose(value, 'M', 'Male', 'F', 'Female', 'Other')
+  'M' &rarr; 'Male', 'F' &rarr; 'Female', 'X' &rarr; 'Other' (default)
+
+choose(value, 'A', 'Active', 'I', 'Inactive')
+  'A' &rarr; 'Active', 'I' &rarr; 'Inactive', 'X' &rarr; 'X' (no default)</pre>
+
+<h4>Error Handling</h4>
+<ul>
+<li><strong>Parse errors</strong> are caught when a plugin is loaded. Invalid column rules are skipped.</li>
+<li><strong>Runtime errors</strong> fall back to displaying the raw value silently.</li>
+<li><code>num()</code> on non-numeric strings returns <code>null</code>.</li>
+<li>Division by zero returns <code>null</code> (displays as empty).</li>
+<li>Property access on null returns <code>null</code>.</li>
+</ul>
+    `);
+  }
+
   // ---- Public API ----
   return {
     init,
@@ -4896,6 +5574,8 @@ ${_aiImageContext()}`;
     restoreAll,
     showAbout,
     showManual,
+    loadPluginFromFile,
+    showExpressionReference,
     ...(new URLSearchParams(location.search).has('test') ? {
       _test: {
         sanitizeTableName, sanitizeColumnName, sanitizeColumns,
@@ -4904,6 +5584,13 @@ ${_aiImageContext()}`;
         get windows() { return windows; },
         get db() { return db; },
         set _shiftOpen(v) { _shiftOpen = v; },
+        get plugins() { return plugins; },
+        get _columnTransformCache() { return _columnTransformCache; },
+        exprCompile, exprEval, exprEvalToString,
+        validatePlugin, compilePlugin, loadPersistedPlugins,
+        rebuildTransformCache, rebuildTransformCacheForTable,
+        getDisplayValue, hasDisplayTransform,
+        unloadPlugin, persistPlugins, updatePluginMenu,
       }
     } : {}),
   };

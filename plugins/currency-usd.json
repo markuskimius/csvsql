@@ -1,0 +1,11 @@
+{
+  "name": "USD Currency",
+  "description": "Format monetary columns as USD with commas and 2 decimal places",
+  "table": ".*",
+  "columns": [
+    {
+      "match": "^(amount|price|total|cost|balance)$",
+      "display": "isNum(value) ? '$' + fixed(num(value), 2) : value"
+    }
+  ]
+}

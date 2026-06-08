@@ -1,0 +1,11 @@
+{
+  "name": "ID Padding",
+  "description": "Zero-pad ID columns to 6 digits",
+  "table": ".*",
+  "columns": [
+    {
+      "match": "^(id|employee_id|order_id)$",
+      "display": "padLeft(value, 6, '0')"
+    }
+  ]
+}

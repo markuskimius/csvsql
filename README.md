@@ -176,6 +176,34 @@ The AI receives column statistics and sample rows, then writes SQL queries to ge
 
 <!-- ![Window layouts](screenshots/layouts.png) -->
 
+## Plugins
+
+Plugins customize how cell values are displayed. A plugin is a JSON file that maps table and column name patterns (regex) to display expressions in the CSVSQL expression language — a safe, sandboxed language with no JavaScript execution.
+
+Multiple plugins can be loaded simultaneously and stack on the same table — each column is governed by the last-loaded plugin with a matching rule.
+
+**Loading:** Use **Plugins > Load Plugin** in the menu. Plugins persist across page reloads.
+
+**Example plugin** (`plugins/dates.json`):
+
+```json
+{
+  "name": "Locale Dates",
+  "description": "Display date columns as locale-formatted dates",
+  "table": ".*",
+  "columns": [
+    {
+      "match": "(date|created|updated|_at|timestamp|member_since)",
+      "display": "isEmpty(value) ? '' : date(value, 'locale')"
+    }
+  ]
+}
+```
+
+Bundled example plugins are in the `plugins/` directory: date formatting, USD currency, boolean display, and ID zero-padding.
+
+The in-app **Plugins > Expression Reference** has the full language documentation including all operators, built-in functions, and examples.
+
 ## Keyboard Shortcuts
 
 | Shortcut | Action |

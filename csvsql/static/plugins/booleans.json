@@ -1,0 +1,11 @@
+{
+  "name": "Friendly Booleans",
+  "description": "Show 1/0 and true/false as Yes/No for boolean-like columns",
+  "table": ".*",
+  "columns": [
+    {
+      "match": "^(active|enabled|verified|is_\\w+)$",
+      "display": "choose(lower(value), '1', 'Yes', 'true', 'Yes', 'yes', 'Yes', '0', 'No', 'false', 'No', 'no', 'No')"
+    }
+  ]
+}

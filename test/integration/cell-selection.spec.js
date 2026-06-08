@@ -201,7 +201,7 @@ test.describe('Cell row/column highlight', () => {
     await page.keyboard.press('Control+ArrowLeft');
     await page.waitForTimeout(150);
     const cols = await page.evaluate(() => [...app._test.tables['sample1'].columns]);
-    expect(cols).toEqual(['name', 'email']);
+    expect(cols).toEqual(['name', 'email', 'member_since']);
   });
 
   test('arrow key with no selection focuses a cell in the middle of view', async ({ page }) => {

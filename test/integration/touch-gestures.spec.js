@@ -103,7 +103,7 @@ test.describe('Touch gestures', () => {
 
   test('1.5-tap reorders columns', async ({ page }) => {
     const before = (await getTableData(page, 'sample1')).columns;
-    expect(before).toEqual(['name', 'email']);
+    expect(before).toEqual(['name', 'email', 'member_since']);
 
     const nameTh = page.locator('.subwindow table thead th').nth(1);  // name
     const emailTh = page.locator('.subwindow table thead th').nth(2); // email
@@ -135,7 +135,7 @@ test.describe('Touch gestures', () => {
 
     await page.waitForTimeout(300);
     const after = (await getTableData(page, 'sample1')).columns;
-    expect(after).toEqual(['email', 'name']);
+    expect(after).toEqual(['email', 'name', 'member_since']);
   });
 
   test('1.5-tap on a cell extends the selection rectangle', async ({ page }) => {
@@ -241,7 +241,7 @@ test.describe('Touch gestures', () => {
 
   test('tap without follow-up does not enter drag mode', async ({ page }) => {
     const before = (await getTableData(page, 'sample1')).columns;
-    expect(before).toEqual(['name', 'email']);
+    expect(before).toEqual(['name', 'email', 'member_since']);
 
     const nameTh = page.locator('.subwindow table thead th').nth(1);
     const handle = await nameTh.elementHandle();
@@ -264,6 +264,6 @@ test.describe('Touch gestures', () => {
     await page.waitForTimeout(300);
 
     const after = (await getTableData(page, 'sample1')).columns;
-    expect(after).toEqual(['name', 'email']);
+    expect(after).toEqual(['name', 'email', 'member_since']);
   });
 });

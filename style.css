@@ -116,6 +116,13 @@ html, body {
   border-top: 1px solid var(--border);
   margin: 4px 0;
 }
+.menu-hint {
+  display: block;
+  padding: 4px 12px;
+  color: #888;
+  font-size: 12px;
+  font-style: italic;
+}
 
 /* ---- Workspace ---- */
 #workspace {

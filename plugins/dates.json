@@ -1,0 +1,11 @@
+{
+  "name": "Locale Dates",
+  "description": "Display date columns as locale-formatted dates with full precision",
+  "table": ".*",
+  "columns": [
+    {
+      "match": "(date|created|updated|_at|timestamp|member_since)",
+      "display": "isEmpty(value) ? '' : date(value, 'full')"
+    }
+  ]
+}

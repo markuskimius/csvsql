@@ -35,7 +35,7 @@ test.describe('Column reorder', () => {
 
   test('plain drag reorders columns', async ({ page }) => {
     const before = await getColumns(page, 'sample1');
-    expect(before).toEqual(['name', 'email']);
+    expect(before).toEqual(['name', 'email', 'member_since']);
 
     // Drag email header leftward past midpoint of name header (no modifier).
     const fromTh = page.locator('.subwindow table thead th').nth(2); // email
@@ -52,7 +52,7 @@ test.describe('Column reorder', () => {
 
     await page.waitForTimeout(300);
     const after = await getColumns(page, 'sample1');
-    expect(after).toEqual(['email', 'name']);
+    expect(after).toEqual(['email', 'name', 'member_since']);
   });
 
   test('Ctrl+Right moves selected column right; Ctrl+Left moves it back', async ({ page }) => {
@@ -61,7 +61,7 @@ test.describe('Column reorder', () => {
     await firstHeader.click();
 
     const before = await getColumns(page, 'sample1');
-    expect(before).toEqual(['name', 'email']);
+    expect(before).toEqual(['name', 'email', 'member_since']);
 
     // Focus document body so keydown isn't captured by an input
     await page.evaluate(() => document.body.focus());
@@ -69,7 +69,7 @@ test.describe('Column reorder', () => {
     await page.waitForTimeout(200);
 
     const afterRight = await getColumns(page, 'sample1');
-    expect(afterRight).toEqual(['email', 'name']);
+    expect(afterRight).toEqual(['email', 'name', 'member_since']);
 
     // Selection should still be on "name" (now at index 1)
     const win = await getWin(page, 'sample1');
@@ -79,7 +79,7 @@ test.describe('Column reorder', () => {
     await page.waitForTimeout(200);
 
     const afterLeft = await getColumns(page, 'sample1');
-    expect(afterLeft).toEqual(['name', 'email']);
+    expect(afterLeft).toEqual(['name', 'email', 'member_since']);
   });
 
   test('Ctrl+Left on leftmost column is a no-op', async ({ page }) => {
@@ -91,7 +91,7 @@ test.describe('Column reorder', () => {
     await page.waitForTimeout(200);
 
     const after = await getColumns(page, 'sample1');
-    expect(after).toEqual(['name', 'email']);
+    expect(after).toEqual(['name', 'email', 'member_since']);
   });
 
   test('Ctrl+Arrow with no selection is a no-op', async ({ page }) => {
@@ -116,7 +116,7 @@ test.describe('Column reorder', () => {
     await page.waitForTimeout(200);
 
     const after = await getColumns(page, 'sample1');
-    expect(after).toEqual(['name', 'email']);
+    expect(after).toEqual(['name', 'email', 'member_since']);
   });
 
   test('multiple Ctrl+Right presses walk the column to the end', async ({ page }) => {
@@ -152,5 +152,37 @@ test.describe('Column reorder', () => {
     await page.waitForTimeout(150);
     const after = await getColumns(page, qName);
     expect(after).toEqual(['b', 'c', 'a']);
+  });
+
+  test('sorting works on large numeric values that exceed Number precision', async ({ page }) => {
+    // member_since has values like 1780862826.123456700 that differ only
+    // in the last digits — beyond Number.MAX_SAFE_INTEGER when combined.
+    // Sort should still differentiate them via string comparison fallback.
+    const memberSinceHeader = page.locator('.subwindow table thead th').nth(3); // member_since
+    await memberSinceHeader.click();
+    await page.waitForTimeout(200);
+
+    // After ascending sort, verify the rows are in order
+    const values = await page.evaluate(() => {
+      const win = app._test.windows[0];
+      return win._displayRows.map(r => r.member_since);
+    });
+
+    for (let i = 1; i < values.length; i++) {
+      expect(String(values[i]) >= String(values[i - 1])).toBe(true);
+    }
+
+    // Click again for descending
+    await memberSinceHeader.click();
+    await page.waitForTimeout(200);
+
+    const desc = await page.evaluate(() => {
+      const win = app._test.windows[0];
+      return win._displayRows.map(r => r.member_since);
+    });
+
+    for (let i = 1; i < desc.length; i++) {
+      expect(String(desc[i]) <= String(desc[i - 1])).toBe(true);
+    }
   });
 });

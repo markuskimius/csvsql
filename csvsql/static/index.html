@@ -38,6 +38,14 @@
         <button id="btn-restore-all" disabled>Restore All</button>
       </div>
     </div>
+    <div class="menu-item" id="menu-plugins">
+      <span class="menu-label">Plugins</span>
+      <div class="menu-dropdown">
+        <button id="btn-load-plugin">Load Plugin...</button>
+        <hr>
+        <div id="plugin-list-area"><span class="menu-hint">No plugins loaded</span></div>
+      </div>
+    </div>
     <div class="menu-item" id="menu-windows">
       <span class="menu-label">Windows</span>
       <div class="menu-dropdown" id="windows-list">
@@ -47,6 +55,7 @@
       <span class="menu-label">Help</span>
       <div class="menu-dropdown">
         <button onclick="app.showManual()">User's Manual</button>
+        <button id="btn-expr-ref">Plugin Expression Reference</button>
         <hr>
         <button onclick="app.showAbout()">About CSVSQL</button>
       </div>
