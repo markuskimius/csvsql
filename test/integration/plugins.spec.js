@@ -343,4 +343,56 @@ test.describe('Plugin system', () => {
     const afterCommit = await cell.textContent();
     expect(afterCommit).toBe('ALICE JOHNSON');
   });
+
+  test('loadPluginFile loads a plugin from a File object', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const json = JSON.stringify({
+        name: 'Drop Test',
+        table: '.*',
+        columns: [{ match: '^name$', display: "upper(value)" }]
+      });
+      const file = new File([json], 'drop-test.json', { type: 'application/json' });
+      await app._test.loadPluginFile(file);
+      return {
+        count: app._test.plugins.length,
+        name: app._test.plugins[0]?.name,
+        filename: app._test.plugins[0]?._filename,
+        transformed: app._test.getDisplayValue(
+          app._test.windows[0].tableName, 'name',
+          app._test.tables[app._test.windows[0].tableName].rows[0]
+        ),
+      };
+    });
+    expect(result.count).toBe(1);
+    expect(result.name).toBe('Drop Test');
+    expect(result.filename).toBe('drop-test.json');
+    expect(result.transformed).toBe('ALICE JOHNSON');
+  });
+
+  test('dropping a .json file loads it as a plugin, not a data file', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const json = JSON.stringify({
+        name: 'Drop Plugin',
+        table: '.*',
+        columns: [{ match: '^name$', display: "lower(value)" }]
+      });
+      const file = new File([json], 'test-plugin.json', { type: 'application/json' });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      const evt = new DragEvent('drop', { bubbles: true, dataTransfer: dt });
+      document.dispatchEvent(evt);
+      await new Promise(r => setTimeout(r, 200));
+      const windowCount = app._test.windows.length;
+      const pluginCount = app._test.plugins.length;
+      const hasTransform = app._test.hasDisplayTransform(
+        app._test.windows[0].tableName, 'name'
+      );
+      return { windowCount, pluginCount, hasTransform };
+    });
+    // Should still have just the original sample1 window (no new data window)
+    expect(result.windowCount).toBe(1);
+    // Plugin was loaded
+    expect(result.pluginCount).toBe(1);
+    expect(result.hasTransform).toBe(true);
+  });
 });

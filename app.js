@@ -149,7 +149,13 @@ const app = (() => {
       }));
       for (const entry of entries) {
         const handle = await entry.handlePromise;
-        if (entry.file) openFileByType(entry.file, handle, undefined, hasHeader);
+        if (entry.file) {
+          if (entry.file.name.toLowerCase().endsWith('.json')) {
+            loadPluginFile(entry.file);
+          } else {
+            openFileByType(entry.file, handle, undefined, hasHeader);
+          }
+        }
       }
     });
   }
@@ -3474,7 +3480,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.14.0 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.14.1 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -3642,7 +3648,7 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <h4>Plugins</h4>
 <p>Plugins customize how cell values are displayed. A plugin is a JSON config file that maps table and column name patterns to display expressions written in the CSVSQL expression language.</p>
 
-<p><strong>Loading &amp; unloading:</strong> Use <strong>Plugins &rarr; Load Plugin</strong> to open a <code>.json</code> plugin file. Loaded plugins appear in the Plugins menu with an &times; button to unload them. Plugins persist across page reloads.</p>
+<p><strong>Loading &amp; unloading:</strong> Use <strong>Plugins &rarr; Load Plugin</strong> to open a <code>.json</code> plugin file, or drag and drop a <code>.json</code> file onto the app. Loaded plugins appear in the Plugins menu with an &times; button to unload them. Plugins persist across page reloads.</p>
 
 <p><strong>How matching works:</strong> Each plugin has a <code>table</code> regex matched against table names, and column rules with a <code>match</code> regex matched against column names. Multiple plugins can be loaded simultaneously and stack on the same table &mdash; each column is governed by the <em>last-loaded</em> plugin with a matching rule. Unloading a plugin reveals any earlier plugin&rsquo;s rule that was shadowed.</p>
 
@@ -5356,30 +5362,32 @@ ${_aiImageContext()}`;
     return !!(tableCache && tableCache[column]);
   }
 
+  async function loadPluginFile(file) {
+    try {
+      const text = await file.text();
+      const config = JSON.parse(text);
+      const errors = validatePlugin(config);
+      if (errors.length > 0) { alert('Plugin validation errors:\n' + errors.join('\n')); return; }
+      const compiled = compilePlugin(config);
+      if (!compiled || compiled.columns.length === 0) { alert('Plugin has no valid column rules after compilation.'); return; }
+      config._compiled = compiled;
+      config._filename = file.name;
+      plugins.push(config);
+      rebuildTransformCache();
+      rerenderAllWindows();
+      persistPlugins();
+      updatePluginMenu();
+    } catch (e) {
+      alert('Failed to load plugin: ' + e.message);
+    }
+  }
+
   async function loadPluginFromFile() {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.json';
-    input.addEventListener('change', async () => {
-      if (!input.files || !input.files[0]) return;
-      const file = input.files[0];
-      try {
-        const text = await file.text();
-        const config = JSON.parse(text);
-        const errors = validatePlugin(config);
-        if (errors.length > 0) { alert('Plugin validation errors:\n' + errors.join('\n')); return; }
-        const compiled = compilePlugin(config);
-        if (!compiled || compiled.columns.length === 0) { alert('Plugin has no valid column rules after compilation.'); return; }
-        config._compiled = compiled;
-        config._filename = file.name;
-        plugins.push(config);
-        rebuildTransformCache();
-        rerenderAllWindows();
-        persistPlugins();
-        updatePluginMenu();
-      } catch (e) {
-        alert('Failed to load plugin: ' + e.message);
-      }
+    input.addEventListener('change', () => {
+      if (input.files && input.files[0]) loadPluginFile(input.files[0]);
     });
     input.click();
   }
@@ -5590,7 +5598,7 @@ choose(value, 'A', 'Active', 'I', 'Inactive')
         validatePlugin, compilePlugin, loadPersistedPlugins,
         rebuildTransformCache, rebuildTransformCacheForTable,
         getDisplayValue, hasDisplayTransform,
-        unloadPlugin, persistPlugins, updatePluginMenu,
+        loadPluginFile, unloadPlugin, persistPlugins, updatePluginMenu,
       }
     } : {}),
   };

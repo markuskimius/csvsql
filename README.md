@@ -182,7 +182,7 @@ Plugins customize how cell values are displayed. A plugin is a JSON file that ma
 
 Multiple plugins can be loaded simultaneously and stack on the same table — each column is governed by the last-loaded plugin with a matching rule.
 
-**Loading:** Use **Plugins > Load Plugin** in the menu. Plugins persist across page reloads.
+**Loading:** Use **Plugins > Load Plugin** in the menu, or drag and drop a `.json` file onto the app. Plugins persist across page reloads.
 
 **Example plugin** (`plugins/dates.json`):
 
