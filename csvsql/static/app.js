@@ -1634,7 +1634,7 @@ const app = (() => {
       const filterBtn = document.createElement('span');
       filterBtn.className = 'col-filter-btn';
       if (win.columnFilters[col]) filterBtn.classList.add('active');
-      filterBtn.textContent = '\u25BE';
+      filterBtn.textContent = '\u2630';
       filterBtn.addEventListener('mousedown', (e) => { e.stopPropagation(); });
       filterBtn.addEventListener('touchstart', (e) => { e.stopPropagation(); }, { passive: true });
       filterBtn.addEventListener('click', (e) => {
@@ -2224,7 +2224,24 @@ const app = (() => {
     // Update statusbar
     const statusLeft = win.el.querySelector('.status-left');
     const statusRight = win.el.querySelector('.status-right');
-    statusLeft.textContent = `${displayRows.length} of ${rows.length} rows`;
+    const hasColumnFilters = Object.keys(win.columnFilters).length > 0;
+    const hasWhereFilter = !!win.filterText;
+    if (hasColumnFilters || hasWhereFilter) {
+      statusLeft.textContent = `${displayRows.length} of ${rows.length} rows — `;
+      const clearLink = document.createElement('span');
+      clearLink.className = 'status-clear-filters';
+      clearLink.textContent = 'Clear Filters';
+      clearLink.addEventListener('click', () => {
+        win.columnFilters = {};
+        win.filterText = '';
+        const filterInput = win.el.querySelector('.filter-input');
+        if (filterInput) filterInput.value = '';
+        rebuildTable(win);
+      });
+      statusLeft.appendChild(clearLink);
+    } else {
+      statusLeft.textContent = `${displayRows.length} of ${rows.length} rows`;
+    }
     statusRight.textContent = `${columns.length} columns`;
   }
 
@@ -3764,7 +3781,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.15.0 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.15.1 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -3829,7 +3846,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <li><strong>Multi-column sort:</strong> Shift+click additional column headers. Numbers next to arrows indicate sort priority.</li>
 <li><strong>Filter:</strong> Type a SQL <code>WHERE</code> clause in the filter bar (without the <code>WHERE</code> keyword). For example: <code>age > 30 AND name LIKE '%Smith%'</code></li>
 <li>The filter supports all SQLite expressions including <code>REGEXP</code> (see below).</li>
-<li><strong>Column autofilter:</strong> Click the <code>&#x25BE;</code> icon on any column header to open a dropdown with checkboxes for each unique value. Use the search box to narrow the list. Uncheck values and click Apply to hide matching rows. Multiple column filters AND together and combine with the WHERE filter bar. Filtered columns show a green border. Click Clear to remove a column&rsquo;s filter.</li>
+<li><strong>Column autofilter:</strong> Click the <code>&#x2630;</code> icon on any column header to open a dropdown with checkboxes for each unique value. Use the search box to narrow the list. Uncheck values and click Apply to hide matching rows. Multiple column filters AND together and combine with the WHERE filter bar. Filtered columns show a green border. Click Clear to remove a column&rsquo;s filter. When any filters are active, a &ldquo;Clear Filters&rdquo; link appears in the status bar to reset all column autofilters and the WHERE filter at once.</li>
 </ul>
 
 <h4>SQL Console</h4>

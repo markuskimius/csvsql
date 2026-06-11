@@ -105,7 +105,7 @@ Use **File > Open** (Ctrl+O / Cmd+O), **File > Open URL**, or drag and drop file
   age > 30 AND name LIKE '%Smith%'
   name REGEXP 'smith|jones'
   ```
-- **Column autofilter** — Click the ▾ icon on any column header to open an Excel-style dropdown with searchable checkboxes for each unique value. Uncheck values to hide matching rows. Multiple column filters AND together and combine with the WHERE filter. Filtered columns show a green border indicator
+- **Column autofilter** — Click the ☰ icon on any column header to open an Excel-style dropdown with searchable checkboxes for each unique value. Uncheck values to hide matching rows. Multiple column filters AND together and combine with the WHERE filter. Filtered columns show a green border indicator. Click "Clear Filters" in the status bar to reset all filters at once
 
 <!-- ![Sorting and filtering](screenshots/filter.png) -->
 

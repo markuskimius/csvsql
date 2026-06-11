@@ -356,7 +356,6 @@ body {
 .th-inner {
   display: flex;
   align-items: center;
-  gap: 2px;
 }
 
 .data-table th:hover {
@@ -388,6 +387,7 @@ body {
 .data-table th .sort-arrow {
   margin-left: 4px;
   font-size: 10px;
+  line-height: 1;
   color: var(--accent-hover);
 }
 
@@ -431,9 +431,9 @@ body {
 }
 
 .col-filter-btn {
-  margin-left: auto;
-  padding: 0 3px;
-  font-size: 11px;
+  margin-left: 4px;
+  padding: 0 3px 0 4px;
+  font-size: 14px;
   color: var(--text-dim);
   opacity: 0.5;
   cursor: pointer;
@@ -441,8 +441,6 @@ body {
   flex-shrink: 0;
   line-height: 1;
   border-radius: 2px;
-  transform: scale(2);
-  transform-origin: right center;
 }
 
 .data-table th:hover .col-filter-btn,
@@ -676,6 +674,16 @@ body {
   border-radius: 0 0 6px 6px;
   border-top: 1px solid var(--border);
   flex-shrink: 0;
+}
+
+.status-clear-filters {
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.status-clear-filters:hover {
+  text-decoration: underline;
+  color: var(--accent-hover);
 }
 
 /* ---- Resize handles ---- */

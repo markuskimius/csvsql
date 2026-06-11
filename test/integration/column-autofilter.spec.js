@@ -317,6 +317,137 @@ test.describe('Column AutoFilter', () => {
     expect(await page.locator('.data-table tbody tr:not(.virtual-pad)').count()).toBe(10);
   });
 
+  test('filter icon uses ☰ distinct from sort arrow ▲/▼', async ({ page }) => {
+    const th = page.locator('.data-table th:not(.row-num-header)').first();
+
+    // Filter icon should be ☰
+    const filterText = await th.locator('.col-filter-btn').textContent();
+    expect(filterText.trim()).toBe('☰');
+
+    // Sort the column
+    await th.locator('.col-name').click();
+    await page.waitForTimeout(300);
+
+    // Sort arrow should be ▲ or ▼, not ☰
+    const arrowText = await th.locator('.sort-arrow').textContent();
+    expect(arrowText.trim()).toMatch(/^[▲▼]/);
+    expect(arrowText.trim()).not.toContain('☰');
+  });
+
+  test('sort arrow and filter icon are vertically aligned', async ({ page }) => {
+    const th = page.locator('.data-table th:not(.row-num-header)').first();
+
+    // Sort the column so both icons are visible
+    await th.locator('.col-name').click();
+    await page.waitForTimeout(300);
+
+    const arrowBox = await th.locator('.sort-arrow').boundingBox();
+    const btnBox = await th.locator('.col-filter-btn').boundingBox();
+
+    // Vertical centers should be within 2px of each other
+    const arrowCenter = arrowBox.y + arrowBox.height / 2;
+    const btnCenter = btnBox.y + btnBox.height / 2;
+    expect(Math.abs(arrowCenter - btnCenter)).toBeLessThan(2);
+  });
+
+  test('Clear Filters link not shown when no filters active', async ({ page }) => {
+    await expect(page.locator('.status-clear-filters')).toHaveCount(0);
+    const statusText = await page.locator('.status-left').textContent();
+    expect(statusText).toBe('10 of 10 rows');
+  });
+
+  test('Clear Filters link appears with column autofilter', async ({ page }) => {
+    const th = page.locator('.data-table th:not(.row-num-header)').first();
+    await th.locator('.col-filter-btn').click();
+    await page.waitForTimeout(300);
+    await page.locator('.autofilter-dropdown .autofilter-item input[type="checkbox"]').first().uncheck();
+    await page.locator('.autofilter-dropdown .autofilter-apply').click();
+    await page.waitForTimeout(300);
+
+    await expect(page.locator('.status-clear-filters')).toHaveCount(1);
+    expect(await page.locator('.status-left').textContent()).toContain('Clear Filters');
+  });
+
+  test('Clear Filters link appears with WHERE filter', async ({ page }) => {
+    const filterInput = page.locator('.subwindow .filter-input');
+    await filterInput.fill("name LIKE '%Alice%'");
+    await page.waitForTimeout(500);
+
+    await expect(page.locator('.status-clear-filters')).toHaveCount(1);
+  });
+
+  test('Clear Filters clears column autofilters', async ({ page }) => {
+    // Apply column filter on two columns
+    const nameTh = page.locator('.data-table th:not(.row-num-header)').nth(0);
+    await nameTh.locator('.col-filter-btn').click();
+    await page.waitForTimeout(300);
+    await page.locator('.autofilter-dropdown .autofilter-item input[type="checkbox"]').first().uncheck();
+    await page.locator('.autofilter-dropdown .autofilter-apply').click();
+    await page.waitForTimeout(300);
+
+    const emailTh = page.locator('.data-table th:not(.row-num-header)').nth(1);
+    await emailTh.locator('.col-filter-btn').click();
+    await page.waitForTimeout(300);
+    await page.locator('.autofilter-dropdown .autofilter-item input[type="checkbox"]').first().uncheck();
+    await page.locator('.autofilter-dropdown .autofilter-apply').click();
+    await page.waitForTimeout(300);
+
+    await expect(page.locator('.data-table th.col-filtered')).toHaveCount(2);
+
+    // Click Clear Filters
+    await page.locator('.status-clear-filters').click();
+    await page.waitForTimeout(300);
+
+    // All rows back, no filtered indicators, link gone
+    expect(await page.locator('.data-table tbody tr:not(.virtual-pad)').count()).toBe(10);
+    await expect(page.locator('.data-table th.col-filtered')).toHaveCount(0);
+    await expect(page.locator('.col-filter-btn.active')).toHaveCount(0);
+    await expect(page.locator('.status-clear-filters')).toHaveCount(0);
+  });
+
+  test('Clear Filters clears WHERE filter text', async ({ page }) => {
+    const filterInput = page.locator('.subwindow .filter-input');
+    await filterInput.fill("name LIKE '%Alice%'");
+    await page.waitForTimeout(500);
+    expect(await page.locator('.data-table tbody tr:not(.virtual-pad)').count()).toBe(1);
+
+    await page.locator('.status-clear-filters').click();
+    await page.waitForTimeout(300);
+
+    expect(await filterInput.inputValue()).toBe('');
+    expect(await page.locator('.data-table tbody tr:not(.virtual-pad)').count()).toBe(10);
+    await expect(page.locator('.status-clear-filters')).toHaveCount(0);
+  });
+
+  test('Clear Filters clears both column autofilters and WHERE at once', async ({ page }) => {
+    // Apply column filter
+    const th = page.locator('.data-table th:not(.row-num-header)').first();
+    await th.locator('.col-filter-btn').click();
+    await page.waitForTimeout(300);
+    await page.locator('.autofilter-select-all input[type="checkbox"]').uncheck();
+    await page.waitForTimeout(100);
+    await page.locator('.autofilter-dropdown .autofilter-item input[type="checkbox"]').first().check();
+    await page.locator('.autofilter-dropdown .autofilter-apply').click();
+    await page.waitForTimeout(300);
+
+    // Also apply WHERE filter
+    const filterInput = page.locator('.subwindow .filter-input');
+    await filterInput.fill("[email] LIKE '%alice%'");
+    await page.waitForTimeout(500);
+
+    expect(await page.locator('.data-table tbody tr:not(.virtual-pad)').count()).toBe(1);
+    await expect(page.locator('.data-table th.col-filtered')).toHaveCount(1);
+
+    // Click Clear Filters — both should be gone
+    await page.locator('.status-clear-filters').click();
+    await page.waitForTimeout(300);
+
+    expect(await page.locator('.data-table tbody tr:not(.virtual-pad)').count()).toBe(10);
+    await expect(page.locator('.data-table th.col-filtered')).toHaveCount(0);
+    expect(await filterInput.inputValue()).toBe('');
+    await expect(page.locator('.status-clear-filters')).toHaveCount(0);
+  });
+
   test('dropdown is right-aligned to column header', async ({ page }) => {
     const th = page.locator('.data-table th:not(.row-num-header)').first();
     await th.locator('.col-filter-btn').click();
