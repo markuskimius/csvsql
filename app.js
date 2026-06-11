@@ -12,6 +12,7 @@ const app = (() => {
   let _activeConsoleTab = 'sql';
 
   // Touch gesture state (shared across tables / windows)
+  let _activeAutoFilter = null;            // { win, col, el } — currently open autofilter dropdown
   let _touchHeaderDrag = null;             // header 1.5-tap drag (→ reorder column)
   let _touchCellDrag = null;               // cell second-tap interaction (→ double-tap edit or 1.5-tap multi-select)
   let _touchWinDrag = null;                // titlebar 1.5-tap drag (→ move window)
@@ -935,6 +936,7 @@ const app = (() => {
       prevBounds: null,
       sortCols: [],   // [{col, dir:'asc'|'desc'}, ...]
       filterText: '',
+      columnFilters: {},  // { colName: Set of allowed string values }
       selectedCol: null, // column name currently highlighted (target for Ctrl+Arrow reorder)
       selectedCells: new Set(), // keys "rownum:colName" for cells highlighted by selection
       anchorCell: null, // { rownum, col } — fixed corner for Ctrl+Shift+Arrow extension
@@ -1138,6 +1140,7 @@ const app = (() => {
       const resizeT = cl.contains('rh-top') || cl.contains('rh-tl') || cl.contains('rh-tr');
 
       handle.addEventListener('mousedown', (e) => {
+        closeAutoFilter();
         resizing = true;
         startX = e.clientX;
         startY = e.clientY;
@@ -1538,6 +1541,7 @@ const app = (() => {
 
 
   function buildTableHTML(win, container, tableData) {
+    closeAutoFilter();
     const { columns, rows } = tableData;
     let displayRows = [...rows];
 
@@ -1558,6 +1562,17 @@ const app = (() => {
       }
     } else {
       win._filterError = null;
+    }
+
+    // Column autofilters (AND together)
+    const cfKeys = Object.keys(win.columnFilters);
+    if (cfKeys.length > 0) {
+      displayRows = displayRows.filter(row => {
+        for (const c of cfKeys) {
+          if (!win.columnFilters[c].has(String(row[c] ?? ''))) return false;
+        }
+        return true;
+      });
     }
 
     // Multi-column sort
@@ -1595,7 +1610,12 @@ const app = (() => {
 
     columns.forEach((col, colIdx) => {
       const th = document.createElement('th');
-      th.textContent = col;
+      const thInner = document.createElement('div');
+      thInner.className = 'th-inner';
+      const colLabel = document.createElement('span');
+      colLabel.className = 'col-name';
+      colLabel.textContent = col;
+      thInner.appendChild(colLabel);
       th.dataset.colIdx = colIdx;
       const sortIdx = win.sortCols.findIndex(s => s.col === col);
       if (sortIdx !== -1) {
@@ -1605,9 +1625,26 @@ const app = (() => {
         const dir = win.sortCols[sortIdx].dir;
         arrow.textContent = dir === 'asc' ? '\u25B2' : '\u25BC';
         if (win.sortCols.length > 1) arrow.textContent += (sortIdx + 1);
-        th.appendChild(arrow);
+        thInner.appendChild(arrow);
       }
+      if (win.columnFilters[col]) th.classList.add('col-filtered');
       if (win.selectedCol === col) th.classList.add('col-selected');
+
+      // AutoFilter button
+      const filterBtn = document.createElement('span');
+      filterBtn.className = 'col-filter-btn';
+      if (win.columnFilters[col]) filterBtn.classList.add('active');
+      filterBtn.textContent = '\u25BE';
+      filterBtn.addEventListener('mousedown', (e) => { e.stopPropagation(); });
+      filterBtn.addEventListener('touchstart', (e) => { e.stopPropagation(); }, { passive: true });
+      filterBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        openAutoFilter(win, col, th);
+      });
+      thInner.appendChild(filterBtn);
+      th.appendChild(thInner);
+
       // Drag to reorder columns; click to sort/select; Ctrl/Cmd+click to rename
       th.addEventListener('mousedown', (e) => {
         if (e.button !== 0 || th._renaming) return;
@@ -2524,11 +2561,15 @@ const app = (() => {
     const filterChanged = oldFilter !== undefined && oldFilter !== win.filterText;
     win._lastFilterText = win.filterText;
 
+    const cfKey = JSON.stringify(Object.keys(win.columnFilters).sort().map(k => [k, [...win.columnFilters[k]].sort()]));
+    const colFilterChanged = win._lastColFilterKey !== undefined && win._lastColFilterKey !== cfKey;
+    win._lastColFilterKey = cfKey;
+
     const savedScrollLeft = container.scrollLeft;
     buildTableHTML(win, container, t);
 
     container.scrollLeft = savedScrollLeft;
-    if (filterChanged) {
+    if (filterChanged || colFilterChanged) {
       container.scrollTop = 0;
     }
   }
@@ -2577,6 +2618,10 @@ const app = (() => {
       if (s.col === oldCol) s.col = newCol;
     }
     if (win.selectedCol === oldCol) win.selectedCol = newCol;
+    if (win.columnFilters[oldCol]) {
+      win.columnFilters[newCol] = win.columnFilters[oldCol];
+      delete win.columnFilters[oldCol];
+    }
     markModified(tableName);
     try { db.run(`ALTER TABLE [${tableName}] RENAME COLUMN [${oldCol}] TO [${newCol}]`); } catch (_) {}
     rebuildTransformCacheForTable(tableName);
@@ -2601,7 +2646,7 @@ const app = (() => {
     input.value = oldCol;
     input.style.width = currentWidth + 'px';
     input.style.boxSizing = 'border-box';
-    th.textContent = '';
+    th.innerHTML = '';
     th.appendChild(input);
     th._renaming = true;
     input.focus();
@@ -2684,6 +2729,245 @@ const app = (() => {
       delete syncTimers[name];
       syncToSQL(name);
     }
+  }
+
+  // ---- AutoFilter Dropdown ----
+
+  function closeAutoFilter() {
+    if (!_activeAutoFilter) return;
+    _activeAutoFilter.el.remove();
+    document.removeEventListener('mousedown', _autoFilterOutsideClick);
+    document.removeEventListener('keydown', _autoFilterEscapeKey);
+    window.removeEventListener('resize', closeAutoFilter);
+    if (_activeAutoFilter.scrollHandler) {
+      const container = _activeAutoFilter.win.el.querySelector('.table-container');
+      if (container) container.removeEventListener('scroll', _activeAutoFilter.scrollHandler);
+    }
+    _activeAutoFilter = null;
+  }
+
+  function _autoFilterOutsideClick(e) {
+    if (_activeAutoFilter && !_activeAutoFilter.el.contains(e.target)) {
+      closeAutoFilter();
+    }
+  }
+
+  function _autoFilterEscapeKey(e) {
+    if (e.key === 'Escape' && _activeAutoFilter) {
+      closeAutoFilter();
+    }
+  }
+
+  function openAutoFilter(win, col, anchorEl) {
+    if (_activeAutoFilter && _activeAutoFilter.win === win && _activeAutoFilter.col === col) {
+      closeAutoFilter();
+      return;
+    }
+    closeAutoFilter();
+
+    const t = tables[win.tableName];
+    if (!t) return;
+
+    // Gather unique values from all rows (not just filtered)
+    const seen = new Set();
+    const values = [];
+    for (const row of t.rows) {
+      const v = String(row[col] ?? '');
+      if (!seen.has(v)) { seen.add(v); values.push(v); }
+    }
+    values.sort((a, b) => collator.compare(a, b));
+
+    const existingFilter = win.columnFilters[col];
+    const items = values.map(v => ({
+      value: v,
+      checked: existingFilter ? existingFilter.has(v) : true,
+    }));
+
+    // Build dropdown DOM
+    const dropdown = document.createElement('div');
+    dropdown.className = 'autofilter-dropdown';
+
+    // Search
+    const searchWrap = document.createElement('div');
+    searchWrap.className = 'autofilter-search-wrap';
+    const searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.className = 'autofilter-search';
+    searchInput.placeholder = 'Search values...';
+    searchWrap.appendChild(searchInput);
+    dropdown.appendChild(searchWrap);
+
+    // Select All
+    const controls = document.createElement('div');
+    controls.className = 'autofilter-controls';
+    const selectAllLabel = document.createElement('label');
+    selectAllLabel.className = 'autofilter-select-all';
+    const selectAllCb = document.createElement('input');
+    selectAllCb.type = 'checkbox';
+    selectAllLabel.appendChild(selectAllCb);
+    selectAllLabel.appendChild(document.createTextNode(' Select All'));
+    controls.appendChild(selectAllLabel);
+    dropdown.appendChild(controls);
+
+    // Value list
+    const listEl = document.createElement('div');
+    listEl.className = 'autofilter-list';
+    dropdown.appendChild(listEl);
+
+    let searchText = '';
+    let visibleItems = items;
+
+    function getVisibleItems() {
+      if (!searchText) return items;
+      const lower = searchText.toLowerCase();
+      return items.filter(it => it.value.toLowerCase().includes(lower));
+    }
+
+    function updateSelectAll() {
+      const vis = getVisibleItems();
+      const allChecked = vis.length > 0 && vis.every(it => it.checked);
+      const someChecked = vis.some(it => it.checked);
+      selectAllCb.checked = allChecked;
+      selectAllCb.indeterminate = someChecked && !allChecked;
+    }
+
+    function renderList() {
+      visibleItems = getVisibleItems();
+      listEl.innerHTML = '';
+
+      if (visibleItems.length <= 200) {
+        for (const item of visibleItems) {
+          const label = document.createElement('label');
+          label.className = 'autofilter-item';
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.checked = item.checked;
+          cb.addEventListener('change', () => {
+            item.checked = cb.checked;
+            updateSelectAll();
+          });
+          const txt = document.createElement('span');
+          txt.textContent = item.value === '' ? '(empty)' : item.value;
+          label.appendChild(cb);
+          label.appendChild(txt);
+          listEl.appendChild(label);
+        }
+      } else {
+        // Virtual scrolling for large lists
+        const ITEM_H = 24;
+        const spacer = document.createElement('div');
+        spacer.style.height = (visibleItems.length * ITEM_H) + 'px';
+        spacer.style.position = 'relative';
+        listEl.appendChild(spacer);
+
+        const renderVirtual = () => {
+          const st = listEl.scrollTop;
+          const ch = listEl.clientHeight;
+          const start = Math.max(0, Math.floor(st / ITEM_H) - 5);
+          const end = Math.min(visibleItems.length, Math.ceil((st + ch) / ITEM_H) + 5);
+          while (spacer.firstChild) spacer.removeChild(spacer.firstChild);
+          for (let i = start; i < end; i++) {
+            const item = visibleItems[i];
+            const label = document.createElement('label');
+            label.className = 'autofilter-item';
+            label.style.position = 'absolute';
+            label.style.top = (i * ITEM_H) + 'px';
+            label.style.left = '0';
+            label.style.right = '0';
+            label.style.height = ITEM_H + 'px';
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.checked = item.checked;
+            cb.addEventListener('change', () => {
+              item.checked = cb.checked;
+              updateSelectAll();
+            });
+            const txt = document.createElement('span');
+            txt.textContent = item.value === '' ? '(empty)' : item.value;
+            label.appendChild(cb);
+            label.appendChild(txt);
+            spacer.appendChild(label);
+          }
+        };
+        renderVirtual();
+        listEl.addEventListener('scroll', () => requestAnimationFrame(renderVirtual));
+      }
+      updateSelectAll();
+    }
+
+    selectAllCb.addEventListener('change', () => {
+      const checked = selectAllCb.checked;
+      for (const it of getVisibleItems()) it.checked = checked;
+      renderList();
+    });
+
+    let searchTimeout;
+    searchInput.addEventListener('input', () => {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() => {
+        searchText = searchInput.value.trim();
+        renderList();
+      }, 150);
+    });
+
+    // Buttons
+    const buttons = document.createElement('div');
+    buttons.className = 'autofilter-buttons';
+    const clearBtn = document.createElement('button');
+    clearBtn.className = 'autofilter-clear';
+    clearBtn.textContent = 'Clear';
+    clearBtn.addEventListener('click', () => {
+      delete win.columnFilters[col];
+      closeAutoFilter();
+      rebuildTable(win);
+    });
+    const applyBtn = document.createElement('button');
+    applyBtn.className = 'autofilter-apply';
+    applyBtn.textContent = 'Apply';
+    applyBtn.addEventListener('click', () => {
+      const checked = new Set();
+      for (const it of items) {
+        if (it.checked) checked.add(it.value);
+      }
+      if (checked.size === items.length) {
+        delete win.columnFilters[col];
+      } else {
+        win.columnFilters[col] = checked;
+      }
+      closeAutoFilter();
+      rebuildTable(win);
+    });
+    buttons.appendChild(clearBtn);
+    buttons.appendChild(applyBtn);
+    dropdown.appendChild(buttons);
+
+    renderList();
+    document.body.appendChild(dropdown);
+
+    // Position below the anchor header cell, right-aligned to its right edge
+    const rect = anchorEl.getBoundingClientRect();
+    let top = rect.bottom + 2;
+    const dRect = dropdown.getBoundingClientRect();
+    let left = rect.right - dRect.width;
+    if (top + dRect.height > window.innerHeight) top = rect.top - dRect.height - 2;
+    if (left < 0) left = 4;
+    if (left + dRect.width > window.innerWidth) left = window.innerWidth - dRect.width - 8;
+    dropdown.style.top = top + 'px';
+    dropdown.style.left = left + 'px';
+
+    searchInput.focus();
+
+    // Close on outside click or Escape
+    const scrollHandler = () => closeAutoFilter();
+    const container = win.el.querySelector('.table-container');
+    if (container) container.addEventListener('scroll', scrollHandler);
+
+    _activeAutoFilter = { win, col, el: dropdown, scrollHandler };
+    setTimeout(() => {
+      document.addEventListener('mousedown', _autoFilterOutsideClick);
+      document.addEventListener('keydown', _autoFilterEscapeKey);
+      window.addEventListener('resize', closeAutoFilter);
+    }, 0);
   }
 
   // ---- Row Context Menu ----
@@ -3480,7 +3764,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.14.1 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.15.0 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -3545,6 +3829,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <li><strong>Multi-column sort:</strong> Shift+click additional column headers. Numbers next to arrows indicate sort priority.</li>
 <li><strong>Filter:</strong> Type a SQL <code>WHERE</code> clause in the filter bar (without the <code>WHERE</code> keyword). For example: <code>age > 30 AND name LIKE '%Smith%'</code></li>
 <li>The filter supports all SQLite expressions including <code>REGEXP</code> (see below).</li>
+<li><strong>Column autofilter:</strong> Click the <code>&#x25BE;</code> icon on any column header to open a dropdown with checkboxes for each unique value. Use the search box to narrow the list. Uncheck values and click Apply to hide matching rows. Multiple column filters AND together and combine with the WHERE filter bar. Filtered columns show a green border. Click Clear to remove a column&rsquo;s filter.</li>
 </ul>
 
 <h4>SQL Console</h4>

@@ -353,6 +353,12 @@ body {
   transition: background 0.1s;
 }
 
+.th-inner {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
 .data-table th:hover {
   background: #3d3d5c;
 }
@@ -415,6 +421,166 @@ body {
   z-index: 100000;
   opacity: 0.9;
   box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}
+
+.col-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.col-filter-btn {
+  margin-left: auto;
+  padding: 0 3px;
+  font-size: 11px;
+  color: var(--text-dim);
+  opacity: 0.5;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+  line-height: 1;
+  border-radius: 2px;
+  transform: scale(2);
+  transform-origin: right center;
+}
+
+.data-table th:hover .col-filter-btn,
+.col-filter-btn.active {
+  opacity: 1;
+}
+
+.col-filter-btn:hover {
+  color: var(--accent-hover);
+  background: rgba(124,111,247,0.15);
+}
+
+.col-filter-btn.active {
+  color: var(--accent);
+}
+
+.data-table th.col-filtered {
+  border-bottom: 2px solid var(--success);
+}
+
+.data-table th.col-filtered.sorted {
+  border-bottom: 2px solid var(--accent);
+  box-shadow: inset 0 -2px 0 var(--success);
+}
+
+/* ---- AutoFilter Dropdown ---- */
+.autofilter-dropdown {
+  position: fixed;
+  background: var(--menu-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  width: 240px;
+  max-height: 360px;
+  display: flex;
+  flex-direction: column;
+  z-index: 3000;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  font-size: 12px;
+}
+
+.autofilter-search-wrap {
+  padding: 8px 8px 4px;
+}
+
+.autofilter-search {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 4px 8px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.autofilter-search:focus {
+  border-color: var(--accent);
+}
+
+.autofilter-controls {
+  padding: 2px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.autofilter-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+  max-height: 240px;
+}
+
+.autofilter-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.autofilter-list::-webkit-scrollbar-thumb {
+  background: var(--scrollbar);
+  border-radius: 3px;
+}
+
+.autofilter-item,
+.autofilter-select-all {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  cursor: pointer;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.autofilter-item:hover {
+  background: rgba(124,111,247,0.1);
+}
+
+.autofilter-select-all {
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.autofilter-item input[type="checkbox"],
+.autofilter-select-all input[type="checkbox"] {
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.autofilter-buttons {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  padding: 6px 8px;
+  border-top: 1px solid var(--border);
+}
+
+.autofilter-buttons button {
+  padding: 4px 12px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.autofilter-buttons button.autofilter-apply {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.autofilter-buttons button:hover {
+  opacity: 0.85;
 }
 
 .data-table th.row-num-header {
