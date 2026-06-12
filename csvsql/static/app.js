@@ -915,7 +915,7 @@ const app = (() => {
         </div>
       </div>
       <div class="win-body"></div>
-      <div class="win-statusbar"><span class="status-left"></span><span class="status-right"></span></div>
+      <div class="win-statusbar"><span class="status-left"></span><span class="status-center"></span><span class="status-right"></span></div>
       <div class="resize-handle rh-top"></div>
       <div class="resize-handle rh-bottom"></div>
       <div class="resize-handle rh-left"></div>
@@ -940,6 +940,7 @@ const app = (() => {
       selectedCol: null, // column name currently highlighted (target for Ctrl+Arrow reorder)
       selectedCells: new Set(), // keys "rownum:colName" for cells highlighted by selection
       anchorCell: null, // { rownum, col } — fixed corner for Ctrl+Shift+Arrow extension
+      disabledTransforms: new Set(),
     };
     windows.push(winObj);
 
@@ -1630,6 +1631,23 @@ const app = (() => {
       if (win.columnFilters[col]) th.classList.add('col-filtered');
       if (win.selectedCol === col) th.classList.add('col-selected');
 
+      if (hasDisplayTransform(win.tableName, col)) {
+        const fxIcon = document.createElement('span');
+        const colDisabled = win.disabledTransforms.has(col);
+        fxIcon.className = 'col-transform-icon' + (colDisabled ? ' disabled' : '');
+        fxIcon.textContent = '\u{1F50C}';
+        fxIcon.title = colDisabled ? 'Plugin transform disabled — click to enable' : 'Plugin transform active — click to disable';
+        fxIcon.addEventListener('mousedown', (e) => { e.stopPropagation(); });
+        fxIcon.addEventListener('click', (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          if (win.disabledTransforms.has(col)) win.disabledTransforms.delete(col);
+          else win.disabledTransforms.add(col);
+          rebuildTable(win);
+        });
+        thInner.appendChild(fxIcon);
+      }
+
       // AutoFilter button
       const filterBtn = document.createElement('span');
       filterBtn.className = 'col-filter-btn';
@@ -1859,7 +1877,7 @@ const app = (() => {
         debouncedSync(win.tableName);
       }
       exitEditMode(td);
-      if (win.tableName && col && hasDisplayTransform(win.tableName, col)) {
+      if (win.tableName && col && !win.disabledTransforms.has(col) && hasDisplayTransform(win.tableName, col)) {
         td.textContent = getDisplayValue(win.tableName, col, row);
       }
     }, true); // capture phase for blur
@@ -2165,7 +2183,7 @@ const app = (() => {
             const col = win._columns[colIdx];
             if (row && col != null) {
               td.textContent = row[col] ?? '';
-              if (win.tableName && hasDisplayTransform(win.tableName, col)) {
+              if (win.tableName && !win.disabledTransforms.has(col) && hasDisplayTransform(win.tableName, col)) {
                 td.textContent = getDisplayValue(win.tableName, col, row);
               }
             }
@@ -2243,6 +2261,30 @@ const app = (() => {
       statusLeft.textContent = `${displayRows.length} of ${rows.length} rows`;
     }
     statusRight.textContent = `${columns.length} columns`;
+
+    const statusCenter = win.el.querySelector('.status-center');
+    statusCenter.innerHTML = '';
+    const transformedCols = win.tableName && _columnTransformCache[win.tableName]
+      ? Object.keys(_columnTransformCache[win.tableName]) : [];
+    if (transformedCols.length > 0) {
+      const allOff = transformedCols.every(c => win.disabledTransforms.has(c));
+      const allOn = !transformedCols.some(c => win.disabledTransforms.has(c));
+      const toggle = document.createElement('span');
+      const state = allOn ? 'on' : allOff ? 'off' : 'partial';
+      toggle.className = 'status-plugin-toggle' + (state !== 'on' ? ' disabled' : '');
+      toggle.title = state === 'on' ? 'All plugins enabled — click to disable all'
+        : 'Some plugins disabled — click to enable all';
+      toggle.textContent = state === 'on' ? '⊕ Plugins on'
+        : state === 'off' ? '⊘ Plugins off'
+        : '⊕ Plugins partial';
+      toggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (allOn) transformedCols.forEach(c => win.disabledTransforms.add(c));
+        else transformedCols.forEach(c => win.disabledTransforms.delete(c));
+        rebuildTable(win);
+      });
+      statusCenter.appendChild(toggle);
+    }
   }
 
   function renderVisibleRows(win) {
@@ -2304,7 +2346,7 @@ const app = (() => {
 
       for (let c = 0; c < columns.length; c++) {
         const td = document.createElement('td');
-        td.textContent = getDisplayValue(win.tableName, columns[c], row);
+        td.textContent = win.disabledTransforms.has(columns[c]) ? (row[columns[c]] ?? '') : getDisplayValue(win.tableName, columns[c], row);
         td.className = 'data-cell';
         td.tabIndex = 0;
         td.dataset.colIdx = c;
@@ -2392,7 +2434,7 @@ const app = (() => {
       const displayIdx = parseInt(tr.dataset.displayIdx, 10);
       if (!isNaN(colIdx) && !isNaN(displayIdx) && win._columns && win._displayRows) {
         const col = win._columns[colIdx];
-        if (col && hasDisplayTransform(win.tableName, col)) {
+        if (col && !win.disabledTransforms.has(col) && hasDisplayTransform(win.tableName, col)) {
           const row = win._displayRows[displayIdx];
           if (row) td.textContent = row[col] ?? '';
         }
@@ -2786,18 +2828,23 @@ const app = (() => {
     if (!t) return;
 
     // Gather unique values from all rows (not just filtered)
+    const useTransform = !win.disabledTransforms.has(col) && hasDisplayTransform(win.tableName, col);
     const seen = new Set();
     const values = [];
     for (const row of t.rows) {
       const v = String(row[col] ?? '');
-      if (!seen.has(v)) { seen.add(v); values.push(v); }
+      if (!seen.has(v)) {
+        seen.add(v);
+        values.push({ raw: v, display: useTransform ? String(getDisplayValue(win.tableName, col, row)) : v });
+      }
     }
-    values.sort((a, b) => collator.compare(a, b));
+    values.sort((a, b) => collator.compare(a.display, b.display));
 
     const existingFilter = win.columnFilters[col];
     const items = values.map(v => ({
-      value: v,
-      checked: existingFilter ? existingFilter.has(v) : true,
+      value: v.raw,
+      display: v.display,
+      checked: existingFilter ? existingFilter.has(v.raw) : true,
     }));
 
     // Build dropdown DOM
@@ -2837,7 +2884,7 @@ const app = (() => {
     function getVisibleItems() {
       if (!searchText) return items;
       const lower = searchText.toLowerCase();
-      return items.filter(it => it.value.toLowerCase().includes(lower));
+      return items.filter(it => it.display.toLowerCase().includes(lower));
     }
 
     function updateSelectAll() {
@@ -2864,7 +2911,7 @@ const app = (() => {
             updateSelectAll();
           });
           const txt = document.createElement('span');
-          txt.textContent = item.value === '' ? '(empty)' : item.value;
+          txt.textContent = item.display === '' ? '(empty)' : item.display;
           label.appendChild(cb);
           label.appendChild(txt);
           listEl.appendChild(label);
@@ -2900,7 +2947,7 @@ const app = (() => {
               updateSelectAll();
             });
             const txt = document.createElement('span');
-            txt.textContent = item.value === '' ? '(empty)' : item.value;
+            txt.textContent = item.display === '' ? '(empty)' : item.display;
             label.appendChild(cb);
             label.appendChild(txt);
             spacer.appendChild(label);
@@ -3781,7 +3828,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.15.1 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.16.0 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -3967,7 +4014,11 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
   ]
 }</pre>
 
+<p><strong>Per-column toggle:</strong> Columns with an active plugin transform show a &#x1F50C; icon in the header. Click the icon to disable the transform for that column &mdash; the icon dims but stays visible. Click again to re-enable. The status bar shows a bulk <strong>Plugins on/off/partial</strong> toggle to enable or disable all transforms at once.</p>
+
 <p><strong>Editing:</strong> When you enter edit mode on a cell with a display transform, the raw value is shown so you edit the actual data. The formatted display returns when you finish editing.</p>
+
+<p><strong>Autofilter dropdowns:</strong> When a plugin transform is active for a column, the autofilter dropdown shows the formatted display values (not raw values). Searching within the dropdown also matches against the formatted text.</p>
 
 <p><strong>Saving, SQL, filtering, sorting:</strong> All operate on raw values, not the plugin&rsquo;s display output.</p>
 
@@ -5901,6 +5952,7 @@ choose(value, 'A', 'Active', 'I', 'Inactive')
         rebuildTransformCache, rebuildTransformCacheForTable,
         getDisplayValue, hasDisplayTransform,
         loadPluginFile, unloadPlugin, persistPlugins, updatePluginMenu,
+        rebuildTable, rerenderAllWindows,
       }
     } : {}),
   };

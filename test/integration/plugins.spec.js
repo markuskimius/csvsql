@@ -395,4 +395,365 @@ test.describe('Plugin system', () => {
     expect(result.pluginCount).toBe(1);
     expect(result.hasTransform).toBe(true);
   });
+
+  test('plugin toggle appears in status bar when plugins match', async ({ page }) => {
+    let toggle = await page.$('.status-plugin-toggle');
+    expect(toggle).toBeNull();
+
+    await loadPluginConfig(page, {
+      name: 'Toggle Test', table: '.*',
+      columns: [{ match: '^name$', display: 'upper(value)' }]
+    });
+    await page.evaluate(() => app._test.rerenderAllWindows());
+    await page.waitForTimeout(100);
+
+    toggle = await page.$('.status-plugin-toggle');
+    expect(toggle).not.toBeNull();
+    const text = await toggle.textContent();
+    expect(text).toContain('Plugins on');
+  });
+
+  test('plugin toggle does not appear when no plugins match', async ({ page }) => {
+    await loadPluginConfig(page, {
+      name: 'No Match', table: '^nonexistent$',
+      columns: [{ match: '^name$', display: 'upper(value)' }]
+    });
+    await page.evaluate(() => app._test.rerenderAllWindows());
+    await page.waitForTimeout(100);
+
+    const toggle = await page.$('.status-plugin-toggle');
+    expect(toggle).toBeNull();
+  });
+
+  test('status bar toggle disables all transforms, icons become disabled', async ({ page }) => {
+    await loadPluginConfig(page, {
+      name: 'Toggle Disable', table: '.*',
+      columns: [{ match: '^name$', display: 'upper(value)' }]
+    });
+    await page.evaluate(() => app._test.rerenderAllWindows());
+    await page.waitForTimeout(100);
+
+    const before = await getCellText(page, 0, 0);
+    expect(before).toBe('ALICE JOHNSON');
+
+    let icon = await page.$('.col-transform-icon');
+    expect(icon).not.toBeNull();
+    expect(await icon.evaluate(el => el.classList.contains('disabled'))).toBe(false);
+
+    await page.click('.status-plugin-toggle');
+    await page.waitForTimeout(100);
+
+    const after = await getCellText(page, 0, 0);
+    expect(after).toBe('Alice Johnson');
+
+    const toggleText = await page.$eval('.status-plugin-toggle', el => el.textContent);
+    expect(toggleText).toContain('Plugins off');
+
+    icon = await page.$('.col-transform-icon');
+    expect(icon).not.toBeNull();
+    expect(await icon.evaluate(el => el.classList.contains('disabled'))).toBe(true);
+  });
+
+  test('status bar toggle re-enables all transforms', async ({ page }) => {
+    await loadPluginConfig(page, {
+      name: 'Toggle Re-enable', table: '.*',
+      columns: [{ match: '^name$', display: 'upper(value)' }]
+    });
+    await page.evaluate(() => app._test.rerenderAllWindows());
+    await page.waitForTimeout(100);
+
+    await page.click('.status-plugin-toggle');
+    await page.waitForTimeout(100);
+    await page.click('.status-plugin-toggle');
+    await page.waitForTimeout(100);
+
+    const cell = await getCellText(page, 0, 0);
+    expect(cell).toBe('ALICE JOHNSON');
+
+    const toggleText = await page.$eval('.status-plugin-toggle', el => el.textContent);
+    expect(toggleText).toContain('Plugins on');
+
+    const icon = await page.$('.col-transform-icon');
+    expect(await icon.evaluate(el => el.classList.contains('disabled'))).toBe(false);
+  });
+
+  test('clicking column plug icon disables only that column', async ({ page }) => {
+    await loadPluginConfig(page, {
+      name: 'Multi Col', table: '.*',
+      columns: [
+        { match: '^name$', display: 'upper(value)' },
+        { match: '^email$', display: 'upper(value)' }
+      ]
+    });
+    await page.evaluate(() => app._test.rerenderAllWindows());
+    await page.waitForTimeout(100);
+
+    const nameBefore = await getCellText(page, 0, 0);
+    expect(nameBefore).toBe('ALICE JOHNSON');
+
+    const icons = await page.$$('.col-transform-icon');
+    expect(icons.length).toBe(2);
+    await icons[0].click();
+    await page.waitForTimeout(100);
+
+    const nameAfter = await getCellText(page, 0, 0);
+    expect(nameAfter).toBe('Alice Johnson');
+
+    const emailIdx = await page.evaluate(() => app._test.windows[0]._columns.indexOf('email'));
+    const emailCell = await getCellText(page, 0, emailIdx);
+    expect(emailCell).toBe('ALICE@EXAMPLE.COM');
+
+    const toggleText = await page.$eval('.status-plugin-toggle', el => el.textContent);
+    expect(toggleText).toContain('Plugins partial');
+  });
+
+  test('clicking disabled column plug icon re-enables that column', async ({ page }) => {
+    await loadPluginConfig(page, {
+      name: 'Re-enable Col', table: '.*',
+      columns: [{ match: '^name$', display: 'upper(value)' }]
+    });
+    await page.evaluate(() => app._test.rerenderAllWindows());
+    await page.waitForTimeout(100);
+
+    const icon = await page.$('.col-transform-icon');
+    await icon.click();
+    await page.waitForTimeout(100);
+    expect(await getCellText(page, 0, 0)).toBe('Alice Johnson');
+
+    const disabledIcon = await page.$('.col-transform-icon');
+    await disabledIcon.click();
+    await page.waitForTimeout(100);
+    expect(await getCellText(page, 0, 0)).toBe('ALICE JOHNSON');
+
+    const reenabledIcon = await page.$('.col-transform-icon');
+    expect(await reenabledIcon.evaluate(el => el.classList.contains('disabled'))).toBe(false);
+  });
+
+  test('column icon only appears on transformed columns', async ({ page }) => {
+    await loadPluginConfig(page, {
+      name: 'Selective', table: '.*',
+      columns: [{ match: '^name$', display: 'upper(value)' }]
+    });
+    await page.evaluate(() => app._test.rerenderAllWindows());
+    await page.waitForTimeout(100);
+
+    const transformed = await page.$$eval('.col-transform-icon', els => els.map(el => {
+      const th = el.closest('th');
+      const colName = th && th.querySelector('.col-name');
+      return colName ? colName.textContent.trim() : '';
+    }));
+    expect(transformed).toContain('name');
+    expect(transformed).not.toContain('age');
+    expect(transformed).not.toContain('city');
+  });
+
+  test('disabled transform state survives table rebuild from sort', async ({ page }) => {
+    await loadPluginConfig(page, {
+      name: 'Sort Survive', table: '.*',
+      columns: [{ match: '^name$', display: 'upper(value)' }]
+    });
+    await page.evaluate(() => app._test.rerenderAllWindows());
+    await page.waitForTimeout(100);
+
+    await page.click('.col-transform-icon');
+    await page.waitForTimeout(100);
+
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.sortCols = [{ col: 'name', dir: 'asc' }];
+      app._test.rebuildTable(win);
+    });
+    await page.waitForTimeout(100);
+
+    const cell = await getCellText(page, 0, 0);
+    expect(cell).toBe('Alice Johnson');
+
+    const icon = await page.$('.col-transform-icon');
+    expect(await icon.evaluate(el => el.classList.contains('disabled'))).toBe(true);
+  });
+
+  test('autofilter dropdown shows display-formatted values when transform active', async ({ page }) => {
+    await loadPluginConfig(page, {
+      name: 'Upper Names', table: '.*',
+      columns: [{ match: '^name$', display: 'upper(value)' }]
+    });
+    await page.evaluate(() => app._test.rerenderAllWindows());
+    await page.waitForTimeout(100);
+
+    const filterBtn = await page.$('th .col-filter-btn');
+    await filterBtn.click();
+    await page.waitForTimeout(200);
+
+    const items = await page.$$eval('.autofilter-item span', els => els.map(el => el.textContent));
+    expect(items.length).toBeGreaterThan(0);
+    expect(items.every(t => t === t.toUpperCase())).toBe(true);
+    expect(items).toContain('ALICE JOHNSON');
+  });
+
+  test('autofilter dropdown shows raw values when column transform disabled', async ({ page }) => {
+    await loadPluginConfig(page, {
+      name: 'Upper Names', table: '.*',
+      columns: [{ match: '^name$', display: 'upper(value)' }]
+    });
+    await page.evaluate(() => app._test.rerenderAllWindows());
+    await page.waitForTimeout(100);
+
+    await page.click('.col-transform-icon');
+    await page.waitForTimeout(100);
+
+    const filterBtn = await page.$('th .col-filter-btn');
+    await filterBtn.click();
+    await page.waitForTimeout(200);
+
+    const items = await page.$$eval('.autofilter-item span', els => els.map(el => el.textContent));
+    expect(items).toContain('Alice Johnson');
+  });
+
+  test('autofilter search matches display-formatted values', async ({ page }) => {
+    await loadPluginConfig(page, {
+      name: 'Upper Names', table: '.*',
+      columns: [{ match: '^name$', display: 'upper(value)' }]
+    });
+    await page.evaluate(() => app._test.rerenderAllWindows());
+    await page.waitForTimeout(100);
+
+    const filterBtn = await page.$('th .col-filter-btn');
+    await filterBtn.click();
+    await page.waitForTimeout(200);
+
+    const searchInput = await page.$('.autofilter-search');
+    await searchInput.fill('ALICE');
+    await page.waitForTimeout(200);
+
+    const items = await page.$$eval('.autofilter-item span', els => els.map(el => el.textContent));
+    expect(items).toContain('ALICE JOHNSON');
+    expect(items.length).toBe(1);
+  });
+
+  test('edit mode shows raw value when per-column transform is active', async ({ page }) => {
+    await loadPluginConfig(page, {
+      name: 'Upper Names', table: '.*',
+      columns: [{ match: '^name$', display: 'upper(value)' }]
+    });
+    await page.evaluate(() => app._test.rerenderAllWindows());
+    await page.waitForTimeout(100);
+
+    const cell = page.locator('.subwindow table tbody td.data-cell').first();
+    expect(await cell.textContent()).toBe('ALICE JOHNSON');
+
+    await cell.click();
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    expect(await cell.textContent()).toBe('Alice Johnson');
+
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(100);
+    expect(await cell.textContent()).toBe('ALICE JOHNSON');
+  });
+
+  test('edit mode with per-column transform disabled shows raw value throughout', async ({ page }) => {
+    await loadPluginConfig(page, {
+      name: 'Upper Names', table: '.*',
+      columns: [{ match: '^name$', display: 'upper(value)' }]
+    });
+    await page.evaluate(() => app._test.rerenderAllWindows());
+    await page.waitForTimeout(100);
+
+    await page.click('.col-transform-icon');
+    await page.waitForTimeout(100);
+
+    const cell = page.locator('.subwindow table tbody td.data-cell').first();
+    expect(await cell.textContent()).toBe('Alice Johnson');
+
+    await cell.click();
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    expect(await cell.textContent()).toBe('Alice Johnson');
+
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(100);
+    expect(await cell.textContent()).toBe('Alice Johnson');
+  });
+
+  test('status bar shows partial when some columns disabled', async ({ page }) => {
+    await loadPluginConfig(page, {
+      name: 'Multi', table: '.*',
+      columns: [
+        { match: '^name$', display: 'upper(value)' },
+        { match: '^email$', display: 'upper(value)' }
+      ]
+    });
+    await page.evaluate(() => app._test.rerenderAllWindows());
+    await page.waitForTimeout(100);
+
+    let toggleText = await page.$eval('.status-plugin-toggle', el => el.textContent);
+    expect(toggleText).toContain('Plugins on');
+
+    const icons = await page.$$('.col-transform-icon');
+    await icons[0].click();
+    await page.waitForTimeout(100);
+
+    toggleText = await page.$eval('.status-plugin-toggle', el => el.textContent);
+    expect(toggleText).toContain('Plugins partial');
+
+    await page.click('.status-plugin-toggle');
+    await page.waitForTimeout(100);
+
+    toggleText = await page.$eval('.status-plugin-toggle', el => el.textContent);
+    expect(toggleText).toContain('Plugins on');
+    expect(await getCellText(page, 0, 0)).toBe('ALICE JOHNSON');
+  });
+
+  test('unloading plugin removes icons and toggle', async ({ page }) => {
+    await loadPluginConfig(page, {
+      name: 'Removable', table: '.*',
+      columns: [{ match: '^name$', display: 'upper(value)' }]
+    });
+    await page.evaluate(() => app._test.rerenderAllWindows());
+    await page.waitForTimeout(100);
+
+    expect(await page.$('.col-transform-icon')).not.toBeNull();
+    expect(await page.$('.status-plugin-toggle')).not.toBeNull();
+
+    await page.evaluate(() => app._test.unloadPlugin(0));
+    await page.waitForTimeout(100);
+
+    expect(await page.$('.col-transform-icon')).toBeNull();
+    expect(await page.$('.status-plugin-toggle')).toBeNull();
+  });
+
+  test('autofilter still filters correctly with display-formatted dropdown', async ({ page }) => {
+    await loadPluginConfig(page, {
+      name: 'Upper Names', table: '.*',
+      columns: [{ match: '^name$', display: 'upper(value)' }]
+    });
+    await page.evaluate(() => app._test.rerenderAllWindows());
+    await page.waitForTimeout(100);
+
+    const totalRows = await page.$$eval(
+      '.subwindow table tbody tr:not(.virtual-pad)', rows => rows.length
+    );
+
+    const filterBtn = await page.$('th .col-filter-btn');
+    await filterBtn.click();
+    await page.waitForTimeout(200);
+
+    // Uncheck Select All, then check only the first value item
+    const selectAllCb = await page.$('.autofilter-select-all input[type="checkbox"]');
+    await selectAllCb.click();
+    await page.waitForTimeout(50);
+    const firstItemCb = await page.$('.autofilter-item input[type="checkbox"]');
+    await firstItemCb.click();
+    await page.waitForTimeout(50);
+
+    const applyBtn = await page.$('.autofilter-apply');
+    await applyBtn.click();
+    await page.waitForTimeout(200);
+
+    const filteredRows = await page.$$eval(
+      '.subwindow table tbody tr:not(.virtual-pad)', rows => rows.length
+    );
+    expect(filteredRows).toBeLessThan(totalRows);
+    expect(filteredRows).toBeGreaterThan(0);
+  });
 });

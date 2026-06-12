@@ -185,6 +185,10 @@ Multiple plugins can be loaded simultaneously and stack on the same table — ea
 
 **Loading:** Use **Plugins > Load Plugin** in the menu, or drag and drop a `.json` file onto the app. Plugins persist across page reloads.
 
+**Per-column toggle:** Columns with an active transform show a 🔌 icon in the header. Click it to disable the transform for that column (the icon dims but stays visible); click again to re-enable. The status bar has a bulk toggle to enable/disable all transforms at once.
+
+**Autofilter integration:** When a transform is active, the column's autofilter dropdown shows formatted display values and searches against them.
+
 **Example plugin** (`plugins/dates.json`):
 
 ```json
