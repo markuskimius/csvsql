@@ -940,6 +940,7 @@ const app = (() => {
       selectedCol: null, // column name currently highlighted (target for Ctrl+Arrow reorder)
       selectedCells: new Set(), // keys "rownum:colName" for cells highlighted by selection
       anchorCell: null, // { rownum, col } — fixed corner for Ctrl+Shift+Arrow extension
+      _copyWithHeader: false,
       disabledTransforms: new Set(),
     };
     windows.push(winObj);
@@ -1904,7 +1905,8 @@ const app = (() => {
       const col = win._columns[colIdx];
       if (!row || col == null) { exitEditMode(td); return; }
       const newVal = td.textContent;
-      if (newVal !== String(row[col] ?? '')) {
+      const oldVal = String(row[col] ?? '');
+      if (newVal !== oldVal) {
         row[col] = newVal;
         td.classList.add('modified');
         markModified(win.tableName);
@@ -1912,6 +1914,9 @@ const app = (() => {
         if (t) {
           if (!t._dirtyCells) t._dirtyCells = [];
           t._dirtyCells.push({ rownum: row._rownum, col, value: newVal });
+          if (!t._undoStack) t._undoStack = [];
+          t._undoStack.push({ type: 'edit', changes: [{ rownum: row._rownum, col, oldValue: oldVal, newValue: newVal }] });
+          t._redoStack = [];
         }
         debouncedSync(win.tableName);
       }
@@ -1934,6 +1939,7 @@ const app = (() => {
       const col = win._columns[ci];
       win.anchorCell = { rownum: row._rownum, col };
       win.selectedCells = new Set([`${row._rownum}:${col}`]);
+      win._copyWithHeader = false;
       applyCellHighlights(win);
     });
 
@@ -1980,6 +1986,16 @@ const app = (() => {
       const di = parseInt(tr.dataset.displayIdx, 10);
       const ci = parseInt(td.dataset.colIdx, 10);
       if (isNaN(di) || isNaN(ci)) return;
+      win._copyWithHeader = false;
+      if (!e.shiftKey && !(e.ctrlKey || e.metaKey)) {
+        const row = win._displayRows[di];
+        if (row) {
+          const col = win._columns[ci];
+          win.anchorCell = { rownum: row._rownum, col };
+          win.selectedCells = new Set([`${row._rownum}:${col}`]);
+          applyCellHighlights(win);
+        }
+      }
       if (e.shiftKey && win.anchorCell) {
         e.preventDefault();
         rebuildSelectionRect(win, di, ci);
@@ -1996,6 +2012,56 @@ const app = (() => {
       dragState = { startDi: di, startCi: ci, lastDi: di, lastCi: ci, isDragging: false };
       document.addEventListener('mousemove', onDragMove);
       document.addEventListener('mouseup', onDragEnd);
+    });
+
+    // Select-all via corner cell click
+    table.addEventListener('click', (e) => {
+      const th = e.target.closest && e.target.closest('th.row-num-header');
+      if (!th || !table.contains(th)) return;
+      selectAllCells(win);
+    });
+
+    // Row selection via row-number cell click/drag
+    let rowDragState = null;
+    const onRowDragMove = (ev) => {
+      if (!rowDragState) return;
+      const el = document.elementFromPoint(ev.clientX, ev.clientY);
+      const td = el && el.closest && el.closest('td.row-num');
+      if (!td || !table.contains(td)) return;
+      const di = parseInt(td.parentElement.dataset.displayIdx, 10);
+      if (isNaN(di) || di === rowDragState.lastDi) return;
+      rowDragState.lastDi = di;
+      const sel = window.getSelection && window.getSelection();
+      if (sel && sel.removeAllRanges) sel.removeAllRanges();
+      selectRows(win, rowDragState.anchorDi, di);
+    };
+    const onRowDragEnd = () => {
+      if (rowDragState) {
+        focusCellAt(win, rowDragState.lastDi, 0);
+      }
+      rowDragState = null;
+      document.removeEventListener('mousemove', onRowDragMove);
+      document.removeEventListener('mouseup', onRowDragEnd);
+    };
+    table.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      const td = e.target.closest && e.target.closest('td.row-num');
+      if (!td || !table.contains(td)) return;
+      const di = parseInt(td.parentElement.dataset.displayIdx, 10);
+      if (isNaN(di)) return;
+      e.preventDefault();
+      if (e.shiftKey && win.anchorCell) {
+        const anchorDi = win._displayRows.findIndex(r => r._rownum === win.anchorCell.rownum);
+        if (anchorDi >= 0) {
+          selectRows(win, anchorDi, di);
+          focusCellAt(win, di, 0);
+        }
+        return;
+      }
+      selectRows(win, di, di);
+      rowDragState = { anchorDi: di, lastDi: di };
+      document.addEventListener('mousemove', onRowDragMove);
+      document.addEventListener('mouseup', onRowDragEnd);
     });
 
     // Cell touch handling — two gestures, both starting from a second tap
@@ -2199,6 +2265,17 @@ const app = (() => {
             return;
           }
         }
+      }
+
+      // Copy / Paste / Undo / Redo — select mode only (edit mode falls through to native)
+      if (!inEdit && (e.ctrlKey || e.metaKey) && !e.altKey) {
+        const k = e.key.toLowerCase();
+        if (k === 'x' && !e.shiftKey) { e.preventDefault(); cutSelectedCells(win); return; }
+        if (k === 'c' && !e.shiftKey) { e.preventDefault(); copySelectedCells(win); return; }
+        if (k === 'v' && !e.shiftKey) { e.preventDefault(); pasteAtAnchor(win); return; }
+        if (k === 'z' && !e.shiftKey) { e.preventDefault(); undoTable(win.tableName, win); return; }
+        if (k === 'z' && e.shiftKey) { e.preventDefault(); redoTable(win.tableName, win); return; }
+        if (k === 'a' && e.shiftKey) { e.preventDefault(); selectAllCells(win); return; }
       }
 
       if (e.key === 'Tab') {
@@ -2511,6 +2588,223 @@ const app = (() => {
     if (td.getAttribute('contenteditable') === 'true') {
       td.removeAttribute('contenteditable');
     }
+  }
+
+  function copySelectedCells(win) {
+    if (!win.selectedCells || win.selectedCells.size === 0) return;
+    const t = tables[win.tableName];
+    if (!t) return;
+    const colOrder = new Map(t.columns.map((c, i) => [c, i]));
+    const displayOrder = new Map(win._displayRows.map((r, i) => [r._rownum, i]));
+    const cells = [];
+    for (const key of win.selectedCells) {
+      const sep = key.indexOf(':');
+      const rownum = parseInt(key.slice(0, sep), 10);
+      const col = key.slice(sep + 1);
+      if (displayOrder.has(rownum) && colOrder.has(col)) cells.push({ rownum, col });
+    }
+    if (cells.length === 0) return;
+    cells.sort((a, b) => (displayOrder.get(a.rownum) - displayOrder.get(b.rownum)) || (colOrder.get(a.col) - colOrder.get(b.col)));
+    const rowMap = new Map(t.rows.map(r => [r._rownum, r]));
+    const rows = [];
+    let curRownum = null, curRow = [];
+    for (const { rownum, col } of cells) {
+      if (rownum !== curRownum) {
+        if (curRow.length) rows.push(curRow);
+        curRow = [];
+        curRownum = rownum;
+      }
+      const row = rowMap.get(rownum);
+      curRow.push(String(row ? (row[col] ?? '') : ''));
+    }
+    if (curRow.length) rows.push(curRow);
+    if (win._copyWithHeader) {
+      const selCols = [...new Set(cells.map(c => c.col))].sort((a, b) => colOrder.get(a) - colOrder.get(b));
+      rows.unshift(selCols);
+    }
+    const tsv = rows.map(r => r.join('\t')).join('\n');
+    try { navigator.clipboard.writeText(tsv); } catch (_) {}
+  }
+
+  function cutSelectedCells(win) {
+    if (!win.selectedCells || win.selectedCells.size === 0) return;
+    const t = tables[win.tableName];
+    if (!t) return;
+    copySelectedCells(win);
+    const changes = [];
+    if (!t._dirtyCells) t._dirtyCells = [];
+    for (const key of win.selectedCells) {
+      const sep = key.indexOf(':');
+      const rownum = parseInt(key.slice(0, sep), 10);
+      const col = key.slice(sep + 1);
+      const row = t.rows.find(r => r._rownum === rownum);
+      if (!row || !t.columns.includes(col)) continue;
+      const oldValue = String(row[col] ?? '');
+      if (oldValue !== '') {
+        row[col] = '';
+        changes.push({ rownum, col, oldValue, newValue: '' });
+        t._dirtyCells.push({ rownum, col, value: '' });
+      }
+    }
+    if (changes.length === 0) return;
+    if (!t._undoStack) t._undoStack = [];
+    t._undoStack.push({ type: 'cut', changes });
+    t._redoStack = [];
+    markModified(win.tableName);
+    debouncedSync(win.tableName);
+    windows.filter(w => w.tableName === win.tableName).forEach(w => {
+      w._renderStart = -1; w._renderEnd = -1;
+      renderVisibleRows(w);
+    });
+    refocusAnchorCell(win);
+  }
+
+  function refocusAnchorCell(win) {
+    if (!win.anchorCell || !win._displayRows || !win._columns) return;
+    const di = win._displayRows.findIndex(r => r._rownum === win.anchorCell.rownum);
+    const ci = win._columns.indexOf(win.anchorCell.col);
+    if (di < 0 || ci < 0) return;
+    const tr = win._tbody && win._tbody.querySelector(`tr[data-display-idx="${di}"]`);
+    if (!tr) return;
+    const td = tr.children[ci + 1];
+    if (!td) return;
+    win._programmaticFocus = true;
+    td.focus();
+    win._programmaticFocus = false;
+  }
+
+  function selectAllCells(win) {
+    if (!win._displayRows || !win._columns || win._columns.length === 0) return;
+    if (win._displayRows.length === 0) return;
+    win.selectedCells = new Set();
+    for (const row of win._displayRows) {
+      for (const col of win._columns) {
+        win.selectedCells.add(`${row._rownum}:${col}`);
+      }
+    }
+    win.anchorCell = { rownum: win._displayRows[0]._rownum, col: win._columns[0] };
+    win._copyWithHeader = true;
+    applyCellHighlights(win);
+    refocusAnchorCell(win);
+  }
+
+  function selectRows(win, fromDi, toDi) {
+    if (!win._displayRows || !win._columns || win._columns.length === 0) return;
+    const r1 = Math.min(fromDi, toDi);
+    const r2 = Math.max(fromDi, toDi);
+    win.selectedCells = new Set();
+    for (let di = r1; di <= r2; di++) {
+      const row = win._displayRows[di];
+      if (!row) continue;
+      for (const col of win._columns) {
+        win.selectedCells.add(`${row._rownum}:${col}`);
+      }
+    }
+    win.anchorCell = { rownum: win._displayRows[fromDi]._rownum, col: win._columns[0] };
+    win._copyWithHeader = true;
+    applyCellHighlights(win);
+  }
+
+  async function pasteAtAnchor(win) {
+    if (!win.anchorCell || !win.tableName) return;
+    const t = tables[win.tableName];
+    if (!t) return;
+    let text;
+    try { text = await navigator.clipboard.readText(); } catch (_) { return; }
+    if (!text) return;
+    if (!tables[win.tableName] || !win._displayRows) return;
+    const lines = text.replace(/\n$/, '').split('\n');
+    const pasteData = lines.map(line => line.split('\t'));
+    const startDi = win._displayRows.findIndex(r => r._rownum === win.anchorCell.rownum);
+    const startCi = win._columns.indexOf(win.anchorCell.col);
+    if (startDi < 0 || startCi < 0) return;
+    const changes = [];
+    for (let ri = 0; ri < pasteData.length; ri++) {
+      const di = startDi + ri;
+      if (di >= win._displayRows.length) break;
+      const row = win._displayRows[di];
+      for (let ci = 0; ci < pasteData[ri].length; ci++) {
+        const colIdx = startCi + ci;
+        if (colIdx >= win._columns.length) break;
+        const col = win._columns[colIdx];
+        const oldValue = String(row[col] ?? '');
+        const newValue = pasteData[ri][ci];
+        if (oldValue !== newValue) {
+          row[col] = newValue;
+          changes.push({ rownum: row._rownum, col, oldValue, newValue });
+          if (!t._dirtyCells) t._dirtyCells = [];
+          t._dirtyCells.push({ rownum: row._rownum, col, value: newValue });
+        }
+      }
+    }
+    if (changes.length === 0) return;
+    if (!t._undoStack) t._undoStack = [];
+    t._undoStack.push({ type: 'paste', changes });
+    t._redoStack = [];
+    markModified(win.tableName);
+    debouncedSync(win.tableName);
+    const endDi = Math.min(startDi + pasteData.length - 1, win._displayRows.length - 1);
+    const endCi = Math.min(startCi + Math.max(...pasteData.map(r => r.length)) - 1, win._columns.length - 1);
+    win.selectedCells = new Set();
+    for (let di = startDi; di <= endDi; di++) {
+      const rn = win._displayRows[di]._rownum;
+      for (let ci = startCi; ci <= endCi; ci++) {
+        win.selectedCells.add(`${rn}:${win._columns[ci]}`);
+      }
+    }
+    windows.filter(w => w.tableName === win.tableName).forEach(w => {
+      w._renderStart = -1; w._renderEnd = -1;
+      renderVisibleRows(w);
+    });
+    refocusAnchorCell(win);
+  }
+
+  function undoTable(tableName, win) {
+    const t = tables[tableName];
+    if (!t) return;
+    if (!t._undoStack || t._undoStack.length === 0) return;
+    const entry = t._undoStack.pop();
+    const rowMap = new Map(t.rows.map(r => [r._rownum, r]));
+    if (!t._dirtyCells) t._dirtyCells = [];
+    for (const { rownum, col, oldValue } of entry.changes) {
+      const row = rowMap.get(rownum);
+      if (!row || !t.columns.includes(col)) continue;
+      row[col] = oldValue;
+      t._dirtyCells.push({ rownum, col, value: oldValue });
+    }
+    if (!t._redoStack) t._redoStack = [];
+    t._redoStack.push(entry);
+    markModified(tableName);
+    debouncedSync(tableName);
+    windows.filter(w => w.tableName === tableName).forEach(w => {
+      w._renderStart = -1; w._renderEnd = -1;
+      renderVisibleRows(w);
+    });
+    refocusAnchorCell(win);
+  }
+
+  function redoTable(tableName, win) {
+    const t = tables[tableName];
+    if (!t) return;
+    if (!t._redoStack || t._redoStack.length === 0) return;
+    const entry = t._redoStack.pop();
+    const rowMap = new Map(t.rows.map(r => [r._rownum, r]));
+    if (!t._dirtyCells) t._dirtyCells = [];
+    for (const { rownum, col, newValue } of entry.changes) {
+      const row = rowMap.get(rownum);
+      if (!row || !t.columns.includes(col)) continue;
+      row[col] = newValue;
+      t._dirtyCells.push({ rownum, col, value: newValue });
+    }
+    if (!t._undoStack) t._undoStack = [];
+    t._undoStack.push(entry);
+    markModified(tableName);
+    debouncedSync(tableName);
+    windows.filter(w => w.tableName === tableName).forEach(w => {
+      w._renderStart = -1; w._renderEnd = -1;
+      renderVisibleRows(w);
+    });
+    refocusAnchorCell(win);
   }
 
   function moveSelectionColumns(win, tr, td, key) {
@@ -3273,6 +3567,12 @@ const app = (() => {
         return;
       }
       if (!(e.ctrlKey || e.metaKey)) return;
+      if (e.shiftKey && e.key.toLowerCase() === 'a') {
+        const tgt = e.target;
+        if (tgt && tgt.matches && tgt.matches('input, textarea, [contenteditable="true"], td.data-cell')) return;
+        const win = getActiveDataWindow();
+        if (win && win.tableName) { e.preventDefault(); selectAllCells(win); return; }
+      }
       switch (e.key) {
         case 's': e.preventDefault(); saveActiveTable(); break;
         case 'o': e.preventDefault(); openFile(e.shiftKey); break;
@@ -3810,6 +4110,30 @@ const app = (() => {
     document.getElementById('btn-restore-all').addEventListener('click', () => restoreAll());
     document.getElementById('btn-load-plugin').addEventListener('click', () => loadPluginFromFile());
     document.getElementById('btn-expr-ref').addEventListener('click', () => showExpressionReference());
+    document.getElementById('btn-undo').addEventListener('click', () => {
+      const win = getActiveDataWindow();
+      if (win && win.tableName) undoTable(win.tableName, win);
+    });
+    document.getElementById('btn-redo').addEventListener('click', () => {
+      const win = getActiveDataWindow();
+      if (win && win.tableName) redoTable(win.tableName, win);
+    });
+    document.getElementById('btn-cut').addEventListener('click', () => {
+      const win = getActiveDataWindow();
+      if (win && win.tableName) cutSelectedCells(win);
+    });
+    document.getElementById('btn-copy').addEventListener('click', () => {
+      const win = getActiveDataWindow();
+      if (win && win.tableName) copySelectedCells(win);
+    });
+    document.getElementById('btn-paste').addEventListener('click', () => {
+      const win = getActiveDataWindow();
+      if (win && win.tableName) pasteAtAnchor(win);
+    });
+    document.getElementById('btn-select-all').addEventListener('click', () => {
+      const win = getActiveDataWindow();
+      if (win && win.tableName) selectAllCells(win);
+    });
 
     function updateMenuState() {
       const hasActive = !!activeWinId;
@@ -3823,6 +4147,22 @@ const app = (() => {
       document.getElementById('btn-cascade').disabled = !hasAny;
       document.getElementById('btn-minimize-all').disabled = !hasAny;
       document.getElementById('btn-restore-all').disabled = !hasAny;
+      const win = getActiveDataWindow();
+      const t = win && win.tableName && tables[win.tableName];
+      const undoEntry = t && t._undoStack && t._undoStack.length > 0 ? t._undoStack[t._undoStack.length - 1] : null;
+      const redoEntry = t && t._redoStack && t._redoStack.length > 0 ? t._redoStack[t._redoStack.length - 1] : null;
+      const actionLabel = (e) => e ? e.type.charAt(0).toUpperCase() + e.type.slice(1) : '';
+      const btnUndo = document.getElementById('btn-undo');
+      const btnRedo = document.getElementById('btn-redo');
+      btnUndo.disabled = !undoEntry;
+      btnRedo.disabled = !redoEntry;
+      btnUndo.firstChild.textContent = undoEntry ? `Undo ${actionLabel(undoEntry)}` : 'Undo';
+      btnRedo.firstChild.textContent = redoEntry ? `Redo ${actionLabel(redoEntry)}` : 'Redo';
+      const hasSel = !!(win && win.selectedCells && win.selectedCells.size > 0);
+      document.getElementById('btn-cut').disabled = !hasSel;
+      document.getElementById('btn-copy').disabled = !hasSel;
+      document.getElementById('btn-paste').disabled = !(win && win.anchorCell);
+      document.getElementById('btn-select-all').disabled = !(win && win.tableName && tables[win.tableName]);
     }
 
     function openItem(item) {
@@ -3949,7 +4289,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.18.1 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.19.0 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -3990,7 +4330,9 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <h4>Editing</h4>
 <ul>
 <li><strong>Edit cells:</strong> Click a cell to select it; press <code>Enter</code>, <code>i</code>, <code>F2</code>, or <code>Ctrl</code>/<code>&#8984;</code>+<code>U</code> to enter edit mode, or <code>Ctrl</code>/<code>&#8984;</code>+click a cell to edit it directly. <code>Tab</code>/<code>Shift+Tab</code> moves between cells, <code>Enter</code> saves and moves down, <code>Escape</code> reverts the edit (and clears the selection when not editing).</li>
-<li><strong>Highlight row &amp; column:</strong> Clicking a cell also highlights its row and column. Move the selection with arrow keys or vim-style <code>h</code>/<code>j</code>/<code>k</code>/<code>l</code>; extend to a rectangle of cells with <code>Shift</code>+arrow (or <code>Shift</code>+<code>H</code>/<code>J</code>/<code>K</code>/<code>L</code>), <code>Shift</code>+click on another cell, or click-and-drag across cells &mdash; every selected cell's row and column is highlighted so you can see what lines up with what. Pressing an arrow key with no cell selected focuses the cell in the middle of the current view. <code>Esc</code> clears the selection.</li>
+<li><strong>Highlight row &amp; column:</strong> Clicking a cell also highlights its row and column. Move the selection with arrow keys or vim-style <code>h</code>/<code>j</code>/<code>k</code>/<code>l</code>; extend to a rectangle of cells with <code>Shift</code>+arrow (or <code>Shift</code>+<code>H</code>/<code>J</code>/<code>K</code>/<code>L</code>), <code>Shift</code>+click on another cell, or click-and-drag across cells &mdash; every selected cell's row and column is highlighted so you can see what lines up with what. Click a row number to select an entire row; drag across row numbers or <code>Shift</code>+click another row number to select a range. Click the <code>#</code> corner cell or press <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>A</code> to select all. Pressing an arrow key with no cell selected focuses the cell in the middle of the current view. <code>Esc</code> clears the selection.</li>
+<li><strong>Cut / Copy / Paste:</strong> Select cells and use <code>Ctrl</code>/<code>&#8984;</code>+<code>X</code>, <code>Ctrl</code>/<code>&#8984;</code>+<code>C</code>, <code>Ctrl</code>/<code>&#8984;</code>+<code>V</code>. Data is copied as tab-separated values. Select All and row selection copies include the column header row. In edit mode, these shortcuts pass through to native browser behavior for text within the cell.</li>
+<li><strong>Undo / Redo:</strong> <code>Ctrl</code>/<code>&#8984;</code>+<code>Z</code> to undo, <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>Z</code> to redo. Undoes cell edits, paste, and cut operations. Multi-cell paste and cut undo as a single step. Also available from the Edit menu.</li>
 <li><strong>Add rows:</strong> Click <code>+ Row</code> in the toolbar, or right-click a row number to insert above.</li>
 <li><strong>Delete rows:</strong> Right-click a row number and choose Delete Row.</li>
 <li><strong>Add columns:</strong> Click <code>+ Col</code> in the toolbar.</li>
@@ -4085,6 +4427,12 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <tr><td>Arrow keys (no cell selected)</td><td>Focus the cell in the middle of the visible table</td></tr>
 <tr><td>Arrow keys or <code>h</code>/<code>j</code>/<code>k</code>/<code>l</code> (cell selected, not editing)</td><td>Move selection to the adjacent cell</td></tr>
 <tr><td><code>Shift+</code>arrow or <code>Shift+H</code>/<code>J</code>/<code>K</code>/<code>L</code></td><td>Extend cell selection (highlights row &amp; column of every selected cell)</td></tr>
+<tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>A</code></td><td>Select all cells</td></tr>
+<tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>X</code></td><td>Cut selected cells</td></tr>
+<tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>C</code></td><td>Copy selected cells</td></tr>
+<tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>V</code></td><td>Paste at selected cell</td></tr>
+<tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>Z</code></td><td>Undo</td></tr>
+<tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>Z</code></td><td>Redo</td></tr>
 <tr><td><code>Tab</code>/<code>Shift+Tab</code> or <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>L</code>/<code>H</code> (cell selected, not editing)</td><td>Switch to next / previous table window</td></tr>
 <tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>H</code>/<code>J</code>/<code>K</code>/<code>L</code> (cell selected, not editing)</td><td>Nudge the active window 5 px left / down / up / right</td></tr>
 <tr><td><code>Ctrl+Enter</code></td><td>Execute SQL query</td></tr>
@@ -6075,6 +6423,7 @@ choose(value, 'A', 'Active', 'I', 'Inactive')
         getDisplayValue, hasDisplayTransform,
         loadPluginFile, unloadPlugin, persistPlugins, updatePluginMenu,
         rebuildTable, rerenderAllWindows,
+        undoTable, redoTable,
       }
     } : {}),
   };

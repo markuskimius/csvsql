@@ -621,7 +621,7 @@ body {
 
 .data-table th.row-num-header {
   background: var(--surface);
-  cursor: default;
+  cursor: pointer;
   color: var(--text-dim);
   text-align: center;
   width: 50px;
@@ -629,7 +629,7 @@ body {
 }
 
 .data-table th.row-num-header:hover {
-  background: var(--surface);
+  background: var(--surface2);
 }
 
 .data-table td.row-num {
@@ -638,6 +638,7 @@ body {
   text-align: center;
   font-size: 11px;
   user-select: none;
+  cursor: pointer;
 }
 
 .data-table td.data-cell {
