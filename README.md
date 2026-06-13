@@ -12,7 +12,7 @@ A browser-based CSV database application. Open CSV, Excel, and compressed files 
 - **Multiple file formats** — CSV, TSV, PSV, Excel (.xlsx/.xls), Gzip (.csv.gz), and ZIP archives
 - **SQL queries** — Full SQLite syntax from the built-in console, including joins, subqueries, aggregates, UNION, CASE, and REGEXP. Query results are queryable tables too
 - **SQL syntax highlighting** — Keywords, strings, numbers, comments, and identifiers are color-coded in the SQL console and filter inputs
-- **Inline editing** — Click a cell to select it; press Enter, i, F2, or Ctrl/Cmd+U to edit. Tab/Enter to navigate, Escape to revert
+- **Inline editing** — Click a cell to select it; press Enter, i, F2, or Ctrl/Cmd+U to edit; or Ctrl/Cmd+click a cell to edit directly. Tab/Enter to navigate, Escape to revert
 - **Sort and filter** — Click column headers to sort (multi-column with Shift+click). Filter with SQL WHERE expressions including REGEXP. Excel-style column autofilter dropdowns with searchable checkboxes for point-and-click filtering
 - **Multi-window workspace** — Draggable, resizable subwindows. Tile, Grid, or Cascade layouts
 - **Row and column management** — Add/delete rows, insert at position (right-click), add/rename/reorder columns (drag or keyboard), resize columns by dragging header edges (double-click to auto-fit)
@@ -77,7 +77,7 @@ Use **File > Open** (Ctrl+O / Cmd+O), **File > Open URL**, or drag and drop file
 
 ### Editing
 
-- **Edit cells** — Click a cell to select it; press Enter, i, F2, or Ctrl/Cmd+U to enter edit mode
+- **Edit cells** — Click a cell to select it; press Enter, i, F2, or Ctrl/Cmd+U to enter edit mode; or Ctrl/Cmd+click a cell to edit it directly
 - **Navigate** — Tab/Shift+Tab between cells, Enter to save and move down, Escape to revert the edit (or clear the selection when not editing)
 - **Add rows** — Click `+ Row` in the toolbar, or right-click a row number to insert above
 - **Delete rows** — Right-click a row number and choose Delete Row
@@ -220,6 +220,7 @@ The in-app **Plugins > Expression Reference** has the full language documentatio
 | Ctrl+W / Cmd+W | Close window |
 | Ctrl+← / Ctrl+→ (or Cmd+arrow on Mac) | Move selected header column, or cell-selection's columns, left / right |
 | Enter, i, F2, or Ctrl+U / Cmd+U | Enter edit mode on the selected cell |
+| Ctrl+click / Cmd+click | Enter edit mode on the clicked cell directly |
 | / (cell selected, not editing) | Jump to the window's filter input |
 | Escape (in filter input) | Return focus to the selected cell |
 | Tab / Shift+Tab or Ctrl+Shift+L / Ctrl+Shift+H (cell selected, not editing) | Switch to next / previous table window |

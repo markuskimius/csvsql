@@ -45,6 +45,61 @@ test.describe('Table Editing', () => {
     await expect(cell).toHaveAttribute('contenteditable', 'true');
   });
 
+  test('Ctrl+click enters edit mode directly', async ({ page }) => {
+    const cell = page.locator('.subwindow table tbody td.data-cell').first();
+    await cell.click({ modifiers: ['Control'] });
+    await expect(cell).toHaveAttribute('contenteditable', 'true');
+  });
+
+  test('Ctrl+click on a different cell edits that cell without selecting first', async ({ page }) => {
+    const cells = page.locator('.subwindow table tbody td.data-cell');
+    const first = cells.first();
+    const second = cells.nth(1);
+    // Click first cell normally to select it
+    await first.click();
+    await expect(first).not.toHaveAttribute('contenteditable', 'true');
+    // Ctrl+click the second cell — should enter edit mode on the second cell
+    await second.click({ modifiers: ['Control'] });
+    await expect(second).toHaveAttribute('contenteditable', 'true');
+    await expect(first).not.toHaveAttribute('contenteditable', 'true');
+  });
+
+  test('Ctrl+click edit allows typing and saves on blur', async ({ page }) => {
+    const before = await getTableData(page, 'sample1');
+    const col = before.columns[0];
+    const cell = page.locator('.subwindow table tbody td.data-cell').first();
+    await cell.click({ modifiers: ['Control'] });
+    await expect(cell).toHaveAttribute('contenteditable', 'true');
+    await cell.fill('CTRL_EDITED');
+    await page.locator('#sql-input').click();
+    await page.waitForTimeout(500);
+    const after = await getTableData(page, 'sample1');
+    expect(after.rows[0][col]).toBe('CTRL_EDITED');
+  });
+
+  test('Ctrl+click does not trigger drag-select', async ({ page }) => {
+    const cell = page.locator('.subwindow table tbody td.data-cell').first();
+    await cell.click({ modifiers: ['Control'] });
+    // Should be in edit mode, not drag-select mode
+    await expect(cell).toHaveAttribute('contenteditable', 'true');
+    // Table should not have drag-selecting class
+    const table = page.locator('.subwindow table');
+    await expect(table).not.toHaveClass(/drag-selecting/);
+  });
+
+  test('plain click after Ctrl+click edit does not stay in edit mode', async ({ page }) => {
+    const cells = page.locator('.subwindow table tbody td.data-cell');
+    const first = cells.first();
+    const second = cells.nth(1);
+    // Ctrl+click to edit the first cell
+    await first.click({ modifiers: ['Control'] });
+    await expect(first).toHaveAttribute('contenteditable', 'true');
+    // Plain click on second cell — exits edit mode on first, selects second
+    await second.click();
+    await expect(first).not.toHaveAttribute('contenteditable', 'true');
+    await expect(second).not.toHaveAttribute('contenteditable', 'true');
+  });
+
   test('add row via context menu', async ({ page }) => {
     const before = await getTableData(page, 'sample1');
 
