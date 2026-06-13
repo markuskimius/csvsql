@@ -177,7 +177,7 @@ The AI receives column statistics and sample rows, then writes SQL queries to ge
 - **Maximize/Restore** — Double-click the title bar, or click the maximize button
 - **Minimize** — Click the minimize button. Restore from the Windows menu
 - **Close** — Click the close button. Ctrl/Cmd+click closes all windows
-- **Layout** — Use the View menu to Tile Horizontally, Tile Vertically, Grid, or Cascade
+- **Layout** — Use the Windows menu to Tile Horizontally, Tile Vertically, Grid, or Cascade
 - **Proportional scaling** — Windows reposition and resize proportionally when the browser window or console panel is resized
 
 <!-- ![Window layouts](screenshots/layouts.png) -->

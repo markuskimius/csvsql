@@ -121,3 +121,153 @@ test.describe('Window Management', () => {
     expect(minimizedCount).toBe(0);
   });
 });
+
+test.describe('Windows Menu', () => {
+  test('no View menu exists', async ({ page }) => {
+    await openApp(page);
+    const viewMenu = page.locator('#menu-view');
+    await expect(viewMenu).toHaveCount(0);
+  });
+
+  test('Windows menu contains layout buttons', async ({ page }) => {
+    await openApp(page);
+    await page.locator('#menu-windows .menu-label').click();
+    await expect(page.locator('#btn-tile-h')).toBeVisible();
+    await expect(page.locator('#btn-tile-v')).toBeVisible();
+    await expect(page.locator('#btn-grid')).toBeVisible();
+    await expect(page.locator('#btn-cascade')).toBeVisible();
+    await expect(page.locator('#btn-minimize-all')).toBeVisible();
+    await expect(page.locator('#btn-restore-all')).toBeVisible();
+  });
+
+  test('layout buttons are disabled with no windows', async ({ page }) => {
+    await openApp(page);
+    await page.locator('#menu-windows .menu-label').click();
+    await expect(page.locator('#btn-tile-h')).toBeDisabled();
+    await expect(page.locator('#btn-tile-v')).toBeDisabled();
+    await expect(page.locator('#btn-grid')).toBeDisabled();
+    await expect(page.locator('#btn-cascade')).toBeDisabled();
+    await expect(page.locator('#btn-minimize-all')).toBeDisabled();
+    await expect(page.locator('#btn-restore-all')).toBeDisabled();
+  });
+
+  test('layout buttons are enabled with windows open', async ({ page }) => {
+    await openApp(page);
+    await uploadFile(page, '../test/sample1.csv');
+    await waitForWindow(page, 'sample1');
+    await page.locator('#menu-windows .menu-label').click();
+    await expect(page.locator('#btn-tile-h')).toBeEnabled();
+    await expect(page.locator('#btn-tile-v')).toBeEnabled();
+    await expect(page.locator('#btn-grid')).toBeEnabled();
+    await expect(page.locator('#btn-cascade')).toBeEnabled();
+    await expect(page.locator('#btn-minimize-all')).toBeEnabled();
+    await expect(page.locator('#btn-restore-all')).toBeEnabled();
+  });
+
+  test('layout buttons appear before window list', async ({ page }) => {
+    await openApp(page);
+    await uploadFile(page, '../test/sample1.csv');
+    await waitForWindow(page, 'sample1');
+    await page.locator('#menu-windows .menu-label').click();
+
+    const buttons = await page.locator('#menu-windows .menu-dropdown button').all();
+    const labels = await Promise.all(buttons.map(b => b.textContent()));
+    // Layout buttons come first, then separator, then window entries
+    expect(labels[0]).toBe('Tile Horizontally');
+    expect(labels[1]).toBe('Tile Vertically');
+    expect(labels[2]).toBe('Grid');
+    expect(labels[3]).toBe('Cascade');
+    expect(labels[4]).toBe('Minimize All');
+    expect(labels[5]).toBe('Restore All');
+    // Window list entries follow
+    expect(labels.some(l => l.includes('sample1'))).toBe(true);
+  });
+
+  test('window list shows open windows', async ({ page }) => {
+    await openApp(page);
+    await uploadFile(page, '../test/sample1.csv');
+    await waitForWindow(page, 'sample1');
+    await uploadFile(page, '../test/sample2.psv');
+    await waitForWindow(page, 'sample2');
+    await page.locator('#menu-windows .menu-label').click();
+
+    const listButtons = page.locator('#windows-list button');
+    await expect(listButtons).toHaveCount(2);
+    const texts = await listButtons.allTextContents();
+    expect(texts.some(t => t.includes('sample1'))).toBe(true);
+    expect(texts.some(t => t.includes('sample2'))).toBe(true);
+  });
+
+  test('clicking window list entry focuses that window', async ({ page }) => {
+    await openApp(page);
+    await uploadFile(page, '../test/sample1.csv');
+    await waitForWindow(page, 'sample1');
+    await uploadFile(page, '../test/sample2.psv');
+    await waitForWindow(page, 'sample2');
+
+    await page.locator('#menu-windows .menu-label').click();
+    const sample1Btn = page.locator('#windows-list button', { hasText: 'sample1' });
+    await sample1Btn.click();
+    await page.waitForTimeout(200);
+
+    const activeTitle = await page.evaluate(() => {
+      const active = document.querySelector('.subwindow.active .win-title');
+      return active ? active.textContent : '';
+    });
+    expect(activeTitle).toContain('sample1');
+  });
+
+  test('minimized windows show prefix in window list', async ({ page }) => {
+    await openApp(page);
+    await uploadFile(page, '../test/sample1.csv');
+    await waitForWindow(page, 'sample1');
+    await page.evaluate(() => app.minimizeAll());
+    await page.waitForTimeout(200);
+
+    await page.locator('#menu-windows .menu-label').click();
+    const listBtn = page.locator('#windows-list button').first();
+    const text = await listBtn.textContent();
+    expect(text).toContain('[_]');
+  });
+
+  test('tile horizontally via menu click', async ({ page }) => {
+    await openApp(page);
+    await uploadFile(page, '../test/sample1.csv');
+    await waitForWindow(page, 'sample1');
+    await uploadFile(page, '../test/sample2.psv');
+    await waitForWindow(page, 'sample2');
+
+    await page.locator('#menu-windows .menu-label').click();
+    await page.locator('#btn-tile-h').click();
+    await page.waitForTimeout(300);
+
+    const positions = await page.evaluate(() => {
+      return [...document.querySelectorAll('.subwindow:not(.minimized)')].map(el => ({
+        top: parseInt(el.style.top),
+      }));
+    });
+    expect(positions.length).toBe(2);
+    expect(positions[1].top).toBeGreaterThan(positions[0].top);
+  });
+
+  test('cascade via menu click', async ({ page }) => {
+    await openApp(page);
+    await uploadFile(page, '../test/sample1.csv');
+    await waitForWindow(page, 'sample1');
+    await uploadFile(page, '../test/sample2.psv');
+    await waitForWindow(page, 'sample2');
+
+    await page.locator('#menu-windows .menu-label').click();
+    await page.locator('#btn-cascade').click();
+    await page.waitForTimeout(300);
+
+    const positions = await page.evaluate(() => {
+      return [...document.querySelectorAll('.subwindow:not(.minimized)')].map(el => ({
+        left: parseInt(el.style.left),
+        top: parseInt(el.style.top),
+      }));
+    });
+    expect(positions.length).toBe(2);
+    expect(positions[1].left).toBeGreaterThan(positions[0].left);
+  });
+});

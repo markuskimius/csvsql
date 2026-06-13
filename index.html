@@ -39,18 +39,6 @@
         <button id="btn-select-all" disabled>Select All<span class="shortcut">Ctrl+Shift+A</span></button>
       </div>
     </div>
-    <div class="menu-item" id="menu-view">
-      <span class="menu-label">View</span>
-      <div class="menu-dropdown">
-        <button id="btn-tile-h" disabled>Tile Horizontally</button>
-        <button id="btn-tile-v" disabled>Tile Vertically</button>
-        <button id="btn-grid" disabled>Grid</button>
-        <button id="btn-cascade" disabled>Cascade</button>
-        <hr>
-        <button id="btn-minimize-all" disabled>Minimize All</button>
-        <button id="btn-restore-all" disabled>Restore All</button>
-      </div>
-    </div>
     <div class="menu-item" id="menu-plugins">
       <span class="menu-label">Plugins</span>
       <div class="menu-dropdown">
@@ -61,7 +49,16 @@
     </div>
     <div class="menu-item" id="menu-windows">
       <span class="menu-label">Windows</span>
-      <div class="menu-dropdown" id="windows-list">
+      <div class="menu-dropdown">
+        <button id="btn-tile-h" disabled>Tile Horizontally</button>
+        <button id="btn-tile-v" disabled>Tile Vertically</button>
+        <button id="btn-grid" disabled>Grid</button>
+        <button id="btn-cascade" disabled>Cascade</button>
+        <hr>
+        <button id="btn-minimize-all" disabled>Minimize All</button>
+        <button id="btn-restore-all" disabled>Restore All</button>
+        <hr>
+        <div id="windows-list"></div>
       </div>
     </div>
     <div class="menu-item" id="menu-help">
