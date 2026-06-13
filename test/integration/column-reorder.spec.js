@@ -154,6 +154,72 @@ test.describe('Column reorder', () => {
     expect(after).toEqual(['b', 'c', 'a']);
   });
 
+  test('drag column to the last position', async ({ page }) => {
+    const before = await getColumns(page, 'sample1');
+    expect(before).toEqual(['name', 'email', 'member_since']);
+
+    // Drag "name" (first col) past the right half of "member_since" (last col).
+    const fromTh = page.locator('.subwindow table thead th').nth(1); // name
+    const toTh = page.locator('.subwindow table thead th').nth(3);   // member_since
+
+    const fromBox = await fromTh.boundingBox();
+    const toBox = await toTh.boundingBox();
+
+    await page.mouse.move(fromBox.x + fromBox.width / 2, fromBox.y + fromBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(fromBox.x + fromBox.width / 2 + 15, fromBox.y + fromBox.height / 2, { steps: 3 });
+    await page.mouse.move(toBox.x + toBox.width * 0.75, toBox.y + toBox.height / 2, { steps: 10 });
+    await page.mouse.up();
+
+    await page.waitForTimeout(300);
+    const after = await getColumns(page, 'sample1');
+    expect(after).toEqual(['email', 'member_since', 'name']);
+  });
+
+  test('drag column from last to first position', async ({ page }) => {
+    const before = await getColumns(page, 'sample1');
+    expect(before).toEqual(['name', 'email', 'member_since']);
+
+    // Drag "member_since" (last col) to the left half of "name" (first col).
+    const fromTh = page.locator('.subwindow table thead th').nth(3); // member_since
+    const toTh = page.locator('.subwindow table thead th').nth(1);   // name
+
+    const fromBox = await fromTh.boundingBox();
+    const toBox = await toTh.boundingBox();
+
+    await page.mouse.move(fromBox.x + fromBox.width / 2, fromBox.y + fromBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(fromBox.x + fromBox.width / 2 - 15, fromBox.y + fromBox.height / 2, { steps: 3 });
+    await page.mouse.move(toBox.x + toBox.width * 0.25, toBox.y + toBox.height / 2, { steps: 10 });
+    await page.mouse.up();
+
+    await page.waitForTimeout(300);
+    const after = await getColumns(page, 'sample1');
+    expect(after).toEqual(['member_since', 'name', 'email']);
+  });
+
+  test('drag middle column to last position', async ({ page }) => {
+    const before = await getColumns(page, 'sample1');
+    expect(before).toEqual(['name', 'email', 'member_since']);
+
+    // Drag "email" (middle col) past the right half of "member_since" (last col).
+    const fromTh = page.locator('.subwindow table thead th').nth(2); // email
+    const toTh = page.locator('.subwindow table thead th').nth(3);   // member_since
+
+    const fromBox = await fromTh.boundingBox();
+    const toBox = await toTh.boundingBox();
+
+    await page.mouse.move(fromBox.x + fromBox.width / 2, fromBox.y + fromBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(fromBox.x + fromBox.width / 2 + 15, fromBox.y + fromBox.height / 2, { steps: 3 });
+    await page.mouse.move(toBox.x + toBox.width * 0.75, toBox.y + toBox.height / 2, { steps: 10 });
+    await page.mouse.up();
+
+    await page.waitForTimeout(300);
+    const after = await getColumns(page, 'sample1');
+    expect(after).toEqual(['name', 'member_since', 'email']);
+  });
+
   test('sorting works on large numeric values that exceed Number precision', async ({ page }) => {
     // member_since has values like 1780862826.123456700 that differ only
     // in the last digits — beyond Number.MAX_SAFE_INTEGER when combined.
