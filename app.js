@@ -1057,8 +1057,10 @@ const app = (() => {
       const cy = Math.max(area.top, Math.min(e.clientY, area.bottom));
       const dx = cx - startX, dy = cy - startY;
       if (Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
-      win.el.style.left = (origX + dx) + 'px';
-      win.el.style.top = (origY + dy) + 'px';
+      const areaW = area.right - area.left, areaH = area.bottom - area.top;
+      const winW = win.el.offsetWidth, winH = win.el.offsetHeight;
+      win.el.style.left = Math.max(0, Math.min(origX + dx, areaW - winW)) + 'px';
+      win.el.style.top = Math.max(0, Math.min(origY + dy, areaH - winH)) + 'px';
       if (win.maximized) win.maximized = false;
     });
 
@@ -1112,8 +1114,10 @@ const app = (() => {
         const cy = Math.max(area.top, Math.min(touch.clientY, area.bottom));
         const ax = cx - _touchWinDrag.startX;
         const ay = cy - _touchWinDrag.startY;
-        win.el.style.left = (_touchWinDrag.origX + ax) + 'px';
-        win.el.style.top = (_touchWinDrag.origY + ay) + 'px';
+        const areaW = area.right - area.left, areaH = area.bottom - area.top;
+        const winW = win.el.offsetWidth, winH = win.el.offsetHeight;
+        win.el.style.left = Math.max(0, Math.min(_touchWinDrag.origX + ax, areaW - winW)) + 'px';
+        win.el.style.top = Math.max(0, Math.min(_touchWinDrag.origY + ay, areaH - winH)) + 'px';
         if (win.maximized) win.maximized = false;
       }
     }, { passive: false });
@@ -1160,17 +1164,20 @@ const app = (() => {
         const cy = Math.max(area.top, Math.min(e.clientY, area.bottom));
         const dx = cx - startX;
         const dy = cy - startY;
-        if (resizeR) win.el.style.width = Math.max(280, origW + dx) + 'px';
-        if (resizeB) win.el.style.height = Math.max(160, origH + dy) + 'px';
+        const areaW = area.right - area.left, areaH = area.bottom - area.top;
+        if (resizeR) win.el.style.width = Math.min(Math.max(280, origW + dx), areaW - origLeft) + 'px';
+        if (resizeB) win.el.style.height = Math.min(Math.max(160, origH + dy), areaH - origTop) + 'px';
         if (resizeL) {
           const newW = Math.max(280, origW - dx);
-          win.el.style.width = newW + 'px';
-          win.el.style.left = (origLeft + origW - newW) + 'px';
+          const newLeft = Math.max(0, origLeft + origW - newW);
+          win.el.style.width = (origLeft + origW - newLeft) + 'px';
+          win.el.style.left = newLeft + 'px';
         }
         if (resizeT) {
           const newH = Math.max(160, origH - dy);
-          win.el.style.height = newH + 'px';
-          win.el.style.top = (origTop + origH - newH) + 'px';
+          const newTop = Math.max(0, origTop + origH - newH);
+          win.el.style.height = (origTop + origH - newTop) + 'px';
+          win.el.style.top = newTop + 'px';
         }
       });
 
@@ -2610,8 +2617,9 @@ const app = (() => {
   function nudgeWindow(win, dx, dy) {
     const left = parseInt(win.el.style.left) || 0;
     const top = parseInt(win.el.style.top) || 0;
-    win.el.style.left = Math.max(0, left + dx) + 'px';
-    win.el.style.top = Math.max(0, top + dy) + 'px';
+    const area = document.getElementById('window-area');
+    win.el.style.left = Math.max(0, Math.min(left + dx, area.clientWidth - win.el.offsetWidth)) + 'px';
+    win.el.style.top = Math.max(0, Math.min(top + dy, area.clientHeight - win.el.offsetHeight)) + 'px';
     if (win.maximized) win.maximized = false;
   }
 
@@ -3935,7 +3943,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.17.1 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.18.0 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -4048,8 +4056,8 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 
 <h4>Window Management</h4>
 <ul>
-<li><strong>Move:</strong> Drag the title bar.</li>
-<li><strong>Resize:</strong> Drag any edge or corner.</li>
+<li><strong>Move:</strong> Drag the title bar. Windows are constrained to the workspace area.</li>
+<li><strong>Resize:</strong> Drag any edge or corner. Windows cannot be resized beyond the workspace boundaries.</li>
 <li><strong>Maximize/Restore:</strong> Double-click the title bar, or click the maximize button.</li>
 <li><strong>Minimize:</strong> Click the minimize button. Restore from the Windows menu.</li>
 <li><strong>Close:</strong> Click the close button. <code>Ctrl</code>/<code>&#8984;</code>+click closes all windows.</li>

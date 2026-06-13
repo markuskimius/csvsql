@@ -36,7 +36,7 @@ All dependencies are self-contained in the `lib/` directory — no CDN or intern
 
 ### Window management
 
-Custom subwindow system — each table/query result gets a draggable, resizable, minimizable window inside `#window-area`. Layout functions (tile, grid, cascade) reposition all visible windows. Windows reposition/resize proportionally when the browser window or console panel is resized (`scaleWindowsToArea()`). Windows track their own sort/filter state and column autofilters. The `windows` array and `tables` object are the two central data structures. Help windows (Manual, About) are singletons — reopening focuses the existing window instead of creating a duplicate.
+Custom subwindow system — each table/query result gets a draggable, resizable, minimizable window inside `#window-area`. Windows are constrained to the workspace area — drag, resize, and keyboard nudge all clamp position and size so windows cannot extend beyond the `#window-area` boundaries. Layout functions (tile, grid, cascade) reposition all visible windows. Windows reposition/resize proportionally when the browser window or console panel is resized (`scaleWindowsToArea()`). Windows track their own sort/filter state and column autofilters. The `windows` array and `tables` object are the two central data structures. Help windows (Manual, About) are singletons — reopening focuses the existing window instead of creating a duplicate.
 
 ### Row identity
 

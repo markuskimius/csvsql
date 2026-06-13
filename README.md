@@ -168,8 +168,8 @@ The AI receives column statistics and sample rows, then writes SQL queries to ge
 
 ### Window Management
 
-- **Move** — Drag the title bar
-- **Resize** — Drag any edge or corner
+- **Move** — Drag the title bar. Windows are constrained to the workspace area
+- **Resize** — Drag any edge or corner. Windows cannot be resized beyond the workspace boundaries
 - **Maximize/Restore** — Double-click the title bar, or click the maximize button
 - **Minimize** — Click the minimize button. Restore from the Windows menu
 - **Close** — Click the close button. Ctrl/Cmd+click closes all windows
