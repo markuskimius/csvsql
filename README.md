@@ -15,7 +15,7 @@ A browser-based CSV database application. Open CSV, Excel, and compressed files 
 - **Inline editing** — Click a cell to select it; press Enter, i, F2, or Ctrl/Cmd+U to edit. Tab/Enter to navigate, Escape to revert
 - **Sort and filter** — Click column headers to sort (multi-column with Shift+click). Filter with SQL WHERE expressions including REGEXP. Excel-style column autofilter dropdowns with searchable checkboxes for point-and-click filtering
 - **Multi-window workspace** — Draggable, resizable subwindows. Tile, Grid, or Cascade layouts
-- **Row and column management** — Add/delete rows, insert at position (right-click), add/rename/reorder columns (drag or keyboard)
+- **Row and column management** — Add/delete rows, insert at position (right-click), add/rename/reorder columns (drag or keyboard), resize columns by dragging header edges (double-click to auto-fit)
 - **Cell selection** — Click a cell to highlight its row, column, and row number. Move the selection with arrow keys or vim-style h/j/k/l, extend to a rectangle with Shift+arrow (or Shift+H/J/K/L), Shift+click, or click-and-drag. With no cell selected, any arrow key focuses the cell in the middle of the view. Ctrl+←/→ moves the selected columns as a block
 - **SELECT INTO** — Create new tables from query results (`SELECT ... INTO tablename ...`)
 - **CREATE TABLE** — New tables created via SQL auto-open as editable windows
@@ -84,6 +84,7 @@ Use **File > Open** (Ctrl+O / Cmd+O), **File > Open URL**, or drag and drop file
 - **Add columns** — Click `+ Col` in the toolbar
 - **Rename columns** — Ctrl/Cmd+click a column header
 - **Reorder columns** — Drag a column header to a new position. With a header selected, press Ctrl/Cmd+←/→ to nudge it. With cells selected, Ctrl/Cmd+←/→ moves the columns spanned by the selection
+- **Resize columns** — Drag the right edge of a column header to resize. Double-click to auto-fit the column to its content
 - **Rename tables** — Ctrl/Cmd+click the window title
 - **Highlight row & column** — Clicking a cell highlights its row and column. Move the selection with arrow keys or vim h/j/k/l; extend to a rectangle with Shift+arrow (or Shift+H/J/K/L), Shift+click, or click-and-drag. Esc clears the selection
 

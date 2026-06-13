@@ -330,6 +330,16 @@ body {
   min-width: 100%;
 }
 
+.data-table.fixed-layout {
+  table-layout: fixed;
+  min-width: 0;
+}
+
+.data-table.fixed-layout th,
+.data-table.fixed-layout td {
+  max-width: none;
+}
+
 .data-table th,
 .data-table td {
   border: 1px solid var(--border);
@@ -476,6 +486,22 @@ body {
 .col-transform-icon.disabled {
   opacity: 0.3;
   filter: grayscale(1);
+}
+
+.col-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 5px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 3;
+}
+
+.col-resize-handle:hover,
+.col-resize-handle.active {
+  background: var(--accent);
+  opacity: 0.4;
 }
 
 /* ---- AutoFilter Dropdown ---- */
@@ -1610,4 +1636,10 @@ body {
   font-family: inherit;
   font-size: 12px;
   line-height: 1.5;
+}
+
+body.col-resizing,
+body.col-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }

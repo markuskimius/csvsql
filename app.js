@@ -1601,6 +1601,24 @@ const app = (() => {
     const table = document.createElement('table');
     table.className = 'data-table';
 
+    const colgroup = document.createElement('colgroup');
+    const rowNumColEl = document.createElement('col');
+    rowNumColEl.style.width = '50px';
+    colgroup.appendChild(rowNumColEl);
+    columns.forEach((col, colIdx) => {
+      const colEl = document.createElement('col');
+      if (win.colWidths && win.colWidths[colIdx] != null) {
+        colEl.style.width = win.colWidths[colIdx] + 'px';
+      }
+      colgroup.appendChild(colEl);
+    });
+    table.appendChild(colgroup);
+    win._colgroup = colgroup;
+    if (win.colWidths) {
+      table.classList.add('fixed-layout');
+      table.style.width = (50 + win.colWidths.reduce((a, b) => a + b, 0)) + 'px';
+    }
+
     // Header
     const thead = document.createElement('thead');
     const headerRow = document.createElement('tr');
@@ -1662,6 +1680,20 @@ const app = (() => {
       });
       thInner.appendChild(filterBtn);
       th.appendChild(thInner);
+
+      const resizeHandle = document.createElement('div');
+      resizeHandle.className = 'col-resize-handle';
+      resizeHandle.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        startColResize(win, colIdx, e);
+      });
+      resizeHandle.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        autoFitColumn(win, colIdx);
+      });
+      th.appendChild(resizeHandle);
 
       // Drag to reorder columns; click to sort/select; Ctrl/Cmd+click to rename
       th.addEventListener('mousedown', (e) => {
@@ -2222,6 +2254,18 @@ const app = (() => {
     // Initial render of visible rows
     renderVisibleRows(win);
 
+    if (!win.colWidths) {
+      const ths = table.querySelectorAll('thead th:not(.row-num-header)');
+      win.colWidths = [];
+      for (const th of ths) win.colWidths.push(th.offsetWidth);
+      const cols = colgroup.querySelectorAll('col');
+      for (let i = 0; i < win.colWidths.length; i++) {
+        cols[i + 1].style.width = win.colWidths[i] + 'px';
+      }
+      table.classList.add('fixed-layout');
+      updateTableWidth(win);
+    }
+
     // Scroll listener for virtual scrolling
     let scrollRaf = 0;
     container.addEventListener('scroll', () => {
@@ -2658,6 +2702,7 @@ const app = (() => {
     t.columns.push(colName);
     t.rows.forEach(r => { r[colName] = ''; });
     markModified(tableName);
+    windows.filter(w => w.tableName === tableName).forEach(w => { w.colWidths = null; });
     await registerTable(tableName);
   }
 
@@ -2687,12 +2732,74 @@ const app = (() => {
     rebuildTable(win);
   }
 
+  function updateTableWidth(win) {
+    if (!win._table || !win.colWidths) return;
+    win._table.style.width = (50 + win.colWidths.reduce((a, b) => a + b, 0)) + 'px';
+  }
+
+  function startColResize(win, colIdx, e) {
+    closeAutoFilter();
+    const colEl = win._colgroup.children[colIdx + 1];
+    const startX = e.clientX;
+    const startWidth = win.colWidths[colIdx];
+    const MIN_COL_WIDTH = 40;
+
+    document.body.classList.add('col-resizing');
+    const th = win._table.querySelector(`thead th[data-col-idx="${colIdx}"]`);
+    const handle = th && th.querySelector('.col-resize-handle');
+    if (handle) handle.classList.add('active');
+
+    const onMove = (me) => {
+      const newWidth = Math.max(MIN_COL_WIDTH, startWidth + me.clientX - startX);
+      win.colWidths[colIdx] = newWidth;
+      colEl.style.width = newWidth + 'px';
+      updateTableWidth(win);
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.classList.remove('col-resizing');
+      if (handle) handle.classList.remove('active');
+      if (th) th._didDrag = true;
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
+
+  function autoFitColumn(win, colIdx) {
+    const MIN_COL_WIDTH = 40;
+    const MAX_COL_WIDTH = 600;
+    const measurer = document.createElement('span');
+    measurer.style.cssText = 'visibility:hidden;position:absolute;white-space:nowrap;padding:0 8px;font-size:12px;font-family:inherit;';
+    document.body.appendChild(measurer);
+
+    const col = win._columns[colIdx];
+    measurer.textContent = col;
+    let maxW = measurer.offsetWidth + 40;
+
+    const displayRows = win._displayRows;
+    const start = win._renderStart || 0;
+    const end = Math.min(win._renderEnd || displayRows.length, displayRows.length);
+    for (let i = start; i < end; i++) {
+      measurer.textContent = String(displayRows[i][col] ?? '');
+      maxW = Math.max(maxW, measurer.offsetWidth);
+    }
+    measurer.remove();
+
+    const finalWidth = Math.min(MAX_COL_WIDTH, Math.max(MIN_COL_WIDTH, maxW));
+    win.colWidths[colIdx] = finalWidth;
+    win._colgroup.children[colIdx + 1].style.width = finalWidth + 'px';
+    updateTableWidth(win);
+  }
+
   async function reorderColumn(win, fromIdx, toIdx) {
     const t = tables[win.tableName];
     if (!t) return;
     const col = t.columns.splice(fromIdx, 1)[0];
+    const w = win.colWidths ? win.colWidths.splice(fromIdx, 1)[0] : null;
     if (toIdx > fromIdx) toIdx--;
     t.columns.splice(toIdx, 0, col);
+    if (win.colWidths && w != null) win.colWidths.splice(toIdx, 0, w);
     markModified(win.tableName);
     await registerTable(win.tableName);
     rebuildTable(win);
@@ -3828,7 +3935,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.16.1 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.17.0 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -3876,6 +3983,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <li><strong>Rename columns:</strong> <code>Ctrl</code>/<code>&#8984;</code>+click a column header.</li>
 <li><strong>Select a column:</strong> Click a column header to select it (highlighted) and sort it. Selection is the target for Ctrl+&larr;/&rarr;.</li>
 <li><strong>Reorder columns:</strong> Drag a column header to a new position. With a column selected by clicking its header, press <code>Ctrl</code>/<code>&#8984;</code>+<code>&larr;</code>/<code>&rarr;</code> to nudge it. With cells selected (in select mode, not editing), <code>Ctrl</code>/<code>&#8984;</code>+<code>&larr;</code>/<code>&rarr;</code> moves the columns spanned by the selection.</li>
+<li><strong>Resize columns:</strong> Drag the right edge of a column header to resize. Double-click the edge to auto-fit the column to its content. Column widths are fixed after initial load and survive sorting and filtering.</li>
 <li><strong>Rename tables:</strong> <code>Ctrl</code>/<code>&#8984;</code>+click the window title.</li>
 </ul>
 
