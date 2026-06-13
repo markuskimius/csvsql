@@ -176,8 +176,8 @@ test.describe('Expression language', () => {
     expect(result).toBe('2026-06-07');
   });
 
-  test('date function with millisecond timestamp string', async () => {
-    const result = await evalExpr("date('1704067200000', 'iso')");
+  test('date function with integer seconds timestamp string', async () => {
+    const result = await evalExpr("date('1704067200', 'iso')");
     expect(result).toBe('2024-01-01');
   });
 

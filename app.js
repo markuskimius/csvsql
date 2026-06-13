@@ -3828,7 +3828,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.16.0 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.16.1 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -5514,7 +5514,7 @@ ${_aiImageContext()}`;
           nanoFrac = fracPart;
           d = new Date(parseInt(secPart) * 1000 + parseInt(fracPart.slice(0, 3)));
         } else if (/^\d+$/.test(sStr)) {
-          d = new Date(Number(sStr));
+          d = new Date(Number(sStr) * 1000);
         }
       }
       if (isNaN(d.getTime())) return sStr;
@@ -5883,7 +5883,7 @@ ${_aiImageContext()}`;
 <tr><td><code>date(s, format)</code></td><td>Parse &amp; format date</td><td><code>date('2024-01-15', 'locale')</code></td></tr>
 </table>
 <p>Format strings: <code>'locale'</code>, <code>'iso'</code>, <code>'time'</code>, <code>'datetime'</code>, <code>'full'</code>, or a pattern with <code>YYYY</code>, <code>MM</code>, <code>DD</code> (e.g. <code>'YYYY/MM/DD'</code>). Returns the original value if unparseable.</p>
-<p><code>'full'</code> shows local date and time with sub-second precision: <code>2026-06-07 13:07:06.123456789</code>. Decimal-seconds timestamps (e.g. <code>1780862826.123456789</code>) are auto-detected and the fractional part is preserved at full precision (up to 9 digits). Integer timestamps (milliseconds) are also supported.</p>
+<p><code>'full'</code> shows local date and time with sub-second precision: <code>2026-06-07 13:07:06.123456789</code>. Decimal-seconds timestamps (e.g. <code>1780862826.123456789</code>) are auto-detected and the fractional part is preserved at full precision (up to 9 digits). Integer timestamps (Unix epoch seconds) are also supported.</p>
 
 <h4>Logic / Utility Functions</h4>
 <table>
