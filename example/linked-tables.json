@@ -1,0 +1,48 @@
+{
+  "name": "Orders ↔ Customers ↔ Products",
+  "version": "1.1.0",
+  "author": "CSVSQL",
+  "created": "2025-06-13",
+  "description": "Cross-table linking with display formatting. Open customers.csv, orders.csv, and products.csv, then load this plugin. Selecting a customer filters orders and selecting an order filters both the customer and the product.",
+  "tables": [
+    {
+      "table": "orders",
+      "columns": [
+        { "match": "^total$", "display": "isNum(value) ? '$' + fixed(num(value), 2) : value" },
+        { "match": "^order_date$", "display": "isEmpty(value) ? '' : date(value, 'locale')" }
+      ]
+    },
+    {
+      "table": "customers",
+      "columns": [
+        { "match": "^signup_date$", "display": "isEmpty(value) ? '' : date(value, 'locale')" },
+        { "match": "^is_active$", "display": "choose(lower(value), 'true', 'Yes', 'false', 'No')" }
+      ]
+    },
+    {
+      "table": "products",
+      "columns": [
+        { "match": "^price$", "display": "isNum(value) ? '$' + fixed(num(value), 2) : value" },
+        { "match": "^is_active$", "display": "choose(lower(value), 'true', 'Yes', 'false', 'No')" }
+      ]
+    }
+  ],
+  "links": [
+    {
+      "source": { "table": "customers", "column": "^id$" },
+      "target": { "table": "orders", "column": "^customer_id$" }
+    },
+    {
+      "source": { "table": "orders", "column": "^customer_id$" },
+      "target": { "table": "customers", "column": "^id$" }
+    },
+    {
+      "source": { "table": "orders", "column": "^product_id$" },
+      "target": { "table": "products", "column": "^id$" }
+    },
+    {
+      "source": { "table": "products", "column": "^id$" },
+      "target": { "table": "orders", "column": "^product_id$" }
+    }
+  ]
+}

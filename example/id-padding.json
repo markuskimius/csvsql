@@ -1,0 +1,28 @@
+{
+  "name": "ID Padding",
+  "version": "1.1.0",
+  "author": "CSVSQL",
+  "created": "2025-06-01",
+  "description": "Zero-pad ID columns to 6 digits and link tables by ID/foreign-key columns. Use with customers.csv, orders.csv, and products.csv.",
+  "tables": [
+    {
+      "table": ".*",
+      "columns": [
+        {
+          "match": "^(id|employee_id|order_id|customer_id|product_id)$",
+          "display": "padLeft(value, 6, '0')"
+        }
+      ]
+    }
+  ],
+  "links": [
+    {
+      "source": { "table": ".*", "column": "^(employee_id|order_id|customer_id|product_id)$" },
+      "target": { "table": ".*", "column": "^id$" }
+    },
+    {
+      "source": { "table": ".*", "column": "^id$" },
+      "target": { "table": ".*", "column": "^(employee_id|order_id|customer_id|product_id)$" }
+    }
+  ]
+}

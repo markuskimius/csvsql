@@ -1,0 +1,18 @@
+{
+  "name": "Locale Dates",
+  "version": "1.1.0",
+  "author": "CSVSQL",
+  "created": "2025-06-01",
+  "description": "Display date columns as locale-formatted dates. Use with customers.csv (signup_date) and orders.csv (order_date).",
+  "tables": [
+    {
+      "table": ".*",
+      "columns": [
+        {
+          "match": "(date|created|updated|_at|timestamp|member_since)",
+          "display": "isEmpty(value) ? '' : date(value, 'full')"
+        }
+      ]
+    }
+  ]
+}

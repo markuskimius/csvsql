@@ -13,7 +13,7 @@ const app = (() => {
 
   // Touch gesture state (shared across tables / windows)
   let _activeAutoFilter = null;            // { win, col, el } — currently open autofilter dropdown
-  let _activePluginPopover = null;         // modal overlay element for plugin about dialog
+  let _activePluginAboutWin = null;        // window object for the currently open plugin about window
   let _touchHeaderDrag = null;             // header 1.5-tap drag (→ reorder column)
   let _touchCellDrag = null;               // cell second-tap interaction (→ double-tap edit or 1.5-tap multi-select)
   let _touchWinDrag = null;                // titlebar 1.5-tap drag (→ move window)
@@ -32,6 +32,7 @@ const app = (() => {
   // Plugin state
   let plugins = [];
   let _columnTransformCache = {};
+  let _linkCache = []; // compiled link rules: [{ sourceTableRe, sourceColRe, targetTableRe, targetColRe, pluginIdx }]
 
   // Sort optimization
   const collator = new Intl.Collator(undefined, { sensitivity: 'base' });
@@ -938,6 +939,7 @@ const app = (() => {
       sortCols: [],   // [{col, dir:'asc'|'desc'}, ...]
       filterText: '',
       columnFilters: {},  // { colName: Set of allowed string values }
+      linkFilters: {},    // { colName: Set of allowed string values } — set by cross-table links
       selectedCol: null, // column name currently highlighted (target for Ctrl+Arrow reorder)
       selectedCells: new Set(), // keys "rownum:colName" for cells highlighted by selection
       anchorCell: null, // { rownum, col } — fixed corner for Ctrl+Shift+Arrow extension
@@ -1585,6 +1587,17 @@ const app = (() => {
       });
     }
 
+    // Link filters (AND together, AND with column autofilters)
+    const lfKeys = Object.keys(win.linkFilters);
+    if (lfKeys.length > 0) {
+      displayRows = displayRows.filter(row => {
+        for (const c of lfKeys) {
+          if (!win.linkFilters[c].has(String(row[c] ?? ''))) return false;
+        }
+        return true;
+      });
+    }
+
     // Multi-column sort
     if (win.sortCols.length > 0) {
       displayRows.sort((a, b) => {
@@ -1656,6 +1669,7 @@ const app = (() => {
         thInner.appendChild(arrow);
       }
       if (win.columnFilters[col]) th.classList.add('col-filtered');
+      if (win.linkFilters[col]) th.classList.add('col-linked');
       if (win.selectedCol === col) th.classList.add('col-selected');
 
       if (hasDisplayTransform(win.tableName, col)) {
@@ -2378,20 +2392,31 @@ const app = (() => {
     const statusLeft = win.el.querySelector('.status-left');
     const statusRight = win.el.querySelector('.status-right');
     const hasColumnFilters = Object.keys(win.columnFilters).length > 0;
+    const hasLinkFilters = Object.keys(win.linkFilters).length > 0;
     const hasWhereFilter = !!win.filterText;
-    if (hasColumnFilters || hasWhereFilter) {
+    if (hasColumnFilters || hasLinkFilters || hasWhereFilter) {
       statusLeft.textContent = `${displayRows.length} of ${rows.length} rows — `;
-      const clearLink = document.createElement('span');
-      clearLink.className = 'status-clear-filters';
-      clearLink.textContent = 'Clear Filters';
-      clearLink.addEventListener('click', () => {
-        win.columnFilters = {};
-        win.filterText = '';
-        const filterInput = win.el.querySelector('.filter-input');
-        if (filterInput) filterInput.value = '';
-        rebuildTable(win);
-      });
-      statusLeft.appendChild(clearLink);
+      if (hasColumnFilters || hasWhereFilter) {
+        const clearLink = document.createElement('span');
+        clearLink.className = 'status-clear-filters';
+        clearLink.textContent = 'Clear Filters';
+        clearLink.addEventListener('click', () => {
+          win.columnFilters = {};
+          win.filterText = '';
+          const filterInput = win.el.querySelector('.filter-input');
+          if (filterInput) filterInput.value = '';
+          rebuildTable(win);
+        });
+        statusLeft.appendChild(clearLink);
+      }
+      if (hasLinkFilters) {
+        if (hasColumnFilters || hasWhereFilter) statusLeft.appendChild(document.createTextNode(' '));
+        const linkLabel = document.createElement('span');
+        linkLabel.className = 'status-link-filter';
+        linkLabel.textContent = '🔗 Linked';
+        linkLabel.title = 'Filtered by cross-table link — select different rows in source table to update';
+        statusLeft.appendChild(linkLabel);
+      }
     } else {
       statusLeft.textContent = `${displayRows.length} of ${rows.length} rows`;
     }
@@ -2960,6 +2985,10 @@ const app = (() => {
         td.classList.toggle('col-highlight', hiCols.has(name));
         td.classList.toggle('cell-selected', selected.has(`${row._rownum}:${name}`));
       }
+    }
+    if (_linkCache.length > 0) {
+      if (selected.size > 0) applyLinkFilters(win);
+      else clearLinkFilters(win);
     }
   }
 
@@ -4307,7 +4336,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.20.0 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.21.0 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -4487,24 +4516,33 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 
 <p><strong>Loading &amp; unloading:</strong> Use <strong>Plugins &rarr; Load Plugin</strong> to open a <code>.json</code> plugin file, or drag and drop a <code>.json</code> file onto the app. A toast notification confirms success or shows errors. Loaded plugins appear in the Plugins menu with an &times; button to unload them. Click a plugin&rsquo;s name to open an About dialog showing its metadata, column rules, and an Unload button. Plugins persist across page reloads.</p>
 
-<p><strong>How matching works:</strong> Each plugin has a <code>table</code> regex matched against table names, and column rules with a <code>match</code> regex matched against column names. Multiple plugins can be loaded simultaneously and stack on the same table &mdash; each column is governed by the <em>last-loaded</em> plugin with a matching rule. Unloading a plugin reveals any earlier plugin&rsquo;s rule that was shadowed.</p>
+<p><strong>How matching works:</strong> Each plugin has table entries with a <code>table</code> regex matched against table names, and column rules with a <code>match</code> regex matched against column names. Multiple plugins can be loaded simultaneously and stack on the same table &mdash; each column is governed by the <em>last-loaded</em> plugin with a matching rule. Unloading a plugin reveals any earlier plugin&rsquo;s rule that was shadowed.</p>
 
-<p><strong>Plugin config format:</strong></p>
+<p><strong>Plugin config format:</strong> Two formats are supported. The legacy format has <code>table</code> and <code>columns</code> at the top level. The multi-table format uses a <code>tables</code> array:</p>
 <pre>{
   "name": "Plugin Name",
   "version": "1.0.0",
   "author": "Author Name",
   "created": "2026-01-01",
   "description": "Optional description",
-  "table": "regex for table names",
-  "columns": [
+  "tables": [
     {
-      "match": "regex for column names",
-      "display": "expression"
+      "table": "regex for table names",
+      "columns": [
+        { "match": "regex for column names", "display": "expression" }
+      ]
+    }
+  ],
+  "links": [
+    {
+      "source": { "table": "source_table_regex", "column": "source_col_regex" },
+      "target": { "table": "target_table_regex", "column": "target_col_regex" }
     }
   ]
 }</pre>
-<p>The <code>version</code>, <code>author</code>, <code>created</code>, and <code>description</code> fields are optional metadata shown in the About dialog.</p>
+<p>The <code>version</code>, <code>author</code>, <code>created</code>, and <code>description</code> fields are optional metadata shown in the About dialog. The <code>tables</code> array and <code>links</code> array are both optional &mdash; a plugin can have just display rules, just links, or both.</p>
+
+<p><strong>Cross-table linking:</strong> The <code>links</code> array defines relationships between tables. When you select rows in a source table, the target table is automatically filtered to matching values. All patterns are regex. The source table is excluded from its own link targets. Link filters are shown with a blue border on the column header and a &#x1F517; Linked label in the status bar. Clearing the selection clears the link filter. Link filters are separate from manual column autofilters.</p>
 
 <p><strong>Per-column toggle:</strong> Columns with an active plugin transform show a &#x1F50C; icon in the header. Click the icon to disable the transform for that column &mdash; the icon dims but stays visible. Click again to re-enable. The status bar shows a bulk <strong>Plugins on/off/partial</strong> toggle to enable or disable all transforms at once.</p>
 
@@ -4520,7 +4558,7 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 choose(value, 'A', 'Active', 'I', 'Inactive')   Value mapping
 value || 'N/A'                                   Default for empty</pre>
 
-<p>Bundled example plugins are available in the <code>plugins/</code> directory.</p>
+<p>Bundled example plugins and sample CSV files are available in the <code>example/</code> directory.</p>
 
 <h4>Links</h4>
 <p><a href="https://github.com/markuskimius/csvsql" target="_blank">GitHub</a></p>
@@ -6134,46 +6172,120 @@ ${_aiImageContext()}`;
 
   // ---- Plugin System ----
 
+  function validatePluginTableEntry(entry, prefix) {
+    const errors = [];
+    if (typeof entry.table !== 'string') errors.push(`${prefix}"table" regex is required`);
+    else { try { new RegExp(entry.table); } catch (e) { errors.push(`${prefix}Invalid table regex: ${e.message}`); } }
+    if (!Array.isArray(entry.columns) || entry.columns.length === 0) errors.push(`${prefix}"columns" must be a non-empty array`);
+    else {
+      entry.columns.forEach((col, i) => {
+        if (typeof col.match !== 'string') errors.push(`${prefix}columns[${i}].match is required`);
+        else { try { new RegExp(col.match); } catch (e) { errors.push(`${prefix}columns[${i}].match invalid regex: ${e.message}`); } }
+        if (typeof col.display !== 'string') errors.push(`${prefix}columns[${i}].display expression is required`);
+      });
+    }
+    return errors;
+  }
+
   function validatePlugin(config) {
     const errors = [];
     if (!config || typeof config !== 'object') { errors.push('Plugin must be a JSON object'); return errors; }
     if (typeof config.name !== 'string' || !config.name.trim()) errors.push('Plugin "name" is required');
-    if (typeof config.table !== 'string') errors.push('Plugin "table" regex is required');
-    else { try { new RegExp(config.table); } catch (e) { errors.push(`Invalid table regex: ${e.message}`); } }
-    if (!Array.isArray(config.columns) || config.columns.length === 0) errors.push('Plugin "columns" must be a non-empty array');
-    else {
-      config.columns.forEach((col, i) => {
-        if (typeof col.match !== 'string') errors.push(`columns[${i}].match is required`);
-        else { try { new RegExp(col.match); } catch (e) { errors.push(`columns[${i}].match invalid regex: ${e.message}`); } }
-        if (typeof col.display !== 'string') errors.push(`columns[${i}].display expression is required`);
+
+    const hasOldFormat = 'table' in config && 'columns' in config;
+    const hasNewFormat = Array.isArray(config.tables);
+    const hasLinks = Array.isArray(config.links);
+    if (!hasOldFormat && !hasNewFormat && !hasLinks) errors.push('Plugin must have "table"+"columns", "tables" array, or "links" array');
+
+    if (hasOldFormat && !hasNewFormat) {
+      errors.push(...validatePluginTableEntry(config, ''));
+    }
+    if (hasNewFormat) {
+      if (config.tables.length === 0) errors.push('"tables" must be a non-empty array');
+      else config.tables.forEach((t, i) => errors.push(...validatePluginTableEntry(t, `tables[${i}].`)));
+    }
+
+    if (hasLinks) {
+      config.links.forEach((link, i) => {
+        const p = `links[${i}]`;
+        if (!link || typeof link !== 'object') { errors.push(`${p} must be an object`); return; }
+        if (!link.source || typeof link.source !== 'object') { errors.push(`${p}.source is required`); return; }
+        if (!link.target || typeof link.target !== 'object') { errors.push(`${p}.target is required`); return; }
+        for (const side of ['source', 'target']) {
+          if (typeof link[side].table !== 'string') errors.push(`${p}.${side}.table regex is required`);
+          else { try { new RegExp(link[side].table); } catch (e) { errors.push(`${p}.${side}.table invalid regex: ${e.message}`); } }
+          if (typeof link[side].column !== 'string') errors.push(`${p}.${side}.column regex is required`);
+          else { try { new RegExp(link[side].column); } catch (e) { errors.push(`${p}.${side}.column invalid regex: ${e.message}`); } }
+        }
       });
     }
+
     if ('version' in config && typeof config.version !== 'string') errors.push('"version" must be a string');
     if ('author' in config && typeof config.author !== 'string') errors.push('"author" must be a string');
     if ('created' in config && typeof config.created !== 'string') errors.push('"created" must be a string');
     return errors;
   }
 
-  function compilePlugin(config) {
+  function compilePluginTableEntry(entry, pluginName) {
     let tableRe;
-    try { tableRe = new RegExp('^(?:' + config.table + ')$'); } catch (e) { return null; }
+    try { tableRe = new RegExp('^(?:' + entry.table + ')$'); } catch (e) { return null; }
     const columns = [];
-    for (const col of config.columns) {
+    for (const col of (entry.columns || [])) {
       try {
         const matchRe = new RegExp('^(?:' + col.match + ')$');
         const displayAst = exprCompile(col.display);
         columns.push({ matchRe, displayAst });
       } catch (e) {
-        console.warn(`Plugin "${config.name}": skipping column rule "${col.match}": ${e.message}`);
+        console.warn(`Plugin "${pluginName}": skipping column rule "${col.match}": ${e.message}`);
       }
     }
     return { tableRe, columns };
+  }
+
+  function compilePlugin(config) {
+    const tableEntries = [];
+    const rawTables = config.tables || [{ table: config.table, columns: config.columns }];
+    for (const entry of rawTables) {
+      const compiled = compilePluginTableEntry(entry, config.name);
+      if (compiled && compiled.columns.length > 0) tableEntries.push(compiled);
+    }
+
+    const links = [];
+    if (Array.isArray(config.links)) {
+      for (const link of config.links) {
+        try {
+          links.push({
+            sourceTableRe: new RegExp('^(?:' + link.source.table + ')$'),
+            sourceColRe: new RegExp('^(?:' + link.source.column + ')$'),
+            targetTableRe: new RegExp('^(?:' + link.target.table + ')$'),
+            targetColRe: new RegExp('^(?:' + link.target.column + ')$'),
+          });
+        } catch (e) {
+          console.warn(`Plugin "${config.name}": skipping link rule: ${e.message}`);
+        }
+      }
+    }
+
+    if (tableEntries.length === 0 && links.length === 0) return null;
+    return { tables: tableEntries, links };
   }
 
   function rebuildTransformCache() {
     _columnTransformCache = {};
     for (const tableName of Object.keys(tables)) {
       rebuildTransformCacheForTable(tableName);
+    }
+    rebuildLinkCache();
+  }
+
+  function rebuildLinkCache() {
+    _linkCache = [];
+    for (let pi = 0; pi < plugins.length; pi++) {
+      const compiled = plugins[pi]._compiled;
+      if (!compiled) continue;
+      for (const link of compiled.links) {
+        _linkCache.push({ ...link, pluginIdx: pi });
+      }
     }
   }
 
@@ -6183,12 +6295,15 @@ ${_aiImageContext()}`;
     const colMap = {};
     for (let pi = 0; pi < plugins.length; pi++) {
       const compiled = plugins[pi]._compiled;
-      if (!compiled || !compiled.tableRe.test(tableName)) continue;
-      for (const colName of t.columns) {
-        for (const rule of compiled.columns) {
-          if (rule.matchRe.test(colName)) {
-            colMap[colName] = { displayAst: rule.displayAst, pluginIdx: pi };
-            break;
+      if (!compiled) continue;
+      for (const tableEntry of compiled.tables) {
+        if (!tableEntry.tableRe.test(tableName)) continue;
+        for (const colName of t.columns) {
+          for (const rule of tableEntry.columns) {
+            if (rule.matchRe.test(colName)) {
+              colMap[colName] = { displayAst: rule.displayAst, pluginIdx: pi };
+              break;
+            }
           }
         }
       }
@@ -6210,6 +6325,87 @@ ${_aiImageContext()}`;
     return !!(tableCache && tableCache[column]);
   }
 
+  function applyLinkFilters(sourceWin) {
+    if (_linkCache.length === 0) return;
+    const sourceTable = sourceWin.tableName;
+    if (!sourceTable || !tables[sourceTable]) return;
+    const t = tables[sourceTable];
+
+    const selectedRownums = new Set();
+    for (const key of sourceWin.selectedCells) {
+      const sep = key.indexOf(':');
+      if (sep > 0) selectedRownums.add(parseInt(key.slice(0, sep), 10));
+    }
+    if (selectedRownums.size === 0) { clearLinkFilters(sourceWin); return; }
+
+    const selectedRows = t.rows.filter(r => selectedRownums.has(r._rownum));
+
+    for (const link of _linkCache) {
+      if (!link.sourceTableRe.test(sourceTable)) continue;
+      const sourceColNames = t.columns.filter(c => link.sourceColRe.test(c));
+      if (sourceColNames.length === 0) continue;
+
+      for (const targetTableName of Object.keys(tables)) {
+        if (targetTableName === sourceTable) continue;
+        if (!link.targetTableRe.test(targetTableName)) continue;
+        const tt = tables[targetTableName];
+        const targetColNames = tt.columns.filter(c => link.targetColRe.test(c));
+        if (targetColNames.length === 0) continue;
+
+        const sourceValues = new Set();
+        for (const row of selectedRows) {
+          for (const sc of sourceColNames) {
+            sourceValues.add(String(row[sc] ?? ''));
+          }
+        }
+
+        for (const targetWin of windows) {
+          if (targetWin.tableName !== targetTableName) continue;
+          let changed = false;
+          const newLinkFilters = {};
+          for (const tc of targetColNames) {
+            newLinkFilters[tc] = sourceValues;
+          }
+          const oldKeys = Object.keys(targetWin.linkFilters).sort().join(',');
+          const newKeys = Object.keys(newLinkFilters).sort().join(',');
+          if (oldKeys !== newKeys) changed = true;
+          if (!changed) {
+            for (const k of Object.keys(newLinkFilters)) {
+              const oldSet = targetWin.linkFilters[k];
+              if (!oldSet || oldSet.size !== newLinkFilters[k].size) { changed = true; break; }
+              for (const v of newLinkFilters[k]) {
+                if (!oldSet.has(v)) { changed = true; break; }
+              }
+              if (changed) break;
+            }
+          }
+          if (changed) {
+            targetWin.linkFilters = newLinkFilters;
+            rebuildTable(targetWin);
+          }
+        }
+      }
+    }
+  }
+
+  function clearLinkFilters(sourceWin) {
+    if (_linkCache.length === 0) return;
+    const sourceTable = sourceWin.tableName;
+    if (!sourceTable) return;
+
+    for (const link of _linkCache) {
+      if (!link.sourceTableRe.test(sourceTable)) continue;
+      for (const targetWin of windows) {
+        if (targetWin.tableName === sourceTable) continue;
+        if (!targetWin.tableName || !link.targetTableRe.test(targetWin.tableName)) continue;
+        if (Object.keys(targetWin.linkFilters).length > 0) {
+          targetWin.linkFilters = {};
+          rebuildTable(targetWin);
+        }
+      }
+    }
+  }
+
   async function loadPluginFile(file) {
     try {
       const text = await file.text();
@@ -6217,7 +6413,7 @@ ${_aiImageContext()}`;
       const errors = validatePlugin(config);
       if (errors.length > 0) { showToast('Plugin error: ' + errors.join('; '), 'error'); return; }
       const compiled = compilePlugin(config);
-      if (!compiled || compiled.columns.length === 0) { showToast('Plugin has no valid column rules.', 'error'); return; }
+      if (!compiled || (compiled.tables.length === 0 && compiled.links.length === 0)) { showToast('Plugin has no valid rules.', 'error'); return; }
       config._compiled = compiled;
       config._filename = file.name;
       plugins.push(config);
@@ -6244,9 +6440,14 @@ ${_aiImageContext()}`;
   function unloadPlugin(index) {
     if (index < 0 || index >= plugins.length) return;
     const pluginName = plugins[index].name || 'Plugin ' + (index + 1);
-    closePluginPopover();
+    closePluginAboutWindow();
     plugins.splice(index, 1);
     rebuildTransformCache();
+    for (const win of windows) {
+      if (Object.keys(win.linkFilters).length > 0) {
+        win.linkFilters = {};
+      }
+    }
     rerenderAllWindows();
     persistPlugins();
     updatePluginMenu();
@@ -6277,7 +6478,7 @@ ${_aiImageContext()}`;
         const errors = validatePlugin(config);
         if (errors.length > 0) continue;
         const compiled = compilePlugin(config);
-        if (!compiled || compiled.columns.length === 0) continue;
+        if (!compiled || (compiled.tables.length === 0 && compiled.links.length === 0)) continue;
         config._compiled = compiled;
         plugins.push(config);
       }
@@ -6296,8 +6497,9 @@ ${_aiImageContext()}`;
     }
     area.innerHTML = '';
     plugins.forEach((p, i) => {
-      const entry = document.createElement('div');
+      const entry = document.createElement('button');
       entry.className = 'plugin-entry';
+      entry.addEventListener('click', () => showPluginAbout(p, i));
 
       const unloadSpan = document.createElement('span');
       unloadSpan.className = 'plugin-unload';
@@ -6305,43 +6507,36 @@ ${_aiImageContext()}`;
       unloadSpan.title = 'Unload plugin';
       unloadSpan.addEventListener('click', (e) => {
         e.stopPropagation();
+        closeMenus();
         unloadPlugin(i);
       });
 
       const nameSpan = document.createElement('span');
       nameSpan.className = 'plugin-name';
       nameSpan.textContent = p.name || p._filename || 'Plugin ' + (i + 1);
-      nameSpan.addEventListener('click', (e) => {
-        e.stopPropagation();
-        e.preventDefault();
-        showPluginAbout(p, i);
-      });
 
-      entry.appendChild(unloadSpan);
       entry.appendChild(nameSpan);
+      entry.appendChild(unloadSpan);
       area.appendChild(entry);
     });
   }
 
-  function closePluginPopover() {
-    if (!_activePluginPopover) return;
-    if (_activePluginPopover._onEscape) document.removeEventListener('keydown', _activePluginPopover._onEscape);
-    _activePluginPopover.remove();
-    _activePluginPopover = null;
+  function closePluginAboutWindow() {
+    if (!_activePluginAboutWin) return;
+    closeWindow(_activePluginAboutWin.id);
+    _activePluginAboutWin = null;
   }
 
   function showPluginAbout(plugin, pluginIndex) {
-    closePluginPopover();
+    closePluginAboutWindow();
 
     const name = escHtml(plugin.name || 'Untitled Plugin');
     const version = plugin.version ? escHtml(plugin.version) : null;
     const author = plugin.author ? escHtml(plugin.author) : null;
     const created = plugin.created ? escHtml(plugin.created) : null;
     const description = plugin.description ? escHtml(plugin.description) : null;
-    const tablePattern = escHtml(plugin.table || '');
 
-    let html = '<button class="modal-close">✕</button>';
-    html += '<h3>' + name + '</h3>';
+    let html = '';
 
     const metaLines = [];
     if (version) metaLines.push('<strong>Version:</strong> ' + version);
@@ -6355,42 +6550,50 @@ ${_aiImageContext()}`;
       html += '<div class="plugin-popover-desc">' + description + '</div>';
     }
 
-    html += '<div class="plugin-popover-section"><strong>Table pattern:</strong> <code>' + tablePattern + '</code></div>';
+    const tableEntries = plugin.tables || (plugin.table ? [{ table: plugin.table, columns: plugin.columns }] : []);
+    for (const entry of tableEntries) {
+      html += '<div class="plugin-popover-section"><strong>Table pattern:</strong> <code>' + escHtml(entry.table) + '</code></div>';
+      if (entry.columns && entry.columns.length > 0) {
+        html += '<div class="plugin-popover-section"><strong>Column rules:</strong></div>';
+        html += '<div class="plugin-popover-rules">';
+        for (const col of entry.columns) {
+          html += '<div class="plugin-popover-rule">';
+          html += '<span class="plugin-rule-match"><code>' + escHtml(col.match) + '</code></span>';
+          html += '<span class="plugin-rule-arrow">→</span>';
+          html += '<span class="plugin-rule-display"><code>' + escHtml(col.display) + '</code></span>';
+          html += '</div>';
+        }
+        html += '</div>';
+      }
+    }
 
-    html += '<div class="plugin-popover-section"><strong>Column rules:</strong></div>';
-    html += '<div class="plugin-popover-rules">';
-    for (const col of plugin.columns) {
-      html += '<div class="plugin-popover-rule">';
-      html += '<span class="plugin-rule-match"><code>' + escHtml(col.match) + '</code></span>';
-      html += '<span class="plugin-rule-arrow">→</span>';
-      html += '<span class="plugin-rule-display"><code>' + escHtml(col.display) + '</code></span>';
+    if (Array.isArray(plugin.links) && plugin.links.length > 0) {
+      html += '<div class="plugin-popover-section"><strong>Links:</strong></div>';
+      html += '<div class="plugin-popover-rules">';
+      for (const link of plugin.links) {
+        html += '<div class="plugin-popover-rule">';
+        html += '<code>' + escHtml(link.source.table) + '.' + escHtml(link.source.column) + '</code>';
+        html += '<span class="plugin-rule-arrow">→</span>';
+        html += '<code>' + escHtml(link.target.table) + '.' + escHtml(link.target.column) + '</code>';
+        html += '</div>';
+      }
       html += '</div>';
     }
-    html += '</div>';
 
-    html += '<div class="modal-buttons"><button class="modal-unload">Unload Plugin</button><button class="modal-cancel">Close</button></div>';
+    html += '<div class="plugin-about-buttons"><button class="plugin-about-unload">Unload Plugin</button></div>';
 
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay';
-    const modal = document.createElement('div');
-    modal.className = 'modal';
-    modal.innerHTML = html;
-
-    modal.querySelector('.modal-close').addEventListener('click', closePluginPopover);
-    modal.querySelector('.modal-cancel').addEventListener('click', closePluginPopover);
-    modal.querySelector('.modal-unload').addEventListener('click', () => {
-      closePluginPopover();
-      unloadPlugin(pluginIndex);
-    });
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) closePluginPopover();
-    });
-    overlay._onEscape = (e) => { if (e.key === 'Escape') closePluginPopover(); };
-    document.addEventListener('keydown', overlay._onEscape);
-
-    overlay.appendChild(modal);
-    document.body.appendChild(overlay);
-    _activePluginPopover = overlay;
+    const title = 'Plugin: ' + (plugin.name || 'Untitled');
+    const area = document.getElementById('window-area');
+    const rect = area.getBoundingClientRect();
+    const w = Math.min(500, rect.width - 60);
+    const h = Math.min(400, rect.height - 40);
+    const win = createSubwindow(title, (winObj, body) => {
+      body.innerHTML = '<div class="help-body">' + html + '</div>';
+      body.querySelector('.plugin-about-unload').addEventListener('click', () => {
+        unloadPlugin(pluginIndex);
+      });
+    }, { width: w, height: h });
+    _activePluginAboutWin = win;
   }
 
   function showExpressionReference() {
@@ -6529,12 +6732,14 @@ choose(value, 'A', 'Active', 'I', 'Inactive')
         set _shiftOpen(v) { _shiftOpen = v; },
         get plugins() { return plugins; },
         get _columnTransformCache() { return _columnTransformCache; },
+        get _linkCache() { return _linkCache; },
         exprCompile, exprEval, exprEvalToString,
         validatePlugin, compilePlugin, loadPersistedPlugins,
-        rebuildTransformCache, rebuildTransformCacheForTable,
+        rebuildTransformCache, rebuildTransformCacheForTable, rebuildLinkCache,
         getDisplayValue, hasDisplayTransform,
+        applyLinkFilters, clearLinkFilters,
         loadPluginFile, unloadPlugin, persistPlugins, updatePluginMenu,
-        showToast, showPluginAbout, closePluginPopover,
+        showToast, showPluginAbout, closePluginAboutWindow,
         rebuildTable, rerenderAllWindows,
         undoTable, redoTable,
       }

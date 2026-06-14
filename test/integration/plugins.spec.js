@@ -204,8 +204,7 @@ test.describe('Plugin system', () => {
     });
     expect(errors.length).toBeGreaterThan(0);
     expect(errors.some(e => e.includes('name'))).toBe(true);
-    expect(errors.some(e => e.includes('table'))).toBe(true);
-    expect(errors.some(e => e.includes('columns'))).toBe(true);
+    expect(errors.some(e => e.includes('table') || e.includes('tables') || e.includes('links'))).toBe(true);
   });
 
   test('validatePlugin catches invalid regex', async ({ page }) => {
@@ -229,7 +228,7 @@ test.describe('Plugin system', () => {
           { match: '^name$', display: 'upper(value)' }
         ]
       });
-      return compiled.columns.length;
+      return compiled.tables[0].columns.length;
     });
     expect(result).toBe(1);
   });
@@ -890,7 +889,7 @@ test.describe('Plugin system', () => {
     expect(await name.textContent()).toBe('Menu Entry');
   });
 
-  test('clicking plugin name opens about dialog with metadata', async ({ page }) => {
+  test('clicking plugin name opens about window with metadata', async ({ page }) => {
     await page.evaluate(async () => {
       const json = JSON.stringify({
         name: 'About Test', version: '3.0.0', author: 'Bob',
@@ -900,25 +899,22 @@ test.describe('Plugin system', () => {
       const file = new File([json], 'about.json', { type: 'application/json' });
       await app._test.loadPluginFile(file);
     });
-    // Open the plugins menu and click the plugin name
     await page.click('#menu-plugins .menu-label');
     await page.waitForTimeout(100);
     await page.click('.plugin-name');
     await page.waitForTimeout(100);
 
-    const modal = await page.$('.modal-overlay .modal');
-    expect(modal).not.toBeNull();
-    const text = await modal.textContent();
-    expect(text).toContain('About Test');
+    const aboutWin = page.locator('.subwindow').filter({ hasText: 'Plugin: About Test' });
+    await expect(aboutWin).toBeVisible();
+    const text = await aboutWin.textContent();
     expect(text).toContain('3.0.0');
     expect(text).toContain('Bob');
     expect(text).toContain('2026-03-15');
     expect(text).toContain('Test description');
     expect(text).toContain('Unload Plugin');
-    expect(text).toContain('Close');
   });
 
-  test('about dialog close button dismisses modal', async ({ page }) => {
+  test('about window close button dismisses it', async ({ page }) => {
     await page.evaluate(async () => {
       const json = JSON.stringify({
         name: 'Close Test', table: '.*',
@@ -931,76 +927,16 @@ test.describe('Plugin system', () => {
     await page.waitForTimeout(100);
     await page.click('.plugin-name');
     await page.waitForTimeout(100);
-    expect(await page.$('.modal-overlay')).not.toBeNull();
 
-    await page.click('.modal-cancel');
+    const aboutWin = page.locator('.subwindow').filter({ hasText: 'Plugin: Close Test' });
+    await expect(aboutWin).toBeVisible();
+
+    await aboutWin.locator('.btn-close').click();
     await page.waitForTimeout(100);
-    expect(await page.$('.modal-overlay')).toBeNull();
+    await expect(aboutWin).not.toBeAttached();
   });
 
-  test('about dialog X button dismisses modal', async ({ page }) => {
-    await page.evaluate(async () => {
-      const json = JSON.stringify({
-        name: 'X Close', table: '.*',
-        columns: [{ match: '^name$', display: 'upper(value)' }]
-      });
-      const file = new File([json], 'xclose.json', { type: 'application/json' });
-      await app._test.loadPluginFile(file);
-    });
-    await page.click('#menu-plugins .menu-label');
-    await page.waitForTimeout(100);
-    await page.click('.plugin-name');
-    await page.waitForTimeout(100);
-    expect(await page.$('.modal-overlay')).not.toBeNull();
-
-    await page.click('.modal-close');
-    await page.waitForTimeout(100);
-    expect(await page.$('.modal-overlay')).toBeNull();
-  });
-
-  test('about dialog Escape dismisses modal', async ({ page }) => {
-    await page.evaluate(async () => {
-      const json = JSON.stringify({
-        name: 'Esc Test', table: '.*',
-        columns: [{ match: '^name$', display: 'upper(value)' }]
-      });
-      const file = new File([json], 'esc.json', { type: 'application/json' });
-      await app._test.loadPluginFile(file);
-      app._test.showPluginAbout(app._test.plugins[0], 0);
-    });
-    await page.waitForTimeout(100);
-    expect(await page.$('.modal-overlay')).not.toBeNull();
-
-    await page.keyboard.press('Escape');
-    await page.waitForTimeout(100);
-    expect(await page.$('.modal-overlay')).toBeNull();
-  });
-
-  test('about dialog overlay click dismisses modal', async ({ page }) => {
-    await page.evaluate(async () => {
-      const json = JSON.stringify({
-        name: 'Overlay Test', table: '.*',
-        columns: [{ match: '^name$', display: 'upper(value)' }]
-      });
-      const file = new File([json], 'overlay.json', { type: 'application/json' });
-      await app._test.loadPluginFile(file);
-    });
-    await page.click('#menu-plugins .menu-label');
-    await page.waitForTimeout(100);
-    await page.click('.plugin-name');
-    await page.waitForTimeout(100);
-    expect(await page.$('.modal-overlay')).not.toBeNull();
-
-    // Click the overlay (not the modal content)
-    await page.evaluate(() => {
-      const overlay = document.querySelector('.modal-overlay');
-      overlay.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    await page.waitForTimeout(100);
-    expect(await page.$('.modal-overlay')).toBeNull();
-  });
-
-  test('about dialog unload button unloads plugin and closes', async ({ page }) => {
+  test('about window unload button unloads plugin and closes', async ({ page }) => {
     await page.evaluate(async () => {
       const json = JSON.stringify({
         name: 'Unload Via Dialog', table: '.*',
@@ -1014,15 +950,16 @@ test.describe('Plugin system', () => {
     await page.click('.plugin-name');
     await page.waitForTimeout(100);
 
-    await page.click('.modal-unload');
+    const aboutWin = page.locator('.subwindow').filter({ hasText: 'Plugin: Unload Via Dialog' });
+    await aboutWin.locator('.plugin-about-unload').click();
     await page.waitForTimeout(100);
 
-    expect(await page.$('.modal-overlay')).toBeNull();
+    await expect(aboutWin).not.toBeAttached();
     const pluginCount = await page.evaluate(() => app._test.plugins.length);
     expect(pluginCount).toBe(0);
   });
 
-  test('about dialog omits metadata fields when absent', async ({ page }) => {
+  test('about window omits metadata fields when absent', async ({ page }) => {
     await page.evaluate(async () => {
       const json = JSON.stringify({
         name: 'Minimal Plugin', table: '.*',
@@ -1036,15 +973,14 @@ test.describe('Plugin system', () => {
     await page.click('.plugin-name');
     await page.waitForTimeout(100);
 
-    const modal = await page.$('.modal-overlay .modal');
-    const text = await modal.textContent();
-    expect(text).toContain('Minimal Plugin');
+    const aboutWin = page.locator('.subwindow').filter({ hasText: 'Plugin: Minimal Plugin' });
+    const text = await aboutWin.textContent();
     expect(text).not.toContain('Version:');
     expect(text).not.toContain('Author:');
     expect(text).not.toContain('Created:');
   });
 
-  test('about dialog shows column rules', async ({ page }) => {
+  test('about window shows column rules', async ({ page }) => {
     await page.evaluate(async () => {
       const json = JSON.stringify({
         name: 'Rules Test', table: 'sample.*',
@@ -1061,8 +997,8 @@ test.describe('Plugin system', () => {
     await page.click('.plugin-name');
     await page.waitForTimeout(100);
 
-    const modal = await page.$('.modal-overlay .modal');
-    const text = await modal.textContent();
+    const aboutWin = page.locator('.subwindow').filter({ hasText: 'Plugin: Rules Test' });
+    const text = await aboutWin.textContent();
     expect(text).toContain('sample.*');
     expect(text).toContain('^name$');
     expect(text).toContain('upper(value)');
@@ -1086,5 +1022,589 @@ test.describe('Plugin system', () => {
 
     const pluginCount = await page.evaluate(() => app._test.plugins.length);
     expect(pluginCount).toBe(0);
+  });
+
+  test('multi-table plugin applies rules to different tables', async ({ page }) => {
+    await loadPluginConfig(page, {
+      name: 'Multi Table',
+      tables: [
+        { table: '^sample1$', columns: [{ match: '^name$', display: 'upper(value)' }] },
+        { table: '^other$', columns: [{ match: '^name$', display: 'lower(value)' }] }
+      ]
+    });
+
+    const result = await page.evaluate(() => {
+      const win = app._test.windows[0];
+      const row = app._test.tables[win.tableName].rows[0];
+      return app._test.getDisplayValue(win.tableName, 'name', row);
+    });
+    expect(result).toBe('ALICE JOHNSON');
+  });
+
+  test('old format plugin still works (backward compat)', async ({ page }) => {
+    await loadPluginConfig(page, {
+      name: 'Old Format',
+      table: '.*',
+      columns: [{ match: '^name$', display: 'upper(value)' }]
+    });
+
+    const result = await page.evaluate(() => {
+      const win = app._test.windows[0];
+      return app._test.getDisplayValue(win.tableName, 'name', app._test.tables[win.tableName].rows[0]);
+    });
+    expect(result).toBe('ALICE JOHNSON');
+  });
+
+  test('validatePlugin accepts tables array format', async ({ page }) => {
+    const errors = await page.evaluate(() => {
+      return app._test.validatePlugin({
+        name: 'Multi',
+        tables: [
+          { table: '.*', columns: [{ match: '^name$', display: 'value' }] }
+        ]
+      });
+    });
+    expect(errors).toEqual([]);
+  });
+
+  test('validatePlugin accepts links-only plugin', async ({ page }) => {
+    const errors = await page.evaluate(() => {
+      return app._test.validatePlugin({
+        name: 'Links Only',
+        links: [
+          { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+        ]
+      });
+    });
+    expect(errors).toEqual([]);
+  });
+
+  test('validatePlugin catches invalid link fields', async ({ page }) => {
+    const errors = await page.evaluate(() => {
+      return app._test.validatePlugin({
+        name: 'Bad Link',
+        links: [
+          { source: { table: '[bad', column: 'id' }, target: { table: 'ok', column: 'id' } }
+        ]
+      });
+    });
+    expect(errors.some(e => e.includes('regex'))).toBe(true);
+  });
+
+  test('compilePlugin compiles links', async ({ page }) => {
+    const result = await page.evaluate(() => {
+      const compiled = app._test.compilePlugin({
+        name: 'Link Test',
+        links: [
+          { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+        ]
+      });
+      return { tables: compiled.tables.length, links: compiled.links.length };
+    });
+    expect(result.tables).toBe(0);
+    expect(result.links).toBe(1);
+  });
+
+  test('about window shows links section', async ({ page }) => {
+    await page.evaluate(async () => {
+      const json = JSON.stringify({
+        name: 'Link About',
+        tables: [{ table: '.*', columns: [{ match: '^name$', display: 'upper(value)' }] }],
+        links: [
+          { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+        ]
+      });
+      const file = new File([json], 'link-about.json', { type: 'application/json' });
+      await app._test.loadPluginFile(file);
+      app._test.showPluginAbout(app._test.plugins[0], 0);
+    });
+    await page.waitForTimeout(100);
+
+    const aboutWin = page.locator('.subwindow').filter({ hasText: 'Plugin: Link About' });
+    const text = await aboutWin.textContent();
+    expect(text).toContain('Links:');
+    expect(text).toContain('orders.customer_id');
+    expect(text).toContain('customers.id');
+  });
+
+  test('validatePlugin accepts combo plugin with tables and links', async ({ page }) => {
+    const errors = await page.evaluate(() => {
+      return app._test.validatePlugin({
+        name: 'Combo',
+        tables: [{ table: '.*', columns: [{ match: '^name$', display: 'value' }] }],
+        links: [
+          { source: { table: 'a', column: 'id' }, target: { table: 'b', column: 'a_id' } }
+        ]
+      });
+    });
+    expect(errors).toEqual([]);
+  });
+
+  test('validatePlugin catches tables entry missing table field', async ({ page }) => {
+    const errors = await page.evaluate(() => {
+      return app._test.validatePlugin({
+        name: 'Bad Entry',
+        tables: [{ columns: [{ match: '^name$', display: 'value' }] }]
+      });
+    });
+    expect(errors.length).toBeGreaterThan(0);
+  });
+
+  test('validatePlugin catches link entry missing source or target', async ({ page }) => {
+    const errors = await page.evaluate(() => {
+      return app._test.validatePlugin({
+        name: 'Bad Link',
+        links: [{ source: { table: 'a', column: 'id' } }]
+      });
+    });
+    expect(errors.length).toBeGreaterThan(0);
+  });
+
+  test('multi-table plugin second table entry does not match first table', async ({ page }) => {
+    await loadPluginConfig(page, {
+      name: 'Multi Table Isolation',
+      tables: [
+        { table: '^sample1$', columns: [{ match: '^name$', display: 'upper(value)' }] },
+        { table: '^other$', columns: [{ match: '^name$', display: 'lower(value)' }] }
+      ]
+    });
+
+    const result = await page.evaluate(() => {
+      const win = app._test.windows[0];
+      return {
+        tableName: win.tableName,
+        display: app._test.getDisplayValue(win.tableName, 'name', app._test.tables[win.tableName].rows[0]),
+      };
+    });
+    expect(result.tableName).toBe('sample1');
+    expect(result.display).toBe('ALICE JOHNSON');
+  });
+
+  test('about window shows multi-table entries', async ({ page }) => {
+    await page.evaluate(async () => {
+      const json = JSON.stringify({
+        name: 'Multi About',
+        tables: [
+          { table: 'orders', columns: [{ match: '^total$', display: 'value' }] },
+          { table: 'customers', columns: [{ match: '^name$', display: 'upper(value)' }] }
+        ]
+      });
+      const file = new File([json], 'multi-about.json', { type: 'application/json' });
+      await app._test.loadPluginFile(file);
+      app._test.showPluginAbout(app._test.plugins[0], 0);
+    });
+    await page.waitForTimeout(100);
+
+    const aboutWin = page.locator('.subwindow').filter({ hasText: 'Plugin: Multi About' });
+    const text = await aboutWin.textContent();
+    expect(text).toContain('orders');
+    expect(text).toContain('customers');
+    expect(text).toContain('^total$');
+    expect(text).toContain('^name$');
+  });
+});
+
+test.describe('Cross-table linking', () => {
+  test.beforeEach(async ({ page }) => {
+    await openApp(page);
+    await uploadFile(page, 'customers.csv');
+    await waitForWindow(page, 'customers');
+    await uploadFile(page, 'orders.csv');
+    await waitForWindow(page, 'orders');
+  });
+
+  async function loadLinkPlugin(page, config) {
+    await page.evaluate((cfg) => {
+      const errors = app._test.validatePlugin(cfg);
+      if (errors.length) throw new Error(errors.join(', '));
+      const compiled = app._test.compilePlugin(cfg);
+      cfg._compiled = compiled;
+      app._test.plugins.push(cfg);
+      app._test.rebuildTransformCache();
+    }, config);
+  }
+
+  test('selecting a row in source filters target table', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Link Test',
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+
+    const result = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      const ordersTable = app._test.tables['orders'];
+      const row = ordersTable.rows[0]; // order 101, customer_id=1
+
+      ordersWin.anchorCell = { rownum: row._rownum, col: 'order_id' };
+      ordersWin.selectedCells = new Set();
+      for (const col of ordersTable.columns) {
+        ordersWin.selectedCells.add(`${row._rownum}:${col}`);
+      }
+
+      app._test.applyLinkFilters(ordersWin);
+
+      return {
+        linkFilterKeys: Object.keys(custWin.linkFilters),
+        filterValues: custWin.linkFilters['id'] ? [...custWin.linkFilters['id']] : [],
+      };
+    });
+
+    expect(result.linkFilterKeys).toEqual(['id']);
+    expect(result.filterValues).toEqual(['1']);
+  });
+
+  test('clearing selection clears link filters on target', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Link Test',
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+
+    await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const ordersTable = app._test.tables['orders'];
+      const row = ordersTable.rows[0];
+
+      ordersWin.anchorCell = { rownum: row._rownum, col: 'order_id' };
+      ordersWin.selectedCells = new Set();
+      for (const col of ordersTable.columns) {
+        ordersWin.selectedCells.add(`${row._rownum}:${col}`);
+      }
+      app._test.applyLinkFilters(ordersWin);
+    });
+
+    const afterClear = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      ordersWin.selectedCells = new Set();
+      app._test.clearLinkFilters(ordersWin);
+      return Object.keys(custWin.linkFilters).length;
+    });
+
+    expect(afterClear).toBe(0);
+  });
+
+  test('multi-row selection collects all source values', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Link Test',
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+
+    const result = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      const ordersTable = app._test.tables['orders'];
+
+      // Select rows 0 and 2 (customer_id 1 and 2)
+      ordersWin.selectedCells = new Set();
+      for (const row of [ordersTable.rows[0], ordersTable.rows[2]]) {
+        for (const col of ordersTable.columns) {
+          ordersWin.selectedCells.add(`${row._rownum}:${col}`);
+        }
+      }
+      ordersWin.anchorCell = { rownum: ordersTable.rows[0]._rownum, col: 'order_id' };
+
+      app._test.applyLinkFilters(ordersWin);
+
+      return [...custWin.linkFilters['id']].sort();
+    });
+
+    expect(result).toEqual(['1', '2']);
+  });
+
+  test('source table is excluded from own link targets', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Self Link',
+      links: [
+        { source: { table: '.*', column: 'id' }, target: { table: '.*', column: 'id' } }
+      ]
+    });
+
+    const result = await page.evaluate(() => {
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      const custTable = app._test.tables['customers'];
+      const row = custTable.rows[0];
+
+      custWin.anchorCell = { rownum: row._rownum, col: 'id' };
+      custWin.selectedCells = new Set();
+      for (const col of custTable.columns) {
+        custWin.selectedCells.add(`${row._rownum}:${col}`);
+      }
+
+      app._test.applyLinkFilters(custWin);
+
+      return Object.keys(custWin.linkFilters).length;
+    });
+
+    expect(result).toBe(0);
+  });
+
+  test('bidirectional links work both ways', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Bidirectional',
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } },
+        { source: { table: 'customers', column: 'id' }, target: { table: 'orders', column: 'customer_id' } }
+      ]
+    });
+
+    const forward = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      const ordersTable = app._test.tables['orders'];
+      const row = ordersTable.rows[0]; // customer_id=1
+
+      ordersWin.selectedCells = new Set();
+      for (const col of ordersTable.columns) {
+        ordersWin.selectedCells.add(`${row._rownum}:${col}`);
+      }
+      ordersWin.anchorCell = { rownum: row._rownum, col: 'order_id' };
+      app._test.applyLinkFilters(ordersWin);
+
+      return [...custWin.linkFilters['id']];
+    });
+    expect(forward).toEqual(['1']);
+
+    const reverse = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      const custTable = app._test.tables['customers'];
+
+      // Clear previous link filters
+      ordersWin.linkFilters = {};
+      custWin.linkFilters = {};
+
+      const row = custTable.rows[1]; // id=2
+
+      custWin.selectedCells = new Set();
+      for (const col of custTable.columns) {
+        custWin.selectedCells.add(`${row._rownum}:${col}`);
+      }
+      custWin.anchorCell = { rownum: row._rownum, col: 'id' };
+      app._test.applyLinkFilters(custWin);
+
+      return [...ordersWin.linkFilters['customer_id']];
+    });
+    expect(reverse).toEqual(['2']);
+  });
+
+  test('link filters apply in buildTableHTML', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Filter Test',
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+
+    const result = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      const ordersTable = app._test.tables['orders'];
+      const row = ordersTable.rows[0]; // customer_id=1
+
+      ordersWin.selectedCells = new Set();
+      for (const col of ordersTable.columns) {
+        ordersWin.selectedCells.add(`${row._rownum}:${col}`);
+      }
+      ordersWin.anchorCell = { rownum: row._rownum, col: 'order_id' };
+      app._test.applyLinkFilters(ordersWin);
+
+      // custWin should now have link filter; check display rows after rebuild
+      return {
+        displayRowCount: custWin._displayRows ? custWin._displayRows.length : -1,
+        totalRows: app._test.tables['customers'].rows.length,
+      };
+    });
+
+    expect(result.totalRows).toBe(3);
+    expect(result.displayRowCount).toBe(1);
+  });
+
+  test('col-linked class appears on link-filtered columns', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'CSS Test',
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+
+    await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const ordersTable = app._test.tables['orders'];
+      const row = ordersTable.rows[0];
+      ordersWin.selectedCells = new Set();
+      for (const col of ordersTable.columns) {
+        ordersWin.selectedCells.add(`${row._rownum}:${col}`);
+      }
+      ordersWin.anchorCell = { rownum: row._rownum, col: 'order_id' };
+      app._test.applyLinkFilters(ordersWin);
+    });
+    await page.waitForTimeout(200);
+
+    const custWindow = page.locator('.subwindow').filter({ hasText: 'customers' });
+    const linkedHeaders = await custWindow.locator('th.col-linked').count();
+    expect(linkedHeaders).toBeGreaterThan(0);
+  });
+
+  test('status bar shows linked indicator', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Status Test',
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+
+    await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const ordersTable = app._test.tables['orders'];
+      const row = ordersTable.rows[0];
+      ordersWin.selectedCells = new Set();
+      for (const col of ordersTable.columns) {
+        ordersWin.selectedCells.add(`${row._rownum}:${col}`);
+      }
+      ordersWin.anchorCell = { rownum: row._rownum, col: 'order_id' };
+      app._test.applyLinkFilters(ordersWin);
+    });
+    await page.waitForTimeout(200);
+
+    const custWindow = page.locator('.subwindow').filter({ hasText: 'customers' });
+    const linkLabel = custWindow.locator('.status-link-filter');
+    await expect(linkLabel).toBeVisible();
+    expect(await linkLabel.textContent()).toContain('Linked');
+  });
+
+  test('unloading link plugin clears link filters', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Unload Link',
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+
+    await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const ordersTable = app._test.tables['orders'];
+      const row = ordersTable.rows[0];
+      ordersWin.selectedCells = new Set();
+      for (const col of ordersTable.columns) {
+        ordersWin.selectedCells.add(`${row._rownum}:${col}`);
+      }
+      ordersWin.anchorCell = { rownum: row._rownum, col: 'order_id' };
+      app._test.applyLinkFilters(ordersWin);
+    });
+
+    const afterUnload = await page.evaluate(() => {
+      app._test.unloadPlugin(0);
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      return Object.keys(custWin.linkFilters).length;
+    });
+    expect(afterUnload).toBe(0);
+  });
+
+  test('link filters coexist with manual column autofilters', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Coexist Test',
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+
+    const result = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      const ordersTable = app._test.tables['orders'];
+
+      // Set a manual column autofilter on customers
+      custWin.columnFilters = { 'name': new Set(['Alice', 'Bob']) };
+
+      // Apply link filter from orders
+      const row = ordersTable.rows[0]; // customer_id=1
+      ordersWin.selectedCells = new Set();
+      for (const col of ordersTable.columns) {
+        ordersWin.selectedCells.add(`${row._rownum}:${col}`);
+      }
+      ordersWin.anchorCell = { rownum: row._rownum, col: 'order_id' };
+      app._test.applyLinkFilters(ordersWin);
+
+      return {
+        hasLinkFilter: Object.keys(custWin.linkFilters).length > 0,
+        hasColumnFilter: Object.keys(custWin.columnFilters).length > 0,
+      };
+    });
+
+    expect(result.hasLinkFilter).toBe(true);
+    expect(result.hasColumnFilter).toBe(true);
+  });
+
+  test('empty selection via applyLinkFilters clears target filters', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Empty Sel Test',
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+
+    const result = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      const ordersTable = app._test.tables['orders'];
+
+      // First select a row to create link filter
+      const row = ordersTable.rows[0];
+      ordersWin.selectedCells = new Set();
+      for (const col of ordersTable.columns) {
+        ordersWin.selectedCells.add(`${row._rownum}:${col}`);
+      }
+      ordersWin.anchorCell = { rownum: row._rownum, col: 'order_id' };
+      app._test.applyLinkFilters(ordersWin);
+      const hadFilter = Object.keys(custWin.linkFilters).length > 0;
+
+      // Now clear selection and apply again
+      ordersWin.selectedCells = new Set();
+      ordersWin.anchorCell = null;
+      app._test.clearLinkFilters(ordersWin);
+      const afterClear = Object.keys(custWin.linkFilters).length;
+
+      return { hadFilter, afterClear };
+    });
+
+    expect(result.hadFilter).toBe(true);
+    expect(result.afterClear).toBe(0);
+  });
+
+  test('link with regex column matches multiple columns', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Regex Col',
+      links: [
+        { source: { table: 'customers', column: '(id|name)' }, target: { table: 'orders', column: 'customer_id' } }
+      ]
+    });
+
+    const result = await page.evaluate(() => {
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const custTable = app._test.tables['customers'];
+      const row = custTable.rows[0]; // id=1, name=Alice
+
+      custWin.selectedCells = new Set();
+      for (const col of custTable.columns) {
+        custWin.selectedCells.add(`${row._rownum}:${col}`);
+      }
+      custWin.anchorCell = { rownum: row._rownum, col: 'id' };
+      app._test.applyLinkFilters(custWin);
+
+      return ordersWin.linkFilters['customer_id']
+        ? [...ordersWin.linkFilters['customer_id']].sort()
+        : [];
+    });
+
+    // Source columns "id" and "name" both match — values are "1" and "Alice"
+    expect(result).toEqual(['1', 'Alice']);
   });
 });

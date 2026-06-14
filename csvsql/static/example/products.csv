@@ -1,0 +1,4 @@
+id,name,price,category,is_active
+501,Widget,49.99,Accessories,true
+502,Gadget Pro,129.50,Electronics,true
+503,Starter Kit,89.00,Bundles,false

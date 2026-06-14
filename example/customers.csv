@@ -1,0 +1,6 @@
+id,name,email,city,signup_date,is_active
+1,Alice Johnson,alice@example.com,Portland,2024-01-15,true
+2,Bob Smith,bob@example.com,Seattle,2024-03-22,true
+3,Carol Williams,carol@example.com,Portland,2024-06-01,false
+4,David Brown,david@example.com,Chicago,2024-07-10,true
+5,Eve Davis,eve@example.com,Seattle,2024-09-05,false

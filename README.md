@@ -196,28 +196,48 @@ Multiple plugins can be loaded simultaneously and stack on the same table — ea
 
 **Autofilter integration:** When a transform is active, the column's autofilter dropdown shows formatted display values and searches against them.
 
-**Example plugin** (`plugins/dates.json`):
+**Plugin formats:** Two formats are supported. The legacy format has `table` and `columns` at the top level. The multi-table format uses a `tables` array to target different tables with different rules in a single plugin:
 
 ```json
 {
-  "name": "Locale Dates",
-  "version": "1.0.0",
+  "name": "Orders ↔ Customers ↔ Products",
+  "version": "1.1.0",
   "author": "CSVSQL",
-  "created": "2025-06-01",
-  "description": "Display date columns as locale-formatted dates",
-  "table": ".*",
-  "columns": [
+  "created": "2025-06-13",
+  "description": "Cross-table linking with display formatting",
+  "tables": [
     {
-      "match": "(date|created|updated|_at|timestamp|member_since)",
-      "display": "isEmpty(value) ? '' : date(value, 'locale')"
+      "table": "orders",
+      "columns": [
+        { "match": "^total$", "display": "isNum(value) ? '$' + fixed(num(value), 2) : value" },
+        { "match": "^order_date$", "display": "isEmpty(value) ? '' : date(value, 'locale')" }
+      ]
+    },
+    {
+      "table": "customers",
+      "columns": [
+        { "match": "^signup_date$", "display": "isEmpty(value) ? '' : date(value, 'locale')" }
+      ]
+    }
+  ],
+  "links": [
+    {
+      "source": { "table": "customers", "column": "^id$" },
+      "target": { "table": "orders", "column": "^customer_id$" }
+    },
+    {
+      "source": { "table": "orders", "column": "^customer_id$" },
+      "target": { "table": "customers", "column": "^id$" }
     }
   ]
 }
 ```
 
-The `version`, `author`, `created`, and `description` fields are optional metadata displayed in the About dialog.
+The `version`, `author`, `created`, and `description` fields are optional metadata displayed in the About dialog. The `tables` and `links` arrays are both optional — a plugin can have just display rules, just links, or both.
 
-Bundled example plugins are in the `plugins/` directory: date formatting, USD currency, boolean display, and ID zero-padding.
+**Cross-table linking:** The `links` array defines relationships between tables. When you select rows in a source table, the target table is automatically filtered to matching values. All table and column patterns are regex. The source table is excluded from its own link targets (even with `.*`). Link filters show a blue border on the column header and a Linked label in the status bar. Clearing the selection clears the link filter. Link filters are separate from manual column autofilters and don't chain (no infinite loops).
+
+Bundled example plugins and sample CSV files are in the `example/` directory: date formatting, USD currency, boolean display, ID zero-padding, and a linked-tables demo with orders, customers, and products.
 
 The in-app **Plugins > Expression Reference** has the full language documentation including all operators, built-in functions, and examples.
 
