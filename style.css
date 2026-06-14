@@ -929,6 +929,11 @@ body {
   cursor: nwse-resize;
 }
 
+/* ---- Snap guides ---- */
+.snap-guide { position: absolute; }
+.snap-guide-x { width: 1px; top: 0; bottom: 0; background: rgba(0, 150, 255, 0.6); }
+.snap-guide-y { height: 1px; left: 0; right: 0; background: rgba(0, 150, 255, 0.6); }
+
 /* ---- Console ---- */
 #console-panel {
   height: 260px;

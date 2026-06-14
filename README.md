@@ -14,7 +14,7 @@ A browser-based CSV database application. Open CSV, Excel, and compressed files 
 - **SQL syntax highlighting** — Keywords, strings, numbers, comments, and identifiers are color-coded in the SQL console and filter inputs
 - **Inline editing** — Click a cell to select it; press Enter, i, F2, or Ctrl/Cmd+U to edit; or Ctrl/Cmd+click a cell to edit directly. Tab/Enter to navigate, Escape to revert
 - **Sort and filter** — Click column headers to sort (multi-column with Shift+click). Filter with SQL WHERE expressions including REGEXP. Excel-style column autofilter dropdowns with searchable checkboxes for point-and-click filtering
-- **Multi-window workspace** — Draggable, resizable subwindows. Tile, Grid, or Cascade layouts
+- **Multi-window workspace** — Draggable, resizable subwindows with edge snapping. Tile, Grid, or Cascade layouts
 - **Row and column management** — Add/delete rows, insert at position (right-click), add/rename/reorder columns (drag or keyboard), resize columns by dragging header edges (double-click to auto-fit)
 - **Cell selection** — Click a cell to highlight its row, column, and row number. Move the selection with arrow keys or vim-style h/j/k/l, extend to a rectangle with Shift+arrow (or Shift+H/J/K/L), Shift+click, or click-and-drag. Click a row number to select the entire row (drag or Shift+click for multiple rows). Click the `#` corner cell or press Ctrl+Shift+A to select all. With no cell selected, any arrow key focuses the cell in the middle of the view. Ctrl+←/→ moves the selected columns as a block
 - **Clipboard** — Cut (Ctrl+X), Copy (Ctrl+C), and Paste (Ctrl+V) work on selected cells. Data is copied as tab-separated values. Copying with Select All or row selection includes the header row
@@ -172,8 +172,8 @@ The AI receives column statistics and sample rows, then writes SQL queries to ge
 
 ### Window Management
 
-- **Move** — Drag the title bar. Windows are constrained to the workspace area
-- **Resize** — Drag any edge or corner. Windows cannot be resized beyond the workspace boundaries
+- **Move** — Drag the title bar. Windows snap to workspace edges and other window edges within 10 px
+- **Resize** — Drag any edge or corner. Edges snap to workspace boundaries and other window edges
 - **Maximize/Restore** — Double-click the title bar, or click the maximize button
 - **Minimize** — Click the minimize button. Restore from the Windows menu
 - **Close** — Click the close button. Ctrl/Cmd+click closes all windows

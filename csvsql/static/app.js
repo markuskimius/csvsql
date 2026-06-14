@@ -22,6 +22,10 @@ const app = (() => {
   let _lastTitleTap = { winId: null, time: 0 };
   const DOUBLE_TAP_WINDOW_MS = 500;        // tap 1 → tap 2 window for double-tap / 1.5-tap
 
+  // Snap threshold for window snapping (px)
+  const SNAP_THRESHOLD = 10;
+  let _snapGuideContainer = null;
+
   // Virtual scrolling constants
   const ROW_HEIGHT = 26;
   const OVERSCAN = 10;
@@ -1039,6 +1043,76 @@ const app = (() => {
     }
   }
 
+  function getSnapEdges(excludeWin) {
+    const area = document.getElementById('window-area');
+    const areaW = area.clientWidth, areaH = area.clientHeight;
+    const xs = new Set([0, areaW]), ys = new Set([0, areaH]);
+    windows.forEach(w => {
+      if (w === excludeWin || w.el.classList.contains('minimized')) return;
+      const l = parseInt(w.el.style.left) || 0;
+      const t = parseInt(w.el.style.top) || 0;
+      xs.add(l); xs.add(l + w.el.offsetWidth);
+      ys.add(t); ys.add(t + w.el.offsetHeight);
+    });
+    return { x: [...xs], y: [...ys] };
+  }
+
+  function findSnap(value, edges, threshold) {
+    let best = null, bestDist = threshold + 1;
+    for (const edge of edges) {
+      const dist = Math.abs(value - edge);
+      if (dist < bestDist) { bestDist = dist; best = edge; }
+    }
+    return best;
+  }
+
+  function snapPosition(excludeWin, left, top, winW, winH, areaW, areaH) {
+    const edges = getSnapEdges(excludeWin);
+    const guidesX = [], guidesY = [];
+    const snapL = findSnap(left, edges.x, SNAP_THRESHOLD);
+    const snapR = findSnap(left + winW, edges.x, SNAP_THRESHOLD);
+    if (snapL !== null && (snapR === null || Math.abs(left - snapL) <= Math.abs(left + winW - snapR))) {
+      left = snapL; guidesX.push(snapL);
+    } else if (snapR !== null) {
+      left = snapR - winW; guidesX.push(snapR);
+    }
+    const snapT = findSnap(top, edges.y, SNAP_THRESHOLD);
+    const snapB = findSnap(top + winH, edges.y, SNAP_THRESHOLD);
+    if (snapT !== null && (snapB === null || Math.abs(top - snapT) <= Math.abs(top + winH - snapB))) {
+      top = snapT; guidesY.push(snapT);
+    } else if (snapB !== null) {
+      top = snapB - winH; guidesY.push(snapB);
+    }
+    left = Math.max(0, Math.min(left, areaW - winW));
+    top = Math.max(0, Math.min(top, areaH - winH));
+    return { left, top, guidesX, guidesY };
+  }
+
+  function showSnapGuides(guidesX, guidesY) {
+    if (!_snapGuideContainer) {
+      _snapGuideContainer = document.createElement('div');
+      _snapGuideContainer.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;pointer-events:none;z-index:999999';
+      document.getElementById('window-area').appendChild(_snapGuideContainer);
+    }
+    _snapGuideContainer.innerHTML = '';
+    guidesX.forEach(x => {
+      const el = document.createElement('div');
+      el.className = 'snap-guide snap-guide-x';
+      el.style.left = x + 'px';
+      _snapGuideContainer.appendChild(el);
+    });
+    guidesY.forEach(y => {
+      const el = document.createElement('div');
+      el.className = 'snap-guide snap-guide-y';
+      el.style.top = y + 'px';
+      _snapGuideContainer.appendChild(el);
+    });
+  }
+
+  function hideSnapGuides() {
+    if (_snapGuideContainer) _snapGuideContainer.innerHTML = '';
+  }
+
   function setupWindowDrag(win) {
     const titlebar = win.el.querySelector('.win-titlebar');
     let dragging = false, startX, startY, origX, origY;
@@ -1063,8 +1137,12 @@ const app = (() => {
       if (Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
       const areaW = area.right - area.left, areaH = area.bottom - area.top;
       const winW = win.el.offsetWidth, winH = win.el.offsetHeight;
-      win.el.style.left = Math.max(0, Math.min(origX + dx, areaW - winW)) + 'px';
-      win.el.style.top = Math.max(0, Math.min(origY + dy, areaH - winH)) + 'px';
+      let left = Math.max(0, Math.min(origX + dx, areaW - winW));
+      let top = Math.max(0, Math.min(origY + dy, areaH - winH));
+      const snapped = snapPosition(win, left, top, winW, winH, areaW, areaH);
+      win.el.style.left = snapped.left + 'px';
+      win.el.style.top = snapped.top + 'px';
+      showSnapGuides(snapped.guidesX, snapped.guidesY);
       if (win.maximized) win.maximized = false;
     });
 
@@ -1072,6 +1150,7 @@ const app = (() => {
       if (dragging) {
         dragging = false;
         titlebar.style.cursor = 'grab';
+        hideSnapGuides();
       }
     });
 
@@ -1120,8 +1199,12 @@ const app = (() => {
         const ay = cy - _touchWinDrag.startY;
         const areaW = area.right - area.left, areaH = area.bottom - area.top;
         const winW = win.el.offsetWidth, winH = win.el.offsetHeight;
-        win.el.style.left = Math.max(0, Math.min(_touchWinDrag.origX + ax, areaW - winW)) + 'px';
-        win.el.style.top = Math.max(0, Math.min(_touchWinDrag.origY + ay, areaH - winH)) + 'px';
+        let left = Math.max(0, Math.min(_touchWinDrag.origX + ax, areaW - winW));
+        let top = Math.max(0, Math.min(_touchWinDrag.origY + ay, areaH - winH));
+        const snapped = snapPosition(win, left, top, winW, winH, areaW, areaH);
+        win.el.style.left = snapped.left + 'px';
+        win.el.style.top = snapped.top + 'px';
+        showSnapGuides(snapped.guidesX, snapped.guidesY);
         if (win.maximized) win.maximized = false;
       }
     }, { passive: false });
@@ -1132,6 +1215,7 @@ const app = (() => {
       _touchWinDrag = null;
       if (!state.dragging) return;
       titlebar.style.cursor = 'grab';
+      hideSnapGuides();
       if (e.cancelable) e.preventDefault();
     };
     titlebar.addEventListener('touchend', endWinTouch);
@@ -1169,23 +1253,44 @@ const app = (() => {
         const dx = cx - startX;
         const dy = cy - startY;
         const areaW = area.right - area.left, areaH = area.bottom - area.top;
-        if (resizeR) win.el.style.width = Math.min(Math.max(280, origW + dx), areaW - origLeft) + 'px';
-        if (resizeB) win.el.style.height = Math.min(Math.max(160, origH + dy), areaH - origTop) + 'px';
+        const edges = getSnapEdges(win);
+        const guidesX = [], guidesY = [];
+        if (resizeR) {
+          let w = Math.min(Math.max(280, origW + dx), areaW - origLeft);
+          const snap = findSnap(origLeft + w, edges.x, SNAP_THRESHOLD);
+          if (snap !== null && snap - origLeft >= 280) { w = snap - origLeft; guidesX.push(snap); }
+          win.el.style.width = w + 'px';
+        }
+        if (resizeB) {
+          let h = Math.min(Math.max(160, origH + dy), areaH - origTop);
+          const snap = findSnap(origTop + h, edges.y, SNAP_THRESHOLD);
+          if (snap !== null && snap - origTop >= 160) { h = snap - origTop; guidesY.push(snap); }
+          win.el.style.height = h + 'px';
+        }
         if (resizeL) {
-          const newW = Math.max(280, origW - dx);
-          const newLeft = Math.max(0, origLeft + origW - newW);
-          win.el.style.width = (origLeft + origW - newLeft) + 'px';
+          let newW = Math.max(280, origW - dx);
+          let newLeft = Math.max(0, origLeft + origW - newW);
+          const snap = findSnap(newLeft, edges.x, SNAP_THRESHOLD);
+          if (snap !== null && snap >= 0 && origLeft + origW - snap >= 280) {
+            newLeft = snap; newW = origLeft + origW - snap; guidesX.push(snap);
+          }
+          win.el.style.width = newW + 'px';
           win.el.style.left = newLeft + 'px';
         }
         if (resizeT) {
-          const newH = Math.max(160, origH - dy);
-          const newTop = Math.max(0, origTop + origH - newH);
-          win.el.style.height = (origTop + origH - newTop) + 'px';
+          let newH = Math.max(160, origH - dy);
+          let newTop = Math.max(0, origTop + origH - newH);
+          const snap = findSnap(newTop, edges.y, SNAP_THRESHOLD);
+          if (snap !== null && snap >= 0 && origTop + origH - snap >= 160) {
+            newTop = snap; newH = origTop + origH - snap; guidesY.push(snap);
+          }
+          win.el.style.height = newH + 'px';
           win.el.style.top = newTop + 'px';
         }
+        showSnapGuides(guidesX, guidesY);
       });
 
-      document.addEventListener('mouseup', () => { resizing = false; });
+      document.addEventListener('mouseup', () => { if (resizing) hideSnapGuides(); resizing = false; });
     });
   }
 
@@ -4336,7 +4441,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.21.0 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.22.0 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -4451,8 +4556,8 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 
 <h4>Window Management</h4>
 <ul>
-<li><strong>Move:</strong> Drag the title bar. Windows are constrained to the workspace area.</li>
-<li><strong>Resize:</strong> Drag any edge or corner. Windows cannot be resized beyond the workspace boundaries.</li>
+<li><strong>Move:</strong> Drag the title bar. Windows snap to workspace edges and other window edges within 10 px. Blue guide lines show the snap alignment.</li>
+<li><strong>Resize:</strong> Drag any edge or corner. Edges snap to workspace boundaries and other window edges.</li>
 <li><strong>Maximize/Restore:</strong> Double-click the title bar, or click the maximize button.</li>
 <li><strong>Minimize:</strong> Click the minimize button. Restore from the Windows menu.</li>
 <li><strong>Close:</strong> Click the close button. <code>Ctrl</code>/<code>&#8984;</code>+click closes all windows.</li>
@@ -6739,6 +6844,7 @@ choose(value, 'A', 'Active', 'I', 'Inactive')
         getDisplayValue, hasDisplayTransform,
         applyLinkFilters, clearLinkFilters,
         loadPluginFile, unloadPlugin, persistPlugins, updatePluginMenu,
+        SNAP_THRESHOLD, getSnapEdges, findSnap, snapPosition,
         showToast, showPluginAbout, closePluginAboutWindow,
         rebuildTable, rerenderAllWindows,
         undoTable, redoTable,
