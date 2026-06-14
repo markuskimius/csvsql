@@ -188,7 +188,9 @@ Plugins customize how cell values are displayed. A plugin is a JSON file that ma
 
 Multiple plugins can be loaded simultaneously and stack on the same table — each column is governed by the last-loaded plugin with a matching rule.
 
-**Loading:** Use **Plugins > Load Plugin** in the menu, or drag and drop a `.json` file onto the app. Plugins persist across page reloads.
+**Loading:** Use **Plugins > Load Plugin** in the menu, or drag and drop a `.json` file onto the app. A toast notification confirms success or shows errors. Plugins persist across page reloads.
+
+**Plugin management:** Loaded plugins appear in the Plugins menu with an ✕ button for quick unloading. Click a plugin's name to open an About dialog showing version, author, creation date, description, matching rules, and an Unload button.
 
 **Per-column toggle:** Columns with an active transform show a 🔌 icon in the header. Click it to disable the transform for that column (the icon dims but stays visible); click again to re-enable. The status bar has a bulk toggle to enable/disable all transforms at once.
 
@@ -199,6 +201,9 @@ Multiple plugins can be loaded simultaneously and stack on the same table — ea
 ```json
 {
   "name": "Locale Dates",
+  "version": "1.0.0",
+  "author": "CSVSQL",
+  "created": "2025-06-01",
   "description": "Display date columns as locale-formatted dates",
   "table": ".*",
   "columns": [
@@ -209,6 +214,8 @@ Multiple plugins can be loaded simultaneously and stack on the same table — ea
   ]
 }
 ```
+
+The `version`, `author`, `created`, and `description` fields are optional metadata displayed in the About dialog.
 
 Bundled example plugins are in the `plugins/` directory: date formatting, USD currency, boolean display, and ID zero-padding.
 

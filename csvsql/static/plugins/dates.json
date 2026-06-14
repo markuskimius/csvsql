@@ -1,5 +1,8 @@
 {
   "name": "Locale Dates",
+  "version": "1.0.0",
+  "author": "CSVSQL",
+  "created": "2025-06-01",
   "description": "Display date columns as locale-formatted dates with full precision",
   "table": ".*",
   "columns": [

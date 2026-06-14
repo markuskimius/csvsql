@@ -1,5 +1,8 @@
 {
   "name": "Friendly Booleans",
+  "version": "1.0.0",
+  "author": "CSVSQL",
+  "created": "2025-06-01",
   "description": "Show 1/0 and true/false as Yes/No for boolean-like columns",
   "table": ".*",
   "columns": [

@@ -1,5 +1,8 @@
 {
   "name": "USD Currency",
+  "version": "1.0.0",
+  "author": "CSVSQL",
+  "created": "2025-06-01",
   "description": "Format monetary columns as USD with commas and 2 decimal places",
   "table": ".*",
   "columns": [

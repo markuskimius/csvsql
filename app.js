@@ -13,6 +13,7 @@ const app = (() => {
 
   // Touch gesture state (shared across tables / windows)
   let _activeAutoFilter = null;            // { win, col, el } — currently open autofilter dropdown
+  let _activePluginPopover = null;         // modal overlay element for plugin about dialog
   let _touchHeaderDrag = null;             // header 1.5-tap drag (→ reorder column)
   let _touchCellDrag = null;               // cell second-tap interaction (→ double-tap edit or 1.5-tap multi-select)
   let _touchWinDrag = null;                // titlebar 1.5-tap drag (→ move window)
@@ -4256,6 +4257,23 @@ const app = (() => {
     return d.innerHTML;
   }
 
+  function showToast(message, type) {
+    type = type || 'success';
+    const toast = document.createElement('div');
+    toast.className = 'toast toast-' + type;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    let offset = 12;
+    document.querySelectorAll('.toast').forEach(t => {
+      if (t !== toast) offset += t.offsetHeight + 8;
+    });
+    toast.style.bottom = offset + 'px';
+    setTimeout(() => {
+      toast.classList.add('toast-fade-out');
+      toast.addEventListener('animationend', () => toast.remove());
+    }, 3000);
+  }
+
   function closeActiveWindow() {
     if (activeWinId) closeWindow(activeWinId);
   }
@@ -4289,7 +4307,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.19.1 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.20.0 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -4467,13 +4485,16 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <h4>Plugins</h4>
 <p>Plugins customize how cell values are displayed. A plugin is a JSON config file that maps table and column name patterns to display expressions written in the CSVSQL expression language.</p>
 
-<p><strong>Loading &amp; unloading:</strong> Use <strong>Plugins &rarr; Load Plugin</strong> to open a <code>.json</code> plugin file, or drag and drop a <code>.json</code> file onto the app. Loaded plugins appear in the Plugins menu with an &times; button to unload them. Plugins persist across page reloads.</p>
+<p><strong>Loading &amp; unloading:</strong> Use <strong>Plugins &rarr; Load Plugin</strong> to open a <code>.json</code> plugin file, or drag and drop a <code>.json</code> file onto the app. A toast notification confirms success or shows errors. Loaded plugins appear in the Plugins menu with an &times; button to unload them. Click a plugin&rsquo;s name to open an About dialog showing its metadata, column rules, and an Unload button. Plugins persist across page reloads.</p>
 
 <p><strong>How matching works:</strong> Each plugin has a <code>table</code> regex matched against table names, and column rules with a <code>match</code> regex matched against column names. Multiple plugins can be loaded simultaneously and stack on the same table &mdash; each column is governed by the <em>last-loaded</em> plugin with a matching rule. Unloading a plugin reveals any earlier plugin&rsquo;s rule that was shadowed.</p>
 
 <p><strong>Plugin config format:</strong></p>
 <pre>{
   "name": "Plugin Name",
+  "version": "1.0.0",
+  "author": "Author Name",
+  "created": "2026-01-01",
   "description": "Optional description",
   "table": "regex for table names",
   "columns": [
@@ -4483,6 +4504,7 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
     }
   ]
 }</pre>
+<p>The <code>version</code>, <code>author</code>, <code>created</code>, and <code>description</code> fields are optional metadata shown in the About dialog.</p>
 
 <p><strong>Per-column toggle:</strong> Columns with an active plugin transform show a &#x1F50C; icon in the header. Click the icon to disable the transform for that column &mdash; the icon dims but stays visible. Click again to re-enable. The status bar shows a bulk <strong>Plugins on/off/partial</strong> toggle to enable or disable all transforms at once.</p>
 
@@ -6126,6 +6148,9 @@ ${_aiImageContext()}`;
         if (typeof col.display !== 'string') errors.push(`columns[${i}].display expression is required`);
       });
     }
+    if ('version' in config && typeof config.version !== 'string') errors.push('"version" must be a string');
+    if ('author' in config && typeof config.author !== 'string') errors.push('"author" must be a string');
+    if ('created' in config && typeof config.created !== 'string') errors.push('"created" must be a string');
     return errors;
   }
 
@@ -6190,9 +6215,9 @@ ${_aiImageContext()}`;
       const text = await file.text();
       const config = JSON.parse(text);
       const errors = validatePlugin(config);
-      if (errors.length > 0) { alert('Plugin validation errors:\n' + errors.join('\n')); return; }
+      if (errors.length > 0) { showToast('Plugin error: ' + errors.join('; '), 'error'); return; }
       const compiled = compilePlugin(config);
-      if (!compiled || compiled.columns.length === 0) { alert('Plugin has no valid column rules after compilation.'); return; }
+      if (!compiled || compiled.columns.length === 0) { showToast('Plugin has no valid column rules.', 'error'); return; }
       config._compiled = compiled;
       config._filename = file.name;
       plugins.push(config);
@@ -6200,8 +6225,9 @@ ${_aiImageContext()}`;
       rerenderAllWindows();
       persistPlugins();
       updatePluginMenu();
+      showToast('Plugin "' + (config.name || file.name) + '" loaded');
     } catch (e) {
-      alert('Failed to load plugin: ' + e.message);
+      showToast('Failed to load plugin: ' + e.message, 'error');
     }
   }
 
@@ -6217,11 +6243,14 @@ ${_aiImageContext()}`;
 
   function unloadPlugin(index) {
     if (index < 0 || index >= plugins.length) return;
+    const pluginName = plugins[index].name || 'Plugin ' + (index + 1);
+    closePluginPopover();
     plugins.splice(index, 1);
     rebuildTransformCache();
     rerenderAllWindows();
     persistPlugins();
     updatePluginMenu();
+    showToast('Plugin "' + pluginName + '" unloaded');
   }
 
   function rerenderAllWindows() {
@@ -6260,25 +6289,108 @@ ${_aiImageContext()}`;
 
   function updatePluginMenu() {
     const area = document.getElementById('plugin-list-area');
-    const unloadBtn = document.getElementById('btn-unload-plugin');
     if (!area) return;
     if (plugins.length === 0) {
       area.innerHTML = '<span class="menu-hint">No plugins loaded</span>';
-      if (unloadBtn) unloadBtn.disabled = true;
       return;
     }
-    if (unloadBtn) unloadBtn.disabled = false;
     area.innerHTML = '';
     plugins.forEach((p, i) => {
-      const btn = document.createElement('button');
-      btn.textContent = '✕ ' + (p.name || p._filename || 'Plugin ' + (i + 1));
-      btn.title = p.description || '';
-      btn.addEventListener('click', (e) => {
+      const entry = document.createElement('div');
+      entry.className = 'plugin-entry';
+
+      const unloadSpan = document.createElement('span');
+      unloadSpan.className = 'plugin-unload';
+      unloadSpan.textContent = '✕';
+      unloadSpan.title = 'Unload plugin';
+      unloadSpan.addEventListener('click', (e) => {
         e.stopPropagation();
         unloadPlugin(i);
       });
-      area.appendChild(btn);
+
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'plugin-name';
+      nameSpan.textContent = p.name || p._filename || 'Plugin ' + (i + 1);
+      nameSpan.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        showPluginAbout(p, i);
+      });
+
+      entry.appendChild(unloadSpan);
+      entry.appendChild(nameSpan);
+      area.appendChild(entry);
     });
+  }
+
+  function closePluginPopover() {
+    if (!_activePluginPopover) return;
+    if (_activePluginPopover._onEscape) document.removeEventListener('keydown', _activePluginPopover._onEscape);
+    _activePluginPopover.remove();
+    _activePluginPopover = null;
+  }
+
+  function showPluginAbout(plugin, pluginIndex) {
+    closePluginPopover();
+
+    const name = escHtml(plugin.name || 'Untitled Plugin');
+    const version = plugin.version ? escHtml(plugin.version) : null;
+    const author = plugin.author ? escHtml(plugin.author) : null;
+    const created = plugin.created ? escHtml(plugin.created) : null;
+    const description = plugin.description ? escHtml(plugin.description) : null;
+    const tablePattern = escHtml(plugin.table || '');
+
+    let html = '<button class="modal-close">✕</button>';
+    html += '<h3>' + name + '</h3>';
+
+    const metaLines = [];
+    if (version) metaLines.push('<strong>Version:</strong> ' + version);
+    if (author) metaLines.push('<strong>Author:</strong> ' + author);
+    if (created) metaLines.push('<strong>Created:</strong> ' + created);
+    if (metaLines.length > 0) {
+      html += '<div class="plugin-popover-meta">' + metaLines.join('<br>') + '</div>';
+    }
+
+    if (description) {
+      html += '<div class="plugin-popover-desc">' + description + '</div>';
+    }
+
+    html += '<div class="plugin-popover-section"><strong>Table pattern:</strong> <code>' + tablePattern + '</code></div>';
+
+    html += '<div class="plugin-popover-section"><strong>Column rules:</strong></div>';
+    html += '<div class="plugin-popover-rules">';
+    for (const col of plugin.columns) {
+      html += '<div class="plugin-popover-rule">';
+      html += '<span class="plugin-rule-match"><code>' + escHtml(col.match) + '</code></span>';
+      html += '<span class="plugin-rule-arrow">→</span>';
+      html += '<span class="plugin-rule-display"><code>' + escHtml(col.display) + '</code></span>';
+      html += '</div>';
+    }
+    html += '</div>';
+
+    html += '<div class="modal-buttons"><button class="modal-unload">Unload Plugin</button><button class="modal-cancel">Close</button></div>';
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.innerHTML = html;
+
+    modal.querySelector('.modal-close').addEventListener('click', closePluginPopover);
+    modal.querySelector('.modal-cancel').addEventListener('click', closePluginPopover);
+    modal.querySelector('.modal-unload').addEventListener('click', () => {
+      closePluginPopover();
+      unloadPlugin(pluginIndex);
+    });
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) closePluginPopover();
+    });
+    overlay._onEscape = (e) => { if (e.key === 'Escape') closePluginPopover(); };
+    document.addEventListener('keydown', overlay._onEscape);
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    _activePluginPopover = overlay;
   }
 
   function showExpressionReference() {
@@ -6422,6 +6534,7 @@ choose(value, 'A', 'Active', 'I', 'Inactive')
         rebuildTransformCache, rebuildTransformCacheForTable,
         getDisplayValue, hasDisplayTransform,
         loadPluginFile, unloadPlugin, persistPlugins, updatePluginMenu,
+        showToast, showPluginAbout, closePluginPopover,
         rebuildTable, rerenderAllWindows,
         undoTable, redoTable,
       }

@@ -756,4 +756,335 @@ test.describe('Plugin system', () => {
     expect(filteredRows).toBeLessThan(totalRows);
     expect(filteredRows).toBeGreaterThan(0);
   });
+
+  test('validatePlugin accepts optional metadata fields', async ({ page }) => {
+    const result = await page.evaluate(() => {
+      const config = {
+        name: 'Meta Test', version: '2.0.0', author: 'Test Author',
+        created: '2026-01-01', description: 'A test plugin',
+        table: '.*', columns: [{ match: '^name$', display: 'value' }]
+      };
+      return app._test.validatePlugin(config);
+    });
+    expect(result).toEqual([]);
+  });
+
+  test('validatePlugin rejects non-string metadata fields', async ({ page }) => {
+    const result = await page.evaluate(() => {
+      const config = {
+        name: 'Bad Meta', table: '.*',
+        columns: [{ match: '^name$', display: 'value' }],
+        version: 123, author: true, created: 42
+      };
+      return app._test.validatePlugin(config);
+    });
+    expect(result).toContain('"version" must be a string');
+    expect(result).toContain('"author" must be a string');
+    expect(result).toContain('"created" must be a string');
+  });
+
+  test('metadata fields persist through save/load cycle', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const json = JSON.stringify({
+        name: 'Persist Meta', version: '1.2.3', author: 'Alice',
+        created: '2026-06-01', description: 'Persists metadata',
+        table: '.*', columns: [{ match: '^name$', display: 'upper(value)' }]
+      });
+      const file = new File([json], 'meta.json', { type: 'application/json' });
+      await app._test.loadPluginFile(file);
+      const stored = JSON.parse(localStorage.getItem('csvsql_plugins'));
+      return stored[0];
+    });
+    expect(result.version).toBe('1.2.3');
+    expect(result.author).toBe('Alice');
+    expect(result.created).toBe('2026-06-01');
+    expect(result.description).toBe('Persists metadata');
+  });
+
+  test('showToast creates and auto-removes toast element', async ({ page }) => {
+    await page.evaluate(() => app._test.showToast('Test message'));
+    const toast = await page.$('.toast.toast-success');
+    expect(toast).not.toBeNull();
+    expect(await toast.textContent()).toBe('Test message');
+    await page.waitForTimeout(3500);
+    const remaining = await page.$('.toast');
+    expect(remaining).toBeNull();
+  });
+
+  test('showToast error type applies error class', async ({ page }) => {
+    await page.evaluate(() => app._test.showToast('Error msg', 'error'));
+    const toast = await page.$('.toast.toast-error');
+    expect(toast).not.toBeNull();
+    expect(await toast.textContent()).toBe('Error msg');
+  });
+
+  test('multiple toasts stack vertically', async ({ page }) => {
+    await page.evaluate(() => {
+      app._test.showToast('First');
+      app._test.showToast('Second');
+    });
+    const toasts = await page.$$('.toast');
+    expect(toasts.length).toBe(2);
+    const bottom0 = await toasts[0].evaluate(el => parseFloat(el.style.bottom));
+    const bottom1 = await toasts[1].evaluate(el => parseFloat(el.style.bottom));
+    expect(bottom1).toBeGreaterThan(bottom0);
+  });
+
+  test('loadPluginFile shows success toast instead of alert', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const json = JSON.stringify({
+        name: 'Toast Test', table: '.*',
+        columns: [{ match: '^name$', display: 'upper(value)' }]
+      });
+      const file = new File([json], 'toast.json', { type: 'application/json' });
+      await app._test.loadPluginFile(file);
+      const toast = document.querySelector('.toast.toast-success');
+      return toast ? toast.textContent : null;
+    });
+    expect(result).toContain('Toast Test');
+    expect(result).toContain('loaded');
+  });
+
+  test('loadPluginFile shows error toast for invalid plugin', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const json = JSON.stringify({ name: '', table: '.*', columns: [] });
+      const file = new File([json], 'bad.json', { type: 'application/json' });
+      await app._test.loadPluginFile(file);
+      const toast = document.querySelector('.toast.toast-error');
+      return toast ? toast.textContent : null;
+    });
+    expect(result).not.toBeNull();
+    expect(result).toContain('error');
+  });
+
+  test('unloadPlugin shows success toast', async ({ page }) => {
+    await loadPluginConfig(page, {
+      name: 'Unload Toast', table: '.*',
+      columns: [{ match: '^name$', display: 'upper(value)' }]
+    });
+    const result = await page.evaluate(() => {
+      app._test.unloadPlugin(0);
+      const toast = document.querySelector('.toast.toast-success');
+      return toast ? toast.textContent : null;
+    });
+    expect(result).toContain('Unload Toast');
+    expect(result).toContain('unloaded');
+  });
+
+  test('plugin menu entry has unload button and clickable name', async ({ page }) => {
+    await page.evaluate(async () => {
+      const json = JSON.stringify({
+        name: 'Menu Entry', table: '.*',
+        columns: [{ match: '^name$', display: 'upper(value)' }]
+      });
+      const file = new File([json], 'menu.json', { type: 'application/json' });
+      await app._test.loadPluginFile(file);
+    });
+    const entry = await page.$('.plugin-entry');
+    expect(entry).not.toBeNull();
+    const unload = await page.$('.plugin-unload');
+    expect(unload).not.toBeNull();
+    expect(await unload.textContent()).toBe('✕');
+    const name = await page.$('.plugin-name');
+    expect(name).not.toBeNull();
+    expect(await name.textContent()).toBe('Menu Entry');
+  });
+
+  test('clicking plugin name opens about dialog with metadata', async ({ page }) => {
+    await page.evaluate(async () => {
+      const json = JSON.stringify({
+        name: 'About Test', version: '3.0.0', author: 'Bob',
+        created: '2026-03-15', description: 'Test description',
+        table: '.*', columns: [{ match: '^name$', display: 'upper(value)' }]
+      });
+      const file = new File([json], 'about.json', { type: 'application/json' });
+      await app._test.loadPluginFile(file);
+    });
+    // Open the plugins menu and click the plugin name
+    await page.click('#menu-plugins .menu-label');
+    await page.waitForTimeout(100);
+    await page.click('.plugin-name');
+    await page.waitForTimeout(100);
+
+    const modal = await page.$('.modal-overlay .modal');
+    expect(modal).not.toBeNull();
+    const text = await modal.textContent();
+    expect(text).toContain('About Test');
+    expect(text).toContain('3.0.0');
+    expect(text).toContain('Bob');
+    expect(text).toContain('2026-03-15');
+    expect(text).toContain('Test description');
+    expect(text).toContain('Unload Plugin');
+    expect(text).toContain('Close');
+  });
+
+  test('about dialog close button dismisses modal', async ({ page }) => {
+    await page.evaluate(async () => {
+      const json = JSON.stringify({
+        name: 'Close Test', table: '.*',
+        columns: [{ match: '^name$', display: 'upper(value)' }]
+      });
+      const file = new File([json], 'close.json', { type: 'application/json' });
+      await app._test.loadPluginFile(file);
+    });
+    await page.click('#menu-plugins .menu-label');
+    await page.waitForTimeout(100);
+    await page.click('.plugin-name');
+    await page.waitForTimeout(100);
+    expect(await page.$('.modal-overlay')).not.toBeNull();
+
+    await page.click('.modal-cancel');
+    await page.waitForTimeout(100);
+    expect(await page.$('.modal-overlay')).toBeNull();
+  });
+
+  test('about dialog X button dismisses modal', async ({ page }) => {
+    await page.evaluate(async () => {
+      const json = JSON.stringify({
+        name: 'X Close', table: '.*',
+        columns: [{ match: '^name$', display: 'upper(value)' }]
+      });
+      const file = new File([json], 'xclose.json', { type: 'application/json' });
+      await app._test.loadPluginFile(file);
+    });
+    await page.click('#menu-plugins .menu-label');
+    await page.waitForTimeout(100);
+    await page.click('.plugin-name');
+    await page.waitForTimeout(100);
+    expect(await page.$('.modal-overlay')).not.toBeNull();
+
+    await page.click('.modal-close');
+    await page.waitForTimeout(100);
+    expect(await page.$('.modal-overlay')).toBeNull();
+  });
+
+  test('about dialog Escape dismisses modal', async ({ page }) => {
+    await page.evaluate(async () => {
+      const json = JSON.stringify({
+        name: 'Esc Test', table: '.*',
+        columns: [{ match: '^name$', display: 'upper(value)' }]
+      });
+      const file = new File([json], 'esc.json', { type: 'application/json' });
+      await app._test.loadPluginFile(file);
+      app._test.showPluginAbout(app._test.plugins[0], 0);
+    });
+    await page.waitForTimeout(100);
+    expect(await page.$('.modal-overlay')).not.toBeNull();
+
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(100);
+    expect(await page.$('.modal-overlay')).toBeNull();
+  });
+
+  test('about dialog overlay click dismisses modal', async ({ page }) => {
+    await page.evaluate(async () => {
+      const json = JSON.stringify({
+        name: 'Overlay Test', table: '.*',
+        columns: [{ match: '^name$', display: 'upper(value)' }]
+      });
+      const file = new File([json], 'overlay.json', { type: 'application/json' });
+      await app._test.loadPluginFile(file);
+    });
+    await page.click('#menu-plugins .menu-label');
+    await page.waitForTimeout(100);
+    await page.click('.plugin-name');
+    await page.waitForTimeout(100);
+    expect(await page.$('.modal-overlay')).not.toBeNull();
+
+    // Click the overlay (not the modal content)
+    await page.evaluate(() => {
+      const overlay = document.querySelector('.modal-overlay');
+      overlay.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await page.waitForTimeout(100);
+    expect(await page.$('.modal-overlay')).toBeNull();
+  });
+
+  test('about dialog unload button unloads plugin and closes', async ({ page }) => {
+    await page.evaluate(async () => {
+      const json = JSON.stringify({
+        name: 'Unload Via Dialog', table: '.*',
+        columns: [{ match: '^name$', display: 'upper(value)' }]
+      });
+      const file = new File([json], 'unload-dialog.json', { type: 'application/json' });
+      await app._test.loadPluginFile(file);
+    });
+    await page.click('#menu-plugins .menu-label');
+    await page.waitForTimeout(100);
+    await page.click('.plugin-name');
+    await page.waitForTimeout(100);
+
+    await page.click('.modal-unload');
+    await page.waitForTimeout(100);
+
+    expect(await page.$('.modal-overlay')).toBeNull();
+    const pluginCount = await page.evaluate(() => app._test.plugins.length);
+    expect(pluginCount).toBe(0);
+  });
+
+  test('about dialog omits metadata fields when absent', async ({ page }) => {
+    await page.evaluate(async () => {
+      const json = JSON.stringify({
+        name: 'Minimal Plugin', table: '.*',
+        columns: [{ match: '^name$', display: 'upper(value)' }]
+      });
+      const file = new File([json], 'minimal.json', { type: 'application/json' });
+      await app._test.loadPluginFile(file);
+    });
+    await page.click('#menu-plugins .menu-label');
+    await page.waitForTimeout(100);
+    await page.click('.plugin-name');
+    await page.waitForTimeout(100);
+
+    const modal = await page.$('.modal-overlay .modal');
+    const text = await modal.textContent();
+    expect(text).toContain('Minimal Plugin');
+    expect(text).not.toContain('Version:');
+    expect(text).not.toContain('Author:');
+    expect(text).not.toContain('Created:');
+  });
+
+  test('about dialog shows column rules', async ({ page }) => {
+    await page.evaluate(async () => {
+      const json = JSON.stringify({
+        name: 'Rules Test', table: 'sample.*',
+        columns: [
+          { match: '^name$', display: 'upper(value)' },
+          { match: '^age$', display: 'value + " years"' }
+        ]
+      });
+      const file = new File([json], 'rules.json', { type: 'application/json' });
+      await app._test.loadPluginFile(file);
+    });
+    await page.click('#menu-plugins .menu-label');
+    await page.waitForTimeout(100);
+    await page.click('.plugin-name');
+    await page.waitForTimeout(100);
+
+    const modal = await page.$('.modal-overlay .modal');
+    const text = await modal.textContent();
+    expect(text).toContain('sample.*');
+    expect(text).toContain('^name$');
+    expect(text).toContain('upper(value)');
+    expect(text).toContain('^age$');
+    expect(text).toContain('value + " years"');
+  });
+
+  test('menu unload button still works directly', async ({ page }) => {
+    await page.evaluate(async () => {
+      const json = JSON.stringify({
+        name: 'Direct Unload', table: '.*',
+        columns: [{ match: '^name$', display: 'upper(value)' }]
+      });
+      const file = new File([json], 'direct.json', { type: 'application/json' });
+      await app._test.loadPluginFile(file);
+    });
+    await page.click('#menu-plugins .menu-label');
+    await page.waitForTimeout(100);
+    await page.click('.plugin-unload');
+    await page.waitForTimeout(100);
+
+    const pluginCount = await page.evaluate(() => app._test.plugins.length);
+    expect(pluginCount).toBe(0);
+  });
 });
