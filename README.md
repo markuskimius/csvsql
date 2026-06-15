@@ -14,7 +14,7 @@ A browser-based CSV database application. Open CSV, Excel, and compressed files 
 - **SQL syntax highlighting** — Keywords, strings, numbers, comments, and identifiers are color-coded in the SQL console and filter inputs
 - **Inline editing** — Click a cell to select it; press Enter, i, F2, or Ctrl/Cmd+U to edit; or Ctrl/Cmd+click a cell to edit directly. Tab/Enter to navigate, Escape to revert
 - **Sort and filter** — Click column headers to sort (multi-column with Shift+click). Filter with SQL WHERE expressions including REGEXP. Excel-style column autofilter dropdowns with searchable checkboxes for point-and-click filtering
-- **Multi-window workspace** — Draggable, resizable subwindows with edge snapping. Tile, Grid, or Cascade layouts
+- **Multi-window workspace** — Draggable, resizable subwindows with edge snapping. Tile, Grid, or Cascade layouts. Tabbing and docking support for IDE-style split layouts
 - **Row and column management** — Add/delete rows, insert at position (right-click), add/rename/reorder columns (drag or keyboard), resize columns by dragging header edges (double-click to auto-fit)
 - **Cell selection** — Click a cell to highlight its row, column, and row number. Move the selection with arrow keys or vim-style h/j/k/l, extend to a rectangle with Shift+arrow (or Shift+H/J/K/L), Shift+click, or click-and-drag. Click a row number to select the entire row (drag or Shift+click for multiple rows). Click the `#` corner cell or press Ctrl+Shift+A to select all. With no cell selected, any arrow key focuses the cell in the middle of the view. Ctrl+←/→ moves the selected columns as a block
 - **Clipboard** — Cut (Ctrl+X), Copy (Ctrl+C), and Paste (Ctrl+V) work on selected cells. Data is copied as tab-separated values. Copying with Select All or row selection includes the header row
@@ -179,6 +179,19 @@ The AI receives column statistics and sample rows, then writes SQL queries to ge
 - **Close** — Click the close button. Ctrl/Cmd+click closes all windows
 - **Layout** — Use the Windows menu to Tile Horizontally, Tile Vertically, Grid, or Cascade
 - **Proportional scaling** — Windows reposition and resize proportionally when the browser window or console panel is resized
+
+### Tabbing and Docking
+
+Windows can be combined into tabbed groups and split layouts for an IDE-style workspace.
+
+- **Tab windows** — Hold Shift and drag a window onto another window's title bar to merge them into a tab group. Click tabs to switch between windows
+- **Split dock** — Hold Shift and drag a window onto the body area of another window. Drop zones are divided diagonally — drop on the top, right, bottom, or left region to split that direction
+- **Rearrange** — Hold Shift and drag a tab to move it to another window or dock pane. A ghost preview shows where the window will land
+- **Undock** — Hold Shift and drag a tab outside its dock container to detach it as a standalone window. The undocked window retains the pane's size
+- **Splitter** — Drag the divider between split panes to resize. Double-click to reset to 50/50
+- **Maximize** — Double-click a tab or the empty tab bar area to maximize/restore the dock container
+- **Rename** — Ctrl/Cmd+click a tab to rename the table
+- **Close tab** — Click the ✕ on a tab. When a dock reduces to a single tab, it dissolves back to a standalone window
 
 <!-- ![Window layouts](screenshots/layouts.png) -->
 

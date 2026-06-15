@@ -22,6 +22,12 @@ const app = (() => {
   let _lastTitleTap = { winId: null, time: 0 };
   const DOUBLE_TAP_WINDOW_MS = 500;        // tap 1 → tap 2 window for double-tap / 1.5-tap
 
+  // Dock state
+  let dockContainers = [];
+  let nextDockId = 1;
+  let _dockDropOverlay = null;
+  let _dockDropTarget = null;
+
   // Snap threshold for window snapping (px)
   const SNAP_THRESHOLD = 10;
   let _snapGuideContainer = null;
@@ -936,6 +942,8 @@ const app = (() => {
 
     const winObj = {
       id, el, title,
+      bodyEl: el.querySelector('.win-body'),
+      statusbarEl: el.querySelector('.win-statusbar'),
       tableName: opts.tableName || null,
       isQuery: opts.isQuery || false,
       maximized: false,
@@ -949,6 +957,9 @@ const app = (() => {
       anchorCell: null, // { rownum, col } — fixed corner for Ctrl+Shift+Arrow extension
       _copyWithHeader: false,
       disabledTransforms: new Set(),
+      dockId: null,
+      dockLeaf: null,
+      dockable: opts.dockable !== false,
     };
     windows.push(winObj);
 
@@ -968,7 +979,22 @@ const app = (() => {
     activeWinId = id;
     windows.forEach(w => w.el.classList.toggle('active', w.id === id));
     const win = windows.find(w => w.id === id);
-    if (win) win.el.style.zIndex = ++nextZIndex;
+    if (win) {
+      if (win.dockId) {
+        const dock = dockContainers.find(d => d.id === win.dockId);
+        if (dock) {
+          dock.el.style.zIndex = ++nextZIndex;
+          dock.el.classList.add('active');
+          if (win.dockLeaf && win.dockLeaf.activeTab !== id) {
+            activateTab(win.dockLeaf, id, dock);
+          }
+        }
+        dockContainers.forEach(d => { if (d.id !== win.dockId) d.el.classList.remove('active'); });
+      } else {
+        win.el.style.zIndex = ++nextZIndex;
+        dockContainers.forEach(d => d.el.classList.remove('active'));
+      }
+    }
   }
 
   function closeWindow(id) {
@@ -984,6 +1010,17 @@ const app = (() => {
       delete _columnTransformCache[win.tableName];
       delete tables[win.tableName];
     }
+
+    if (win.dockId) {
+      const dock = dockContainers.find(d => d.id === win.dockId);
+      const leaf = win.dockLeaf;
+      if (dock && leaf) {
+        removeTabFromLeaf(id, leaf, dock);
+      }
+      win.dockId = null;
+      win.dockLeaf = null;
+    }
+
     win.el.remove();
     windows.splice(idx, 1);
     if (activeWinId === id) {
@@ -995,6 +1032,11 @@ const app = (() => {
   }
 
   function closeAllWindows() {
+    const dockIds = dockContainers.map(d => d.id);
+    for (const did of dockIds) {
+      const dock = dockContainers.find(d => d.id === did);
+      if (dock) closeDock(did);
+    }
     const ids = windows.map(w => w.id);
     for (const id of ids) closeWindow(id);
   }
@@ -1002,6 +1044,11 @@ const app = (() => {
   function minimizeWindow(id) {
     const win = windows.find(w => w.id === id);
     if (win) {
+      if (win.dockId) {
+        const dock = dockContainers.find(d => d.id === win.dockId);
+        if (dock) { dock.el.classList.add('minimized'); updateWindowsList(); }
+        return;
+      }
       win.el.classList.add('minimized');
       updateWindowsList();
     }
@@ -1010,7 +1057,12 @@ const app = (() => {
   function restoreWindow(id) {
     const win = windows.find(w => w.id === id);
     if (win) {
-      win.el.classList.remove('minimized');
+      if (win.dockId) {
+        const dock = dockContainers.find(d => d.id === win.dockId);
+        if (dock) { dock.el.classList.remove('minimized'); }
+      } else {
+        win.el.classList.remove('minimized');
+      }
       focusWindow(id);
       updateWindowsList();
     }
@@ -1019,6 +1071,11 @@ const app = (() => {
   function toggleMaximize(id) {
     const win = windows.find(w => w.id === id);
     if (!win) return;
+    if (win.dockId) {
+      const dock = dockContainers.find(d => d.id === win.dockId);
+      if (dock) toggleMaximizeDock(dock);
+      return;
+    }
     const area = document.getElementById('window-area');
     const rect = area.getBoundingClientRect();
     if (win.maximized) {
@@ -1048,11 +1105,18 @@ const app = (() => {
     const areaW = area.clientWidth, areaH = area.clientHeight;
     const xs = new Set([0, areaW]), ys = new Set([0, areaH]);
     windows.forEach(w => {
-      if (w === excludeWin || w.el.classList.contains('minimized')) return;
+      if (w === excludeWin || w.dockId || w.el.classList.contains('minimized')) return;
       const l = parseInt(w.el.style.left) || 0;
       const t = parseInt(w.el.style.top) || 0;
       xs.add(l); xs.add(l + w.el.offsetWidth);
       ys.add(t); ys.add(t + w.el.offsetHeight);
+    });
+    dockContainers.forEach(d => {
+      if (d === excludeWin || d.el.classList.contains('minimized')) return;
+      const l = parseInt(d.el.style.left) || 0;
+      const t = parseInt(d.el.style.top) || 0;
+      xs.add(l); xs.add(l + d.el.offsetWidth);
+      ys.add(t); ys.add(t + d.el.offsetHeight);
     });
     return { x: [...xs], y: [...ys] };
   }
@@ -1116,15 +1180,21 @@ const app = (() => {
   function setupWindowDrag(win) {
     const titlebar = win.el.querySelector('.win-titlebar');
     let dragging = false, startX, startY, origX, origY;
+    let _dragDropTarget = null;
+    let ghostMode = false, ghostEl = null;
+    let ghostOffsetX = 0, ghostOffsetY = 0;
 
     titlebar.addEventListener('mousedown', (e) => {
-      if (e.target.tagName === 'BUTTON') return;
+      if (e.button !== 0 || e.target.tagName === 'BUTTON') return;
       dragging = true;
+      ghostMode = false;
+      ghostEl = null;
       startX = e.clientX;
       startY = e.clientY;
       origX = parseInt(win.el.style.left);
       origY = parseInt(win.el.style.top);
       titlebar.style.cursor = 'grabbing';
+      _dragDropTarget = null;
       e.preventDefault();
     });
 
@@ -1135,15 +1205,43 @@ const app = (() => {
       const cy = Math.max(area.top, Math.min(e.clientY, area.bottom));
       const dx = cx - startX, dy = cy - startY;
       if (Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
-      const areaW = area.right - area.left, areaH = area.bottom - area.top;
-      const winW = win.el.offsetWidth, winH = win.el.offsetHeight;
-      let left = Math.max(0, Math.min(origX + dx, areaW - winW));
-      let top = Math.max(0, Math.min(origY + dy, areaH - winH));
-      const snapped = snapPosition(win, left, top, winW, winH, areaW, areaH);
-      win.el.style.left = snapped.left + 'px';
-      win.el.style.top = snapped.top + 'px';
-      showSnapGuides(snapped.guidesX, snapped.guidesY);
-      if (win.maximized) win.maximized = false;
+
+      if (!ghostMode && e.shiftKey && win.dockable !== false) {
+        ghostMode = true;
+        const winRect = win.el.getBoundingClientRect();
+        ghostOffsetX = startX - winRect.left;
+        ghostOffsetY = startY - winRect.top;
+        ghostEl = document.createElement('div');
+        ghostEl.className = 'subwindow';
+        ghostEl.style.position = 'fixed';
+        ghostEl.style.width = winRect.width + 'px';
+        ghostEl.style.height = winRect.height + 'px';
+        ghostEl.style.opacity = '0.7';
+        ghostEl.style.pointerEvents = 'none';
+        ghostEl.style.zIndex = '999999';
+        ghostEl.innerHTML = `<div class="win-titlebar"><span class="win-title">${escHtml(getWindowTitle(win))}</span></div>`;
+        document.body.appendChild(ghostEl);
+      }
+
+      if (ghostMode) {
+        ghostEl.style.left = (e.clientX - ghostOffsetX) + 'px';
+        ghostEl.style.top = (e.clientY - ghostOffsetY) + 'px';
+
+        const target = detectDropTarget(e.clientX, e.clientY, win.id);
+        _dragDropTarget = target;
+        if (target) showDropOverlay(target);
+        else hideDropOverlay();
+      } else {
+        const areaW = area.right - area.left, areaH = area.bottom - area.top;
+        const winW = win.el.offsetWidth, winH = win.el.offsetHeight;
+        let left = Math.max(0, Math.min(origX + dx, areaW - winW));
+        let top = Math.max(0, Math.min(origY + dy, areaH - winH));
+        const snapped = snapPosition(win, left, top, winW, winH, areaW, areaH);
+        win.el.style.left = snapped.left + 'px';
+        win.el.style.top = snapped.top + 'px';
+        showSnapGuides(snapped.guidesX, snapped.guidesY);
+        if (win.maximized) win.maximized = false;
+      }
     });
 
     document.addEventListener('mouseup', () => {
@@ -1151,6 +1249,14 @@ const app = (() => {
         dragging = false;
         titlebar.style.cursor = 'grab';
         hideSnapGuides();
+        hideDropOverlay();
+        if (ghostEl) { ghostEl.remove(); ghostEl = null; }
+
+        if (ghostMode && _dragDropTarget && win.dockable !== false) {
+          executeDock(win.id, _dragDropTarget);
+        }
+        _dragDropTarget = null;
+        ghostMode = false;
       }
     });
 
@@ -1233,6 +1339,7 @@ const app = (() => {
       const resizeT = cl.contains('rh-top') || cl.contains('rh-tl') || cl.contains('rh-tr');
 
       handle.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
         closeAutoFilter();
         resizing = true;
         startX = e.clientX;
@@ -1318,7 +1425,11 @@ const app = (() => {
     const oldName = win.tableName;
     const t = tables[oldName];
     if (!t) return;
-    const titleEl = win.el.querySelector('.win-title');
+    let titleEl;
+    if (win.dockId && win.dockLeaf && win.dockLeaf.tabBarEl) {
+      titleEl = win.dockLeaf.tabBarEl.querySelector(`.dock-tab[data-win-id="${win.id}"] .dock-tab-title`);
+    }
+    if (!titleEl) titleEl = win.el.querySelector('.win-title');
     const input = document.createElement('input');
     input.className = 'inline-rename';
     input.value = oldName;
@@ -1397,18 +1508,23 @@ const app = (() => {
       const mod = t && t.modified ? ' *' : '';
       const displayName = getDisplayFilename(t);
       const fname = displayName ? ' — ' + displayName : '';
-      w.el.querySelector('.win-title').textContent = tableName + fname + mod;
+      const fullTitle = tableName + fname + mod;
+      w.el.querySelector('.win-title').textContent = fullTitle;
+      if (w.dockId && w.dockLeaf && w.dockLeaf.tabBarEl) {
+        const tabTitle = w.dockLeaf.tabBarEl.querySelector(`.dock-tab[data-win-id="${w.id}"] .dock-tab-title`);
+        if (tabTitle) tabTitle.textContent = fullTitle;
+      }
     });
   }
 
   function updateWindowsList() {
     const list = document.getElementById('windows-list');
     list.innerHTML = '';
-    if (windows.length === 0) {
+    if (windows.length === 0 && dockContainers.length === 0) {
       list.innerHTML = '<button disabled style="color:var(--text-dim)">No windows</button>';
       return;
     }
-    windows.forEach(w => {
+    windows.filter(w => !w.dockId).forEach(w => {
       const btn = document.createElement('button');
       const minimized = w.el.classList.contains('minimized');
       btn.textContent = (minimized ? '[_] ' : '') + w.title;
@@ -1418,84 +1534,104 @@ const app = (() => {
       });
       list.appendChild(btn);
     });
+    dockContainers.forEach(dock => {
+      const dockWins = windows.filter(w => w.dockId === dock.id);
+      if (!dockWins.length) return;
+      const minimized = dock.el.classList.contains('minimized');
+      const sep = document.createElement('hr');
+      sep.style.cssText = 'border:none;border-top:1px solid var(--border);margin:4px 0';
+      list.appendChild(sep);
+      dockWins.forEach(w => {
+        const btn = document.createElement('button');
+        btn.textContent = (minimized ? '[_] ' : '  ') + w.title;
+        btn.addEventListener('click', () => {
+          if (minimized) restoreWindow(w.id);
+          else focusWindow(w.id);
+        });
+        list.appendChild(btn);
+      });
+    });
   }
 
   // ---- Layout ----
   function getVisibleWindows() {
-    return windows.filter(w => !w.el.classList.contains('minimized'));
+    return windows.filter(w => !w.dockId && !w.el.classList.contains('minimized'));
   }
 
   function layoutTileH() {
-    const vw = getVisibleWindows();
-    if (!vw.length) return;
+    const units = getLayoutUnits();
+    if (!units.length) return;
     const area = document.getElementById('window-area').getBoundingClientRect();
-    const h = area.height / vw.length;
-    vw.forEach((w, i) => {
-      w.el.style.left = '0px';
-      w.el.style.top = Math.round(i * h) + 'px';
-      w.el.style.width = area.width + 'px';
-      w.el.style.height = Math.round(h) + 'px';
-      w.maximized = false;
+    const h = area.height / units.length;
+    units.forEach((u, i) => {
+      u.el.style.left = '0px';
+      u.el.style.top = Math.round(i * h) + 'px';
+      u.el.style.width = area.width + 'px';
+      u.el.style.height = Math.round(h) + 'px';
+      if (u.type === 'window') u.obj.maximized = false;
+      else u.obj.maximized = false;
     });
   }
 
   function layoutTileV() {
-    const vw = getVisibleWindows();
-    if (!vw.length) return;
+    const units = getLayoutUnits();
+    if (!units.length) return;
     const area = document.getElementById('window-area').getBoundingClientRect();
-    const w = area.width / vw.length;
-    vw.forEach((win, i) => {
-      win.el.style.left = Math.round(i * w) + 'px';
-      win.el.style.top = '0px';
-      win.el.style.width = Math.round(w) + 'px';
-      win.el.style.height = area.height + 'px';
-      win.maximized = false;
+    const w = area.width / units.length;
+    units.forEach((u, i) => {
+      u.el.style.left = Math.round(i * w) + 'px';
+      u.el.style.top = '0px';
+      u.el.style.width = Math.round(w) + 'px';
+      u.el.style.height = area.height + 'px';
+      u.obj.maximized = false;
     });
   }
 
   function layoutGrid() {
-    const vw = getVisibleWindows();
-    if (!vw.length) return;
+    const units = getLayoutUnits();
+    if (!units.length) return;
     const area = document.getElementById('window-area').getBoundingClientRect();
-    const cols = Math.ceil(Math.sqrt(vw.length));
-    const rows = Math.ceil(vw.length / cols);
+    const cols = Math.ceil(Math.sqrt(units.length));
+    const rows = Math.ceil(units.length / cols);
     const cellW = area.width / cols;
     const cellH = area.height / rows;
-    vw.forEach((win, i) => {
+    units.forEach((u, i) => {
       const col = i % cols;
       const row = Math.floor(i / cols);
-      win.el.style.left = Math.round(col * cellW) + 'px';
-      win.el.style.top = Math.round(row * cellH) + 'px';
-      win.el.style.width = Math.round(cellW) + 'px';
-      win.el.style.height = Math.round(cellH) + 'px';
-      win.maximized = false;
+      u.el.style.left = Math.round(col * cellW) + 'px';
+      u.el.style.top = Math.round(row * cellH) + 'px';
+      u.el.style.width = Math.round(cellW) + 'px';
+      u.el.style.height = Math.round(cellH) + 'px';
+      u.obj.maximized = false;
     });
   }
 
   function layoutCascade() {
-    const vw = getVisibleWindows();
-    if (!vw.length) return;
+    const units = getLayoutUnits();
+    if (!units.length) return;
     const area = document.getElementById('window-area').getBoundingClientRect();
     const w = Math.min(600, area.width * 0.7);
     const h = Math.min(400, area.height * 0.7);
-    vw.forEach((win, i) => {
+    units.forEach((u, i) => {
       const offset = (i % 10) * 30;
-      win.el.style.left = (20 + offset) + 'px';
-      win.el.style.top = (20 + offset) + 'px';
-      win.el.style.width = w + 'px';
-      win.el.style.height = h + 'px';
-      win.maximized = false;
-      win.el.style.zIndex = ++nextZIndex;
+      u.el.style.left = (20 + offset) + 'px';
+      u.el.style.top = (20 + offset) + 'px';
+      u.el.style.width = w + 'px';
+      u.el.style.height = h + 'px';
+      u.obj.maximized = false;
+      u.el.style.zIndex = ++nextZIndex;
     });
   }
 
   function minimizeAll() {
-    windows.forEach(w => w.el.classList.add('minimized'));
+    windows.filter(w => !w.dockId).forEach(w => w.el.classList.add('minimized'));
+    dockContainers.forEach(d => d.el.classList.add('minimized'));
     updateWindowsList();
   }
 
   function restoreAll() {
     windows.forEach(w => w.el.classList.remove('minimized'));
+    dockContainers.forEach(d => d.el.classList.remove('minimized'));
     updateWindowsList();
   }
 
@@ -1516,6 +1652,7 @@ const app = (() => {
     const scaleY = h / _prevAreaHeight;
     if (scaleX === 1 && scaleY === 1) return;
     windows.forEach(win => {
+      if (win.dockId) return;
       if (win.el.classList.contains('minimized')) return;
       if (win.maximized) {
         win.el.style.width = w + 'px';
@@ -1537,6 +1674,28 @@ const app = (() => {
       win.el.style.width = Math.round(width * scaleX) + 'px';
       win.el.style.height = Math.round(height * scaleY) + 'px';
     });
+    dockContainers.forEach(dock => {
+      if (dock.el.classList.contains('minimized')) return;
+      if (dock.maximized) {
+        dock.el.style.width = w + 'px';
+        dock.el.style.height = h + 'px';
+        if (dock.prevBounds) {
+          dock.prevBounds.left = Math.round(dock.prevBounds.left * scaleX);
+          dock.prevBounds.top = Math.round(dock.prevBounds.top * scaleY);
+          dock.prevBounds.width = Math.round(dock.prevBounds.width * scaleX);
+          dock.prevBounds.height = Math.round(dock.prevBounds.height * scaleY);
+        }
+        return;
+      }
+      const left = parseFloat(dock.el.style.left) || 0;
+      const top = parseFloat(dock.el.style.top) || 0;
+      const dw = parseFloat(dock.el.style.width) || 0;
+      const dh = parseFloat(dock.el.style.height) || 0;
+      dock.el.style.left = Math.round(left * scaleX) + 'px';
+      dock.el.style.top = Math.round(top * scaleY) + 'px';
+      dock.el.style.width = Math.round(dw * scaleX) + 'px';
+      dock.el.style.height = Math.round(dh * scaleY) + 'px';
+    });
     _prevAreaWidth = w;
     _prevAreaHeight = h;
   }
@@ -1547,6 +1706,1105 @@ const app = (() => {
     _prevAreaWidth = rect.width;
     _prevAreaHeight = rect.height;
     window.addEventListener('resize', scaleWindowsToArea);
+  }
+
+  // ---- Dock / Tab System ----
+
+  function isWindowMinimized(win) {
+    if (win.dockId) {
+      const dock = dockContainers.find(d => d.id === win.dockId);
+      return dock && dock.el.classList.contains('minimized');
+    }
+    return win.el.classList.contains('minimized');
+  }
+
+  function getWindowDock(winId) {
+    const win = windows.find(w => w.id === winId);
+    if (!win || !win.dockId) return null;
+    const dock = dockContainers.find(d => d.id === win.dockId);
+    return dock ? { dock, leaf: win.dockLeaf } : null;
+  }
+
+  function findLeafForWindow(node, winId) {
+    if (!node) return null;
+    if (node.type === 'leaf') return node.tabs.includes(winId) ? node : null;
+    for (const child of node.children) {
+      const found = findLeafForWindow(child, winId);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  function countLeaves(node) {
+    if (!node) return 0;
+    if (node.type === 'leaf') return 1;
+    return node.children.reduce((s, c) => s + countLeaves(c), 0);
+  }
+
+  function countTotalTabs(node) {
+    if (!node) return 0;
+    if (node.type === 'leaf') return node.tabs.length;
+    return node.children.reduce((s, c) => s + countTotalTabs(c), 0);
+  }
+
+  function getWindowTitle(win) {
+    if (!win.tableName || !tables[win.tableName]) return win.title;
+    const t = tables[win.tableName];
+    const mod = t.modified ? ' *' : '';
+    const displayName = getDisplayFilename(t);
+    const fname = displayName ? ' — ' + displayName : '';
+    return win.tableName + fname + mod;
+  }
+
+  function createDockContainer(bounds) {
+    const id = nextDockId++;
+    const area = document.getElementById('window-area');
+
+    const el = document.createElement('div');
+    el.className = 'dock-container';
+    el.id = `dock-${id}`;
+    el.style.left = bounds.left + 'px';
+    el.style.top = bounds.top + 'px';
+    el.style.width = bounds.width + 'px';
+    el.style.height = bounds.height + 'px';
+    el.style.zIndex = ++nextZIndex;
+
+    el.innerHTML = `
+      <div class="dock-controls">
+        <button class="btn-min" title="Minimize">&#8211;</button>
+        <button class="btn-max" title="Maximize">&#9633;</button>
+        <button class="btn-close" title="Close All">&#10005;</button>
+      </div>
+      <div class="dock-root"></div>
+      <div class="resize-handle rh-top"></div>
+      <div class="resize-handle rh-bottom"></div>
+      <div class="resize-handle rh-left"></div>
+      <div class="resize-handle rh-right"></div>
+      <div class="resize-handle rh-tl"></div>
+      <div class="resize-handle rh-tr"></div>
+      <div class="resize-handle rh-bl"></div>
+      <div class="resize-handle rh-br"></div>
+    `;
+
+    area.appendChild(el);
+
+    const dock = {
+      id, el,
+      maximized: false,
+      prevBounds: null,
+      root: null,
+    };
+    dockContainers.push(dock);
+
+    el.querySelector('.dock-controls .btn-min').addEventListener('click', (e) => {
+      e.stopPropagation();
+      dock.el.classList.add('minimized');
+      updateWindowsList();
+    });
+    el.querySelector('.dock-controls .btn-max').addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleMaximizeDock(dock);
+    });
+    el.querySelector('.dock-controls .btn-close').addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeDock(dock.id);
+    });
+
+    setupDockResize(dock);
+    el.addEventListener('mousedown', () => {
+      const leaf = dock.root && dock.root.type === 'leaf' ? dock.root : null;
+      const activeTab = leaf ? leaf.activeTab : null;
+      if (activeTab) focusWindow(activeTab);
+      else {
+        dockContainers.forEach(d => d.el.classList.toggle('active', d.id === dock.id));
+        dock.el.style.zIndex = ++nextZIndex;
+      }
+    });
+
+    return dock;
+  }
+
+  function setupDockResize(dock) {
+    const handles = dock.el.querySelectorAll('.resize-handle');
+    handles.forEach(handle => {
+      let resizing = false, startX, startY, origW, origH, origLeft, origTop;
+      const cl = handle.classList;
+      const resizeR = cl.contains('rh-right') || cl.contains('rh-tr') || cl.contains('rh-br');
+      const resizeB = cl.contains('rh-bottom') || cl.contains('rh-bl') || cl.contains('rh-br');
+      const resizeL = cl.contains('rh-left') || cl.contains('rh-tl') || cl.contains('rh-bl');
+      const resizeT = cl.contains('rh-top') || cl.contains('rh-tl') || cl.contains('rh-tr');
+
+      handle.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        resizing = true;
+        startX = e.clientX;
+        startY = e.clientY;
+        origW = parseInt(dock.el.style.width);
+        origH = parseInt(dock.el.style.height);
+        origLeft = parseInt(dock.el.style.left);
+        origTop = parseInt(dock.el.style.top);
+        e.preventDefault();
+        e.stopPropagation();
+      });
+
+      document.addEventListener('mousemove', (e) => {
+        if (!resizing) return;
+        const area = document.getElementById('window-area').getBoundingClientRect();
+        const areaW = area.right - area.left, areaH = area.bottom - area.top;
+        let dx = e.clientX - startX, dy = e.clientY - startY;
+        const edges = getSnapEdges(dock);
+        const guidesX = [], guidesY = [];
+
+        if (resizeR) {
+          let w = Math.min(Math.max(280, origW + dx), areaW - origLeft);
+          const snap = findSnap(origLeft + w, edges.x, SNAP_THRESHOLD);
+          if (snap !== null && snap - origLeft >= 280) { w = snap - origLeft; guidesX.push(snap); }
+          dock.el.style.width = w + 'px';
+        }
+        if (resizeB) {
+          let h = Math.min(Math.max(160, origH + dy), areaH - origTop);
+          const snap = findSnap(origTop + h, edges.y, SNAP_THRESHOLD);
+          if (snap !== null && snap - origTop >= 160) { h = snap - origTop; guidesY.push(snap); }
+          dock.el.style.height = h + 'px';
+        }
+        if (resizeL) {
+          let newW = Math.max(280, origW - dx);
+          let newL = Math.max(0, origLeft + origW - newW);
+          const snap = findSnap(newL, edges.x, SNAP_THRESHOLD);
+          if (snap !== null && snap >= 0 && origLeft + origW - snap >= 280) {
+            newL = snap; newW = origLeft + origW - snap; guidesX.push(snap);
+          }
+          dock.el.style.width = newW + 'px';
+          dock.el.style.left = newL + 'px';
+        }
+        if (resizeT) {
+          let newH = Math.max(160, origH - dy);
+          let newT = Math.max(0, origTop + origH - newH);
+          const snap = findSnap(newT, edges.y, SNAP_THRESHOLD);
+          if (snap !== null && snap >= 0 && origTop + origH - snap >= 160) {
+            newT = snap; newH = origTop + origH - snap; guidesY.push(snap);
+          }
+          dock.el.style.height = newH + 'px';
+          dock.el.style.top = newT + 'px';
+        }
+        showSnapGuides(guidesX, guidesY);
+        if (dock.maximized) dock.maximized = false;
+      });
+
+      document.addEventListener('mouseup', () => {
+        if (resizing) { hideSnapGuides(); resizing = false; }
+      });
+    });
+  }
+
+  function destroyDockContainer(dockId) {
+    const idx = dockContainers.findIndex(d => d.id === dockId);
+    if (idx === -1) return;
+    const dock = dockContainers[idx];
+    dock.el.remove();
+    dockContainers.splice(idx, 1);
+  }
+
+  function dockWindowIntoLeaf(win, leaf, dock) {
+    win.dockId = dock.id;
+    win.dockLeaf = leaf;
+    win.el.classList.add('docked');
+
+    const body = win.el.querySelector('.win-body');
+    const statusbar = win.el.querySelector('.win-statusbar');
+    if (body) leaf.contentEl.appendChild(body);
+    if (statusbar) leaf.contentEl.appendChild(statusbar);
+  }
+
+  function undockWindowFromLeaf(win) {
+    const leaf = win.dockLeaf;
+    const dock = dockContainers.find(d => d.id === win.dockId);
+
+    const body = leaf.contentEl.querySelector('.win-body');
+    const statusbar = leaf.contentEl.querySelector('.win-statusbar');
+
+    if (leaf.activeTab === win.id) {
+      if (body) win.el.insertBefore(body, win.el.querySelector('.win-statusbar') || win.el.querySelector('.resize-handle'));
+      if (statusbar) win.el.insertBefore(statusbar, win.el.querySelector('.resize-handle'));
+    } else {
+      const hiddenBody = Array.from(leaf.contentEl.querySelectorAll('.win-body')).find(b => b.dataset.winId == win.id);
+      const hiddenStatus = Array.from(leaf.contentEl.querySelectorAll('.win-statusbar')).find(s => s.dataset.winId == win.id);
+      if (hiddenBody) win.el.insertBefore(hiddenBody, win.el.querySelector('.resize-handle'));
+      if (hiddenStatus) win.el.insertBefore(hiddenStatus, win.el.querySelector('.resize-handle'));
+    }
+
+    win.el.classList.remove('docked');
+    win.dockId = null;
+    win.dockLeaf = null;
+
+    if (dock) {
+      win.el.style.left = (parseInt(dock.el.style.left) + 20) + 'px';
+      win.el.style.top = (parseInt(dock.el.style.top) + 20) + 'px';
+      win.el.style.width = Math.max(280, Math.round(parseInt(dock.el.style.width) * 0.6)) + 'px';
+      win.el.style.height = Math.max(160, Math.round(parseInt(dock.el.style.height) * 0.6)) + 'px';
+      win.el.style.zIndex = ++nextZIndex;
+    }
+  }
+
+  function activateTab(leaf, winId, dock) {
+    const prevId = leaf.activeTab;
+    leaf.activeTab = winId;
+
+    if (prevId && prevId !== winId) {
+      const prevWin = windows.find(w => w.id === prevId);
+      if (prevWin) {
+        const prevBody = leaf.contentEl.querySelector('.win-body:not([style*="display: none"])');
+        const prevStatus = leaf.contentEl.querySelector('.win-statusbar:not([style*="display: none"])');
+        if (prevBody) { prevBody.style.display = 'none'; prevBody.dataset.winId = prevId; }
+        if (prevStatus) { prevStatus.style.display = 'none'; prevStatus.dataset.winId = prevId; }
+      }
+    }
+
+    const win = windows.find(w => w.id === winId);
+    if (win) {
+      let body = Array.from(leaf.contentEl.querySelectorAll('.win-body')).find(b => b.dataset.winId == winId);
+      let statusbar = Array.from(leaf.contentEl.querySelectorAll('.win-statusbar')).find(s => s.dataset.winId == winId);
+      if (body) { body.style.display = ''; delete body.dataset.winId; }
+      if (statusbar) { statusbar.style.display = ''; delete statusbar.dataset.winId; }
+
+      if (!body) {
+        body = win.el.querySelector('.win-body');
+        statusbar = win.el.querySelector('.win-statusbar');
+        if (body) leaf.contentEl.appendChild(body);
+        if (statusbar) leaf.contentEl.appendChild(statusbar);
+      }
+    }
+
+    renderTabBar(leaf, dock);
+  }
+
+  function renderTabBar(leaf, dock) {
+    if (!leaf.tabBarEl) return;
+    const html = leaf.tabs.map(wid => {
+      const w = windows.find(x => x.id === wid);
+      if (!w) return '';
+      const title = getWindowTitle(w);
+      const active = wid === leaf.activeTab ? ' active' : '';
+      return `<div class="dock-tab${active}" data-win-id="${wid}">` +
+             `<span class="dock-tab-title">${escHtml(title)}</span>` +
+             `<button class="dock-tab-close" title="Close">&#10005;</button>` +
+             `</div>`;
+    }).join('');
+
+    leaf.tabBarEl.innerHTML = html;
+
+    leaf.tabBarEl.querySelectorAll('.dock-tab').forEach(tabEl => {
+      const wid = parseInt(tabEl.dataset.winId);
+
+      tabEl.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        if (e.target.classList.contains('dock-tab-close')) return;
+        if (e.ctrlKey || e.metaKey) {
+          e.preventDefault();
+          const w = windows.find(x => x.id === wid);
+          if (w && w.tableName) startInlineRename(w);
+          return;
+        }
+        focusWindow(wid);
+        setupTabDragFromMousedown(e, tabEl, wid, leaf, dock);
+      });
+
+      tabEl.querySelector('.dock-tab-close').addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+      });
+      tabEl.querySelector('.dock-tab-close').addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeWindow(wid);
+      });
+      tabEl.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        toggleMaximizeDock(dock);
+      });
+    });
+
+    leaf.tabBarEl.addEventListener('dblclick', (e) => {
+      if (e.target.closest('.dock-tab')) return;
+      toggleMaximizeDock(dock);
+    });
+
+    setupDockTabBarDrag(leaf.tabBarEl, dock);
+
+    if (leaf.tabs.length === 1 && leaf.parent) {
+      leaf.tabBarEl.classList.add('single-tab');
+    } else {
+      leaf.tabBarEl.classList.remove('single-tab');
+    }
+  }
+
+  function setupDockTabBarDrag(tabBarEl, dock) {
+    if (tabBarEl._dockDragSetup) return;
+    tabBarEl._dockDragSetup = true;
+
+    let dragging = false, startX, startY, origX, origY;
+
+    tabBarEl.addEventListener('mousedown', (e) => {
+      if (e.button !== 0 || e.target.closest('.dock-tab')) return;
+      dragging = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      origX = parseInt(dock.el.style.left);
+      origY = parseInt(dock.el.style.top);
+      tabBarEl.style.cursor = 'grabbing';
+      e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!dragging) return;
+      const area = document.getElementById('window-area').getBoundingClientRect();
+      const cx = Math.max(area.left, Math.min(e.clientX, area.right));
+      const cy = Math.max(area.top, Math.min(e.clientY, area.bottom));
+      const dx = cx - startX, dy = cy - startY;
+      if (Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
+      const areaW = area.right - area.left, areaH = area.bottom - area.top;
+      const dockW = dock.el.offsetWidth, dockH = dock.el.offsetHeight;
+      let left = Math.max(0, Math.min(origX + dx, areaW - dockW));
+      let top = Math.max(0, Math.min(origY + dy, areaH - dockH));
+      const snapped = snapPosition(dock, left, top, dockW, dockH, areaW, areaH);
+      dock.el.style.left = snapped.left + 'px';
+      dock.el.style.top = snapped.top + 'px';
+      showSnapGuides(snapped.guidesX, snapped.guidesY);
+      if (dock.maximized) dock.maximized = false;
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (dragging) {
+        dragging = false;
+        tabBarEl.style.cursor = '';
+        hideSnapGuides();
+      }
+    });
+  }
+
+  function setupTabDragFromMousedown(startEvent, tabEl, winId, leaf, dock) {
+    const startX = startEvent.clientX;
+    const startY = startEvent.clientY;
+    const origDockX = parseInt(dock.el.style.left);
+    const origDockY = parseInt(dock.el.style.top);
+    let movingDock = false;
+    let undocking = false;
+    let ghostEl = null;
+    let ghostOffsetX = 0, ghostOffsetY = 0, leafW = 0, leafH = 0;
+
+    const onMove = (e) => {
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+
+      if (!movingDock && !undocking && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) {
+        if (e.shiftKey) {
+          undocking = true;
+          const leafRect = leaf.el.getBoundingClientRect();
+          ghostOffsetX = startX - leafRect.left;
+          ghostOffsetY = startY - leafRect.top;
+          leafW = leafRect.width;
+          leafH = leafRect.height;
+          ghostEl = document.createElement('div');
+          ghostEl.className = 'subwindow';
+          ghostEl.style.position = 'fixed';
+          ghostEl.style.width = leafW + 'px';
+          ghostEl.style.height = leafH + 'px';
+          ghostEl.style.opacity = '0.7';
+          ghostEl.style.pointerEvents = 'none';
+          ghostEl.style.zIndex = '999999';
+          ghostEl.innerHTML = `<div class="win-titlebar"><span class="win-title">${escHtml(getWindowTitle(windows.find(w => w.id === winId)))}</span></div>`;
+          document.body.appendChild(ghostEl);
+        } else {
+          movingDock = true;
+        }
+      }
+
+      if (movingDock) {
+        const area = document.getElementById('window-area').getBoundingClientRect();
+        const cx = Math.max(area.left, Math.min(e.clientX, area.right));
+        const cy = Math.max(area.top, Math.min(e.clientY, area.bottom));
+        const areaW = area.right - area.left, areaH = area.bottom - area.top;
+        const dockW = dock.el.offsetWidth, dockH = dock.el.offsetHeight;
+        let left = Math.max(0, Math.min(origDockX + (cx - startX), areaW - dockW));
+        let top = Math.max(0, Math.min(origDockY + (cy - startY), areaH - dockH));
+        const snapped = snapPosition(dock, left, top, dockW, dockH, areaW, areaH);
+        dock.el.style.left = snapped.left + 'px';
+        dock.el.style.top = snapped.top + 'px';
+        showSnapGuides(snapped.guidesX, snapped.guidesY);
+        if (dock.maximized) dock.maximized = false;
+      }
+
+      if (undocking) {
+        ghostEl.style.left = (e.clientX - ghostOffsetX) + 'px';
+        ghostEl.style.top = (e.clientY - ghostOffsetY) + 'px';
+
+        const target = detectDropTarget(e.clientX, e.clientY, winId);
+        _dockDropTarget = target;
+        if (target) showDropOverlay(target);
+        else hideDropOverlay();
+      }
+    };
+
+    const onUp = (e) => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      if (ghostEl) { ghostEl.remove(); ghostEl = null; }
+      hideDropOverlay();
+      hideSnapGuides();
+
+      if (undocking && _dockDropTarget) {
+        const sameDock = _dockDropTarget.type === 'leaf' && _dockDropTarget.dock === dock;
+        const sameLeaf = sameDock && _dockDropTarget.leaf === leaf && _dockDropTarget.zone === 'center';
+        if (!sameLeaf) {
+          removeTabFromLeaf(winId, leaf, dock, sameDock);
+          executeDock(winId, _dockDropTarget);
+          if (sameDock) cleanupAfterTabRemoval(leaf, dock);
+        }
+        _dockDropTarget = null;
+      } else if (undocking) {
+        const dockRect = dock.el.getBoundingClientRect();
+        const overSource = e.clientX >= dockRect.left && e.clientX <= dockRect.right &&
+                           e.clientY >= dockRect.top && e.clientY <= dockRect.bottom;
+        if (!overSource) {
+          const area = document.getElementById('window-area').getBoundingClientRect();
+          const winLeft = Math.max(0, e.clientX - ghostOffsetX - area.left);
+          const winTop = Math.max(0, e.clientY - ghostOffsetY - area.top);
+          undockWindow(winId);
+          const win = windows.find(w => w.id === winId);
+          if (win) {
+            win.el.style.left = winLeft + 'px';
+            win.el.style.top = winTop + 'px';
+            win.el.style.width = leafW + 'px';
+            win.el.style.height = leafH + 'px';
+          }
+        }
+        _dockDropTarget = null;
+      }
+    };
+
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
+
+  function toggleMaximizeDock(dock) {
+    const area = document.getElementById('window-area');
+    const rect = area.getBoundingClientRect();
+    if (dock.maximized) {
+      if (dock.prevBounds) {
+        dock.el.style.left = dock.prevBounds.left + 'px';
+        dock.el.style.top = dock.prevBounds.top + 'px';
+        dock.el.style.width = dock.prevBounds.width + 'px';
+        dock.el.style.height = dock.prevBounds.height + 'px';
+      }
+      dock.maximized = false;
+    } else {
+      dock.prevBounds = {
+        left: parseInt(dock.el.style.left), top: parseInt(dock.el.style.top),
+        width: parseInt(dock.el.style.width), height: parseInt(dock.el.style.height)
+      };
+      dock.el.style.left = '0px';
+      dock.el.style.top = '0px';
+      dock.el.style.width = rect.width + 'px';
+      dock.el.style.height = rect.height + 'px';
+      dock.maximized = true;
+    }
+  }
+
+  function closeDock(dockId) {
+    const dock = dockContainers.find(d => d.id === dockId);
+    if (!dock) return;
+    const dockWins = windows.filter(w => w.dockId === dockId);
+    const unsaved = dockWins.filter(w =>
+      w.tableName && tables[w.tableName] && !w.isQuery && tables[w.tableName].modified
+    );
+    if (unsaved.length > 0) {
+      const names = unsaved.map(w => w.tableName).join(', ');
+      if (!confirm(`Tables ${names} have unsaved changes. Close anyway?`)) return;
+    }
+    const ids = dockWins.map(w => w.id);
+    for (const id of ids) {
+      const win = windows.find(w => w.id === id);
+      if (win) {
+        if (win.tableName && tables[win.tableName]) {
+          try { db.run(`DROP TABLE IF EXISTS [${win.tableName}]`); } catch (e) {}
+          delete _columnTransformCache[win.tableName];
+          delete tables[win.tableName];
+        }
+        win.el.remove();
+        const idx = windows.indexOf(win);
+        if (idx !== -1) windows.splice(idx, 1);
+      }
+    }
+    destroyDockContainer(dockId);
+    if (activeWinId && !windows.find(w => w.id === activeWinId)) {
+      activeWinId = windows.length ? windows[windows.length - 1].id : null;
+      if (activeWinId) focusWindow(activeWinId);
+    }
+    updateWindowsList();
+    if (_activeConsoleTab === 'ai') populateTableSelect();
+  }
+
+  function renderDockTree(dock) {
+    const rootEl = dock.el.querySelector('.dock-root');
+    reparentDockedContent(dock.root);
+    rootEl.innerHTML = '';
+    if (!dock.root) return;
+    delete dock.root.flex;
+    const domNode = buildDockNodeDOM(dock.root, dock);
+    rootEl.appendChild(domNode);
+    const trLeaf = findTopRightLeaf(dock.root);
+    if (trLeaf && trLeaf.tabBarEl) trLeaf.tabBarEl.classList.add('has-controls');
+  }
+
+  function findTopRightLeaf(node) {
+    if (node.type === 'leaf') return node;
+    if (node.direction === 'horizontal') return findTopRightLeaf(node.children[1]);
+    return findTopRightLeaf(node.children[0]);
+  }
+
+  function reparentDockedContent(node) {
+    if (!node) return;
+    if (node.type === 'leaf' && node.contentEl) {
+      node.tabs.forEach(wid => {
+        const win = windows.find(w => w.id === wid);
+        if (!win) return;
+        const body = Array.from(node.contentEl.querySelectorAll('.win-body')).find(b =>
+          b.dataset.winId == wid || (!b.dataset.winId && node.activeTab === wid));
+        const statusbar = Array.from(node.contentEl.querySelectorAll('.win-statusbar')).find(s =>
+          s.dataset.winId == wid || (!s.dataset.winId && node.activeTab === wid));
+        if (body) { win.el.insertBefore(body, win.el.querySelector('.resize-handle')); body.style.display = ''; delete body.dataset.winId; }
+        if (statusbar) { win.el.insertBefore(statusbar, win.el.querySelector('.resize-handle')); statusbar.style.display = ''; delete statusbar.dataset.winId; }
+      });
+    } else if (node.type === 'split') {
+      node.children.forEach(child => reparentDockedContent(child));
+    }
+  }
+
+  function buildDockNodeDOM(node, dock) {
+    if (node.type === 'leaf') {
+      const leafEl = document.createElement('div');
+      leafEl.className = 'dock-leaf';
+      if (node.flex !== undefined) leafEl.style.flex = node.flex;
+
+      const tabBar = document.createElement('div');
+      tabBar.className = 'dock-tab-bar';
+      leafEl.appendChild(tabBar);
+
+      const contentEl = document.createElement('div');
+      contentEl.className = 'dock-leaf-content';
+      leafEl.appendChild(contentEl);
+
+      node.el = leafEl;
+      node.tabBarEl = tabBar;
+      node.contentEl = contentEl;
+
+      node.tabs.forEach(wid => {
+        const win = windows.find(w => w.id === wid);
+        if (!win) return;
+        win.dockLeaf = node;
+        const body = win.el.querySelector('.win-body') ||
+          Array.from(node.contentEl ? node.contentEl.querySelectorAll('.win-body') : []).find(b => b.dataset.winId == wid);
+        const statusbar = win.el.querySelector('.win-statusbar') ||
+          Array.from(node.contentEl ? node.contentEl.querySelectorAll('.win-statusbar') : []).find(s => s.dataset.winId == wid);
+
+        if (body) {
+          contentEl.appendChild(body);
+          if (wid !== node.activeTab) { body.style.display = 'none'; body.dataset.winId = wid; }
+          else { body.style.display = ''; delete body.dataset.winId; }
+        }
+        if (statusbar) {
+          contentEl.appendChild(statusbar);
+          if (wid !== node.activeTab) { statusbar.style.display = 'none'; statusbar.dataset.winId = wid; }
+          else { statusbar.style.display = ''; delete statusbar.dataset.winId; }
+        }
+      });
+
+      renderTabBar(node, dock);
+      return leafEl;
+    }
+
+    const splitEl = document.createElement('div');
+    splitEl.className = `dock-split dock-split-${node.direction}`;
+    if (node.flex !== undefined) splitEl.style.flex = node.flex;
+
+    const child0 = node.children[0];
+    const child1 = node.children[1];
+    child0.flex = node.ratio;
+    child1.flex = 1 - node.ratio;
+    child0.parent = node;
+    child1.parent = node;
+
+    const dom0 = buildDockNodeDOM(child0, dock);
+    splitEl.appendChild(dom0);
+
+    const splitter = document.createElement('div');
+    splitter.className = `dock-splitter dock-splitter-${node.direction}`;
+    splitEl.appendChild(splitter);
+    node.splitterEl = splitter;
+    setupSplitterDrag(splitter, node, dock);
+
+    const dom1 = buildDockNodeDOM(child1, dock);
+    splitEl.appendChild(dom1);
+
+    node.el = splitEl;
+    return splitEl;
+  }
+
+  function setupSplitterDrag(splitterEl, splitNode, dock) {
+    let dragging = false, startPos, origRatio;
+
+    splitterEl.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      dragging = true;
+      origRatio = splitNode.ratio;
+      startPos = splitNode.direction === 'horizontal' ? e.clientX : e.clientY;
+      splitterEl.classList.add('active');
+      e.preventDefault();
+      e.stopPropagation();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!dragging) return;
+      const containerRect = splitNode.el.getBoundingClientRect();
+      const totalSize = splitNode.direction === 'horizontal' ? containerRect.width : containerRect.height;
+      const cursorPos = splitNode.direction === 'horizontal' ? e.clientX : e.clientY;
+      const containerStart = splitNode.direction === 'horizontal' ? containerRect.left : containerRect.top;
+      const newRatio = Math.max(0.1, Math.min(0.9, (cursorPos - containerStart) / totalSize));
+      splitNode.ratio = newRatio;
+
+      const child0El = splitNode.children[0].el;
+      const child1El = splitNode.children[1].el;
+      if (child0El) child0El.style.flex = newRatio;
+      if (child1El) child1El.style.flex = 1 - newRatio;
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (dragging) {
+        dragging = false;
+        splitterEl.classList.remove('active');
+      }
+    });
+
+    splitterEl.addEventListener('dblclick', () => {
+      splitNode.ratio = 0.5;
+      const child0El = splitNode.children[0].el;
+      const child1El = splitNode.children[1].el;
+      if (child0El) child0El.style.flex = 0.5;
+      if (child1El) child1El.style.flex = 0.5;
+    });
+  }
+
+  function mergeWindowsIntoTabs(sourceId, targetId) {
+    const source = windows.find(w => w.id === sourceId);
+    const target = windows.find(w => w.id === targetId);
+    if (!source || !target) return;
+
+    const bounds = {
+      left: parseInt(target.el.style.left), top: parseInt(target.el.style.top),
+      width: parseInt(target.el.style.width), height: parseInt(target.el.style.height),
+    };
+
+    const dock = createDockContainer(bounds);
+    const leaf = {
+      type: 'leaf',
+      tabs: [targetId, sourceId],
+      activeTab: sourceId,
+      el: null, tabBarEl: null, contentEl: null,
+      parent: null,
+    };
+    dock.root = leaf;
+
+    target.el.classList.add('docked');
+    source.el.classList.add('docked');
+    target.dockId = dock.id;
+    source.dockId = dock.id;
+    target.dockLeaf = leaf;
+    source.dockLeaf = leaf;
+
+    renderDockTree(dock);
+    focusWindow(sourceId);
+    updateWindowsList();
+  }
+
+  function mergeWindowsAsSplit(sourceId, targetId, side) {
+    const source = windows.find(w => w.id === sourceId);
+    const target = windows.find(w => w.id === targetId);
+    if (!source || !target) return;
+
+    const bounds = {
+      left: parseInt(target.el.style.left), top: parseInt(target.el.style.top),
+      width: parseInt(target.el.style.width), height: parseInt(target.el.style.height),
+    };
+
+    const dock = createDockContainer(bounds);
+    const direction = (side === 'left' || side === 'right') ? 'horizontal' : 'vertical';
+    const firstIsTarget = (side === 'right' || side === 'bottom');
+
+    const leaf1 = { type: 'leaf', tabs: [firstIsTarget ? targetId : sourceId], activeTab: firstIsTarget ? targetId : sourceId, el: null, tabBarEl: null, contentEl: null, parent: null };
+    const leaf2 = { type: 'leaf', tabs: [firstIsTarget ? sourceId : targetId], activeTab: firstIsTarget ? sourceId : targetId, el: null, tabBarEl: null, contentEl: null, parent: null };
+
+    dock.root = {
+      type: 'split', direction, ratio: 0.5,
+      children: [leaf1, leaf2], el: null, splitterEl: null, parent: null,
+    };
+    leaf1.parent = dock.root;
+    leaf2.parent = dock.root;
+
+    target.el.classList.add('docked');
+    source.el.classList.add('docked');
+    target.dockId = dock.id;
+    source.dockId = dock.id;
+
+    renderDockTree(dock);
+    focusWindow(sourceId);
+    updateWindowsList();
+  }
+
+  function dockWindowAsTab(winId, leaf, dock) {
+    const win = windows.find(w => w.id === winId);
+    if (!win) return;
+
+    win.el.classList.add('docked');
+    win.dockId = dock.id;
+    win.dockLeaf = leaf;
+    leaf.tabs.push(winId);
+
+    activateTab(leaf, winId, dock);
+    focusWindow(winId);
+    updateWindowsList();
+  }
+
+  function dockWindowAsSplit(winId, leaf, dock, side) {
+    const win = windows.find(w => w.id === winId);
+    if (!win) return;
+
+    win.el.classList.add('docked');
+    win.dockId = dock.id;
+
+    const direction = (side === 'left' || side === 'right') ? 'horizontal' : 'vertical';
+    const newLeaf = { type: 'leaf', tabs: [winId], activeTab: winId, el: null, tabBarEl: null, contentEl: null, parent: null };
+    win.dockLeaf = newLeaf;
+
+    const firstIsExisting = (side === 'right' || side === 'bottom');
+    const children = firstIsExisting ? [leaf, newLeaf] : [newLeaf, leaf];
+
+    const splitNode = {
+      type: 'split', direction, ratio: 0.5,
+      children, el: null, splitterEl: null, parent: leaf.parent,
+    };
+
+    replaceNodeInTree(dock, leaf, splitNode);
+    children[0].parent = splitNode;
+    children[1].parent = splitNode;
+    renderDockTree(dock);
+    focusWindow(winId);
+    updateWindowsList();
+  }
+
+  function replaceNodeInTree(dock, oldNode, newNode) {
+    if (dock.root === oldNode) {
+      dock.root = newNode;
+      newNode.parent = null;
+      return;
+    }
+    const parent = oldNode.parent;
+    if (!parent || parent.type !== 'split') return;
+    const idx = parent.children.indexOf(oldNode);
+    if (idx !== -1) {
+      parent.children[idx] = newNode;
+      newNode.parent = parent;
+    }
+  }
+
+  function removeTabFromLeaf(winId, leaf, dock, skipCleanup) {
+    const idx = leaf.tabs.indexOf(winId);
+    if (idx === -1) return;
+    leaf.tabs.splice(idx, 1);
+
+    const win = windows.find(w => w.id === winId);
+    if (win) {
+      const body = Array.from(leaf.contentEl.querySelectorAll('.win-body')).find(b =>
+        b.dataset.winId == winId || (!b.dataset.winId && leaf.activeTab === winId));
+      const statusbar = Array.from(leaf.contentEl.querySelectorAll('.win-statusbar')).find(s =>
+        s.dataset.winId == winId || (!s.dataset.winId && leaf.activeTab === winId));
+      if (body) { win.el.insertBefore(body, win.el.querySelector('.resize-handle')); body.style.display = ''; delete body.dataset.winId; }
+      if (statusbar) { win.el.insertBefore(statusbar, win.el.querySelector('.resize-handle')); statusbar.style.display = ''; delete statusbar.dataset.winId; }
+      win.dockId = null;
+      win.dockLeaf = null;
+    }
+
+    if (skipCleanup) {
+      if (leaf.activeTab === winId) leaf.activeTab = leaf.tabs[0] || null;
+      return;
+    }
+
+    if (leaf.tabs.length === 0) {
+      collapseLeaf(leaf, dock);
+    } else {
+      if (leaf.activeTab === winId) {
+        activateTab(leaf, leaf.tabs[0], dock);
+      }
+      renderTabBar(leaf, dock);
+      if (shouldDissolveDock(dock)) {
+        dissolveDock(dock);
+      }
+    }
+  }
+
+  function cleanupAfterTabRemoval(leaf, dock) {
+    if (!dockContainers.includes(dock)) return;
+    if (leaf.tabs.length === 0) {
+      collapseLeaf(leaf, dock);
+    } else {
+      renderTabBar(leaf, dock);
+      if (shouldDissolveDock(dock)) {
+        dissolveDock(dock);
+      }
+    }
+  }
+
+  function undockWindow(winId) {
+    const win = windows.find(w => w.id === winId);
+    if (!win || !win.dockId) return;
+
+    const dock = dockContainers.find(d => d.id === win.dockId);
+    const leaf = win.dockLeaf;
+    if (!dock || !leaf) return;
+
+    removeTabFromLeaf(winId, leaf, dock);
+    win.el.classList.remove('docked');
+    if (dock.el) {
+      win.el.style.left = (parseInt(dock.el.style.left) + 20) + 'px';
+      win.el.style.top = (parseInt(dock.el.style.top) + 20) + 'px';
+      win.el.style.width = Math.max(280, Math.round(parseInt(dock.el.style.width) * 0.6)) + 'px';
+      win.el.style.height = Math.max(160, Math.round(parseInt(dock.el.style.height) * 0.6)) + 'px';
+    }
+    win.el.style.zIndex = ++nextZIndex;
+
+    focusWindow(winId);
+    updateWindowsList();
+  }
+
+  function collapseLeaf(leaf, dock) {
+    if (dock.root === leaf) {
+      destroyDockContainer(dock.id);
+      return;
+    }
+    const parent = leaf.parent;
+    if (!parent || parent.type !== 'split') return;
+    const sibling = parent.children[0] === leaf ? parent.children[1] : parent.children[0];
+
+    replaceNodeInTree(dock, parent, sibling);
+
+    if (shouldDissolveDock(dock)) {
+      dissolveDock(dock);
+    } else {
+      renderDockTree(dock);
+    }
+  }
+
+  function shouldDissolveDock(dock) {
+    return dock.root && dock.root.type === 'leaf' && dock.root.tabs.length === 1;
+  }
+
+  function dissolveDock(dock) {
+    const leaf = dock.root;
+    const winId = leaf.tabs[0];
+    const win = windows.find(w => w.id === winId);
+    if (!win) { destroyDockContainer(dock.id); return; }
+
+    const body = leaf.contentEl.querySelector('.win-body:not([style*="display: none"])');
+    const statusbar = leaf.contentEl.querySelector('.win-statusbar:not([style*="display: none"])');
+    if (body) { win.el.insertBefore(body, win.el.querySelector('.resize-handle')); body.style.display = ''; delete body.dataset.winId; }
+    if (statusbar) { win.el.insertBefore(statusbar, win.el.querySelector('.resize-handle')); statusbar.style.display = ''; delete statusbar.dataset.winId; }
+
+    win.el.classList.remove('docked');
+    win.el.style.left = dock.el.style.left;
+    win.el.style.top = dock.el.style.top;
+    win.el.style.width = dock.el.style.width;
+    win.el.style.height = dock.el.style.height;
+    win.el.style.zIndex = dock.el.style.zIndex;
+    win.maximized = dock.maximized;
+    win.prevBounds = dock.prevBounds;
+    win.dockId = null;
+    win.dockLeaf = null;
+
+    destroyDockContainer(dock.id);
+    focusWindow(winId);
+    updateWindowsList();
+  }
+
+  function detectDropTarget(clientX, clientY, excludeWinId) {
+    const area = document.getElementById('window-area');
+    const areaRect = area.getBoundingClientRect();
+
+    // Check dock container leaves first (more specific targets)
+    for (let i = dockContainers.length - 1; i >= 0; i--) {
+      const dock = dockContainers[i];
+      if (dock.el.classList.contains('minimized')) continue;
+      const dockRect = dock.el.getBoundingClientRect();
+      if (clientX < dockRect.left || clientX > dockRect.right ||
+          clientY < dockRect.top || clientY > dockRect.bottom) continue;
+
+      const leaf = findLeafAtPoint(dock.root, clientX, clientY, excludeWinId);
+      if (leaf) {
+        const leafRect = leaf.el.getBoundingClientRect();
+        const tbH = leaf.tabBarEl && leaf.tabBarEl.offsetParent !== null ? leaf.tabBarEl.offsetHeight : 0;
+        const zone = getDropZone(clientX, clientY, leafRect, tbH);
+        return { type: 'leaf', leaf, dock, zone, rect: leafRect };
+      }
+    }
+
+    // Check standalone windows (by z-index order, highest first)
+    const sorted = windows
+      .filter(w => !w.dockId && w.id !== excludeWinId && !w.el.classList.contains('minimized') && w.dockable !== false)
+      .sort((a, b) => (parseInt(b.el.style.zIndex) || 0) - (parseInt(a.el.style.zIndex) || 0));
+
+    for (const w of sorted) {
+      const r = w.el.getBoundingClientRect();
+      if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) {
+        const zone = getDropZone(clientX, clientY, r);
+        return { type: 'window', win: w, zone, rect: r };
+      }
+    }
+
+    return null;
+  }
+
+  function findLeafAtPoint(node, x, y, excludeWinId) {
+    if (!node || !node.el) return null;
+    const rect = node.el.getBoundingClientRect();
+    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) return null;
+
+    if (node.type === 'leaf') {
+      if (node.tabs.length === 1 && node.tabs[0] === excludeWinId) return null;
+      return node;
+    }
+
+    for (const child of node.children) {
+      const found = findLeafAtPoint(child, x, y, excludeWinId);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  function getDropZone(x, y, rect, titlebarHeight) {
+    const relX = x - rect.left, relY = y - rect.top;
+    const tbH = titlebarHeight || 32;
+    if (relY < tbH) return 'center';
+    const bx = relX, by = relY - tbH;
+    const bw = rect.width, bh = rect.height - tbH;
+    if (bw <= 0 || bh <= 0) return 'center';
+    const u = bx / bw, v = by / bh;
+    if (v < u && v < 1 - u) return 'top';
+    if (v > u && v > 1 - u) return 'bottom';
+    if (v >= u && v <= 1 - u) return 'left';
+    return 'right';
+  }
+
+  function showDropOverlay(target) {
+    hideDropOverlay();
+    const area = document.getElementById('window-area');
+    const areaRect = area.getBoundingClientRect();
+    const container = target.type === 'leaf' ? target.leaf.el : target.win.el;
+    const rect = container.getBoundingClientRect();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'dock-drop-overlay';
+    overlay.style.left = (rect.left - areaRect.left) + 'px';
+    overlay.style.top = (rect.top - areaRect.top) + 'px';
+    overlay.style.width = rect.width + 'px';
+    overlay.style.height = rect.height + 'px';
+
+    let tbH = 32;
+    if (target.type === 'leaf' && target.leaf.tabBarEl) {
+      tbH = target.leaf.tabBarEl.offsetParent !== null ? target.leaf.tabBarEl.offsetHeight : 0;
+    }
+    const w = rect.width, h = rect.height;
+    const bodyTop = tbH, bodyH = h - tbH;
+    const tbPct = (tbH / h) * 100;
+    const midX = 50, midY = tbPct + ((100 - tbPct) / 2);
+
+    const zoneEl = document.createElement('div');
+    zoneEl.className = 'dock-drop-zone active';
+    zoneEl.style.position = 'absolute';
+    if (target.zone === 'center') {
+      zoneEl.style.inset = '0';
+    } else if (target.zone === 'top') {
+      zoneEl.style.left = '0'; zoneEl.style.right = '0';
+      zoneEl.style.top = tbH + 'px'; zoneEl.style.height = (bodyH / 2) + 'px';
+    } else if (target.zone === 'bottom') {
+      zoneEl.style.left = '0'; zoneEl.style.right = '0';
+      zoneEl.style.bottom = '0'; zoneEl.style.height = (bodyH / 2) + 'px';
+    } else if (target.zone === 'left') {
+      zoneEl.style.top = tbH + 'px'; zoneEl.style.bottom = '0';
+      zoneEl.style.left = '0'; zoneEl.style.width = (w / 2) + 'px';
+    } else if (target.zone === 'right') {
+      zoneEl.style.top = tbH + 'px'; zoneEl.style.bottom = '0';
+      zoneEl.style.right = '0'; zoneEl.style.width = (w / 2) + 'px';
+    }
+    overlay.appendChild(zoneEl);
+
+    area.appendChild(overlay);
+    _dockDropOverlay = overlay;
+  }
+
+  function hideDropOverlay() {
+    if (_dockDropOverlay) {
+      _dockDropOverlay.remove();
+      _dockDropOverlay = null;
+    }
+  }
+
+  function executeDock(sourceWinId, target) {
+    const sourceWin = windows.find(w => w.id === sourceWinId);
+    if (!sourceWin) return;
+
+    if (sourceWin.dockId) {
+      const oldDock = dockContainers.find(d => d.id === sourceWin.dockId);
+      const oldLeaf = sourceWin.dockLeaf;
+      if (oldDock && oldLeaf) {
+        const sameDock = target.type === 'leaf' && target.dock === oldDock;
+        removeTabFromLeaf(sourceWinId, oldLeaf, oldDock, sameDock);
+        sourceWin.el.classList.remove('docked');
+        if (sameDock) {
+          if (target.zone === 'center') {
+            sourceWin.el.classList.add('docked');
+            dockWindowAsTab(sourceWinId, target.leaf, target.dock);
+          } else {
+            sourceWin.el.classList.add('docked');
+            dockWindowAsSplit(sourceWinId, target.leaf, target.dock, target.zone);
+          }
+          cleanupAfterTabRemoval(oldLeaf, oldDock);
+          return;
+        }
+      }
+    }
+
+    if (target.type === 'window') {
+      if (target.zone === 'center') {
+        if (target.win.dockable !== false) mergeWindowsIntoTabs(sourceWinId, target.win.id);
+      } else {
+        mergeWindowsAsSplit(sourceWinId, target.win.id, target.zone);
+      }
+    } else if (target.type === 'leaf') {
+      if (target.zone === 'center') {
+        sourceWin.el.classList.add('docked');
+        dockWindowAsTab(sourceWinId, target.leaf, target.dock);
+      } else {
+        sourceWin.el.classList.add('docked');
+        dockWindowAsSplit(sourceWinId, target.leaf, target.dock, target.zone);
+      }
+    }
+  }
+
+  function getLayoutUnits() {
+    const units = [];
+    windows.filter(w => !w.dockId && !w.el.classList.contains('minimized')).forEach(w => {
+      units.push({ type: 'window', obj: w, el: w.el });
+    });
+    dockContainers.filter(d => !d.el.classList.contains('minimized')).forEach(d => {
+      units.push({ type: 'dock', obj: d, el: d.el });
+    });
+    return units;
   }
 
   // ---- Table Window ----
@@ -1636,7 +2894,7 @@ const app = (() => {
       addRow(win.tableName);
       rebuildTable(win);
       // Scroll to bottom to show new row
-      const container = win.el.querySelector('.table-container');
+      const container = win.bodyEl.querySelector('.table-container');
       if (container) container.scrollTop = container.scrollHeight;
     });
 
@@ -1812,6 +3070,7 @@ const app = (() => {
       const resizeHandle = document.createElement('div');
       resizeHandle.className = 'col-resize-handle';
       resizeHandle.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
         e.stopPropagation();
         e.preventDefault();
         startColResize(win, colIdx, e);
@@ -2046,6 +3305,11 @@ const app = (() => {
       }
     }, true); // capture phase for blur
 
+    table.addEventListener('mousedown', (e) => {
+      if (e.button !== 0 && (e.target.closest('td.data-cell') || e.target.closest('td.row-num'))) {
+        e.preventDefault();
+      }
+    });
     table.addEventListener('focusin', (e) => {
       const td = e.target;
       if (td.tagName !== 'TD' || !td.classList.contains('data-cell')) return;
@@ -2330,7 +3594,7 @@ const app = (() => {
 
       // "/" in select mode → jump to this window's filter input
       if (!inEdit && noMods && e.key === '/') {
-        const filterInput = win.el.querySelector('.filter-input');
+        const filterInput = win.bodyEl.querySelector('.filter-input');
         if (filterInput) {
           e.preventDefault();
           filterInput.focus();
@@ -2494,8 +3758,8 @@ const app = (() => {
     win._resizeObserver.observe(container);
 
     // Update statusbar
-    const statusLeft = win.el.querySelector('.status-left');
-    const statusRight = win.el.querySelector('.status-right');
+    const statusLeft = win.statusbarEl.querySelector('.status-left');
+    const statusRight = win.statusbarEl.querySelector('.status-right');
     const hasColumnFilters = Object.keys(win.columnFilters).length > 0;
     const hasLinkFilters = Object.keys(win.linkFilters).length > 0;
     const hasWhereFilter = !!win.filterText;
@@ -2508,7 +3772,7 @@ const app = (() => {
         clearLink.addEventListener('click', () => {
           win.columnFilters = {};
           win.filterText = '';
-          const filterInput = win.el.querySelector('.filter-input');
+          const filterInput = win.bodyEl.querySelector('.filter-input');
           if (filterInput) filterInput.value = '';
           rebuildTable(win);
         });
@@ -2527,7 +3791,7 @@ const app = (() => {
     }
     statusRight.textContent = `${columns.length} columns`;
 
-    const statusCenter = win.el.querySelector('.status-center');
+    const statusCenter = win.statusbarEl.querySelector('.status-center');
     statusCenter.innerHTML = '';
     const transformedCols = win.tableName && _columnTransformCache[win.tableName]
       ? Object.keys(_columnTransformCache[win.tableName]) : [];
@@ -3029,7 +4293,7 @@ const app = (() => {
 
   function cycleTableWindow(currentWin, dir) {
     const list = windows.filter(w =>
-      w.tableName && tables[w.tableName] && !w.el.classList.contains('minimized')
+      w.tableName && tables[w.tableName] && !isWindowMinimized(w)
     );
     if (list.length < 2) return false;
     const idx = list.indexOf(currentWin);
@@ -3046,6 +4310,17 @@ const app = (() => {
   }
 
   function nudgeWindow(win, dx, dy) {
+    if (win.dockId) {
+      const dock = dockContainers.find(d => d.id === win.dockId);
+      if (!dock) return;
+      const left = parseInt(dock.el.style.left) || 0;
+      const top = parseInt(dock.el.style.top) || 0;
+      const area = document.getElementById('window-area');
+      dock.el.style.left = Math.max(0, Math.min(left + dx, area.clientWidth - dock.el.offsetWidth)) + 'px';
+      dock.el.style.top = Math.max(0, Math.min(top + dy, area.clientHeight - dock.el.offsetHeight)) + 'px';
+      if (dock.maximized) dock.maximized = false;
+      return;
+    }
     const left = parseInt(win.el.style.left) || 0;
     const top = parseInt(win.el.style.top) || 0;
     const area = document.getElementById('window-area');
@@ -3100,7 +4375,7 @@ const app = (() => {
   function rebuildTable(win) {
     const t = tables[win.tableName];
     if (!t) return;
-    const container = win.el.querySelector('.table-container');
+    const container = win.bodyEl.querySelector('.table-container');
     if (!container) return;
 
     const oldFilter = win._lastFilterText;
@@ -3349,7 +4624,7 @@ const app = (() => {
     document.removeEventListener('keydown', _autoFilterEscapeKey);
     window.removeEventListener('resize', closeAutoFilter);
     if (_activeAutoFilter.scrollHandler) {
-      const container = _activeAutoFilter.win.el.querySelector('.table-container');
+      const container = _activeAutoFilter.win.bodyEl.querySelector('.table-container');
       if (container) container.removeEventListener('scroll', _activeAutoFilter.scrollHandler);
     }
     _activeAutoFilter = null;
@@ -3573,7 +4848,7 @@ const app = (() => {
 
     // Close on outside click or Escape
     const scrollHandler = () => closeAutoFilter();
-    const container = win.el.querySelector('.table-container');
+    const container = win.bodyEl.querySelector('.table-container');
     if (container) container.addEventListener('scroll', scrollHandler);
 
     _activeAutoFilter = { win, col, el: dropdown, scrollHandler };
@@ -4203,6 +5478,7 @@ const app = (() => {
     let resizing = false, startY, origH;
 
     handle.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
       resizing = true;
       startY = e.clientY;
       origH = panel.offsetHeight;
@@ -4426,7 +5702,7 @@ const app = (() => {
     const h = Math.min(500, rect.height - 40);
     createSubwindow(title, (win, body) => {
       body.innerHTML = `<div class="help-body">${bodyHTML}</div>`;
-    }, { width: w, height: h });
+    }, { width: w, height: h, dockable: false });
   }
 
   function showAbout() {
@@ -4441,7 +5717,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.22.0 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.23.0 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -4563,6 +5839,19 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <li><strong>Close:</strong> Click the close button. <code>Ctrl</code>/<code>&#8984;</code>+click closes all windows.</li>
 <li><strong>Layout:</strong> Use the Windows menu to tile, grid, or cascade all windows.</li>
 <li><strong>Proportional scaling:</strong> Windows reposition and resize proportionally when the browser window or console panel is resized.</li>
+</ul>
+
+<h4>Tabbing and Docking</h4>
+<p>Windows can be combined into tabbed groups and split layouts for an IDE-style workspace.</p>
+<ul>
+<li><strong>Tab windows:</strong> Hold <code>Shift</code> and drag a window onto another window's title bar to merge them into a tab group. Click tabs to switch between windows.</li>
+<li><strong>Split dock:</strong> Hold <code>Shift</code> and drag a window onto the body area of another window. Drop zones are divided diagonally &mdash; drop on the top, right, bottom, or left region to split that direction.</li>
+<li><strong>Rearrange:</strong> Hold <code>Shift</code> and drag a tab to move it to another window or dock pane. A ghost preview shows where the window will land.</li>
+<li><strong>Undock:</strong> Hold <code>Shift</code> and drag a tab outside its dock container to detach it as a standalone window. The undocked window retains the pane's size.</li>
+<li><strong>Splitter:</strong> Drag the divider between split panes to resize. Double-click to reset to 50/50.</li>
+<li><strong>Maximize:</strong> Double-click a tab or the empty tab bar area to maximize/restore the dock container.</li>
+<li><strong>Rename:</strong> <code>Ctrl</code>/<code>&#8984;</code>+click a tab to rename the table.</li>
+<li><strong>Close tab:</strong> Click the &#10005; on a tab. When a dock reduces to a single tab, it dissolves back to a standalone window.</li>
 </ul>
 
 <h4>Keyboard Shortcuts</h4>
@@ -6697,7 +7986,7 @@ ${_aiImageContext()}`;
       body.querySelector('.plugin-about-unload').addEventListener('click', () => {
         unloadPlugin(pluginIndex);
       });
-    }, { width: w, height: h });
+    }, { width: w, height: h, dockable: false });
     _activePluginAboutWin = win;
   }
 
@@ -6848,6 +8137,12 @@ choose(value, 'A', 'Active', 'I', 'Inactive')
         showToast, showPluginAbout, closePluginAboutWindow,
         rebuildTable, rerenderAllWindows,
         undoTable, redoTable,
+        get dockContainers() { return dockContainers; },
+        mergeWindowsIntoTabs, mergeWindowsAsSplit,
+        dockWindowAsTab, dockWindowAsSplit,
+        undockWindow, closeDock,
+        removeTabFromLeaf, cleanupAfterTabRemoval,
+        toggleMaximizeDock, getDropZone, detectDropTarget,
       }
     } : {}),
   };
