@@ -1811,9 +1811,27 @@ const app = (() => {
     });
 
     setupDockResize(dock);
-    el.addEventListener('mousedown', () => {
-      const leaf = dock.root && dock.root.type === 'leaf' ? dock.root : null;
-      const activeTab = leaf ? leaf.activeTab : null;
+    el.addEventListener('mousedown', (e) => {
+      let activeTab = null;
+      const leafEl = e.target.closest && e.target.closest('.dock-leaf');
+      if (leafEl) {
+        const leaf = (function findLeaf(node) {
+          if (!node) return null;
+          if (node.type === 'leaf' && node.el === leafEl) return node;
+          if (node.type === 'split') {
+            for (const c of node.children) { const f = findLeaf(c); if (f) return f; }
+          }
+          return null;
+        })(dock.root);
+        if (leaf) activeTab = leaf.activeTab;
+      }
+      if (!activeTab && dock.root) {
+        const firstLeaf = (function first(node) {
+          if (node.type === 'leaf') return node;
+          return first(node.children[0]);
+        })(dock.root);
+        if (firstLeaf) activeTab = firstLeaf.activeTab;
+      }
       if (activeTab) focusWindow(activeTab);
       else {
         dockContainers.forEach(d => d.el.classList.toggle('active', d.id === dock.id));
@@ -5717,7 +5735,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.23.0 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.23.1 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -8137,6 +8155,8 @@ choose(value, 'A', 'Active', 'I', 'Inactive')
         showToast, showPluginAbout, closePluginAboutWindow,
         rebuildTable, rerenderAllWindows,
         undoTable, redoTable,
+        get activeWinId() { return activeWinId; },
+        focusWindow, getActiveDataWindow,
         get dockContainers() { return dockContainers; },
         mergeWindowsIntoTabs, mergeWindowsAsSplit,
         dockWindowAsTab, dockWindowAsSplit,
