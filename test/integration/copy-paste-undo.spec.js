@@ -377,6 +377,142 @@ test.describe('Copy, Paste, Undo, Redo', () => {
     expect(sel.cells.length).toBe(30);
   });
 
+  test('Select All toggles to Select None on second invocation via keyboard', async ({ page }) => {
+    const cell = page.locator('.subwindow table tbody td.data-cell').first();
+    await cell.click();
+    await page.keyboard.press('Control+Shift+a');
+    await page.waitForTimeout(100);
+    let sel = await getSelection(page, 'sample1');
+    expect(sel.cells.length).toBe(30);
+    // Second invocation deselects all
+    await page.keyboard.press('Control+Shift+a');
+    await page.waitForTimeout(100);
+    sel = await getSelection(page, 'sample1');
+    expect(sel.cells.length).toBe(0);
+    expect(sel.anchor).toBeNull();
+  });
+
+  test('Select All toggles to Select None via Edit menu button', async ({ page }) => {
+    // First click: select all
+    await page.locator('#menu-edit .menu-label').click();
+    await page.waitForTimeout(100);
+    await page.locator('#btn-select-all').click();
+    await page.waitForTimeout(100);
+    let sel = await getSelection(page, 'sample1');
+    expect(sel.cells.length).toBe(30);
+    // Second click: select none
+    await page.locator('#menu-edit .menu-label').click();
+    await page.waitForTimeout(100);
+    await page.locator('#btn-select-all').click();
+    await page.waitForTimeout(100);
+    sel = await getSelection(page, 'sample1');
+    expect(sel.cells.length).toBe(0);
+    expect(sel.anchor).toBeNull();
+  });
+
+  test('Select All toggles to Select None via corner cell click', async ({ page }) => {
+    const corner = page.locator('.subwindow table thead th.row-num-header');
+    await corner.click();
+    await page.waitForTimeout(100);
+    let sel = await getSelection(page, 'sample1');
+    expect(sel.cells.length).toBe(30);
+    // Second click deselects
+    await corner.click();
+    await page.waitForTimeout(100);
+    sel = await getSelection(page, 'sample1');
+    expect(sel.cells.length).toBe(0);
+    expect(sel.anchor).toBeNull();
+  });
+
+  test('Edit menu shows Select None when all cells are selected', async ({ page }) => {
+    const cell = page.locator('.subwindow table tbody td.data-cell').first();
+    await cell.click();
+    await page.keyboard.press('Control+Shift+a');
+    await page.waitForTimeout(100);
+    await page.locator('#menu-edit .menu-label').click();
+    await page.waitForTimeout(100);
+    const btnText = await page.locator('#btn-select-all').evaluate(el => el.firstChild.textContent);
+    expect(btnText).toBe('Select None');
+  });
+
+  test('Edit menu shows Select All when not all cells are selected', async ({ page }) => {
+    // With just one cell selected
+    const cell = page.locator('.subwindow table tbody td.data-cell').first();
+    await cell.click();
+    await page.waitForTimeout(100);
+    await page.locator('#menu-edit .menu-label').click();
+    await page.waitForTimeout(100);
+    const btnText = await page.locator('#btn-select-all').evaluate(el => el.firstChild.textContent);
+    expect(btnText).toBe('Select All');
+  });
+
+  test('Edit menu reverts to Select All after toggling off', async ({ page }) => {
+    // Select all, then deselect, then check menu label
+    const cell = page.locator('.subwindow table tbody td.data-cell').first();
+    await cell.click();
+    await page.keyboard.press('Control+Shift+a');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Control+Shift+a');
+    await page.waitForTimeout(100);
+    await page.locator('#menu-edit .menu-label').click();
+    await page.waitForTimeout(100);
+    const btnText = await page.locator('#btn-select-all').evaluate(el => el.firstChild.textContent);
+    expect(btnText).toBe('Select All');
+  });
+
+  test('Select None clears _copyWithHeader flag', async ({ page }) => {
+    const cell = page.locator('.subwindow table tbody td.data-cell').first();
+    await cell.click();
+    await page.keyboard.press('Control+Shift+a');
+    await page.waitForTimeout(100);
+    // Verify _copyWithHeader is set
+    let copyWithHeader = await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'sample1');
+      return w._copyWithHeader;
+    });
+    expect(copyWithHeader).toBe(true);
+    // Toggle off
+    await page.keyboard.press('Control+Shift+a');
+    await page.waitForTimeout(100);
+    copyWithHeader = await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'sample1');
+      return w._copyWithHeader;
+    });
+    expect(copyWithHeader).toBe(false);
+  });
+
+  test('Select None via global handler without cell focus', async ({ page }) => {
+    // Select all from title bar (global handler)
+    await page.locator('.subwindow .win-title').first().click();
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Control+Shift+a');
+    await page.waitForTimeout(100);
+    let sel = await getSelection(page, 'sample1');
+    expect(sel.cells.length).toBe(30);
+    // Toggle off from title bar (global handler)
+    await page.locator('.subwindow .win-title').first().click();
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Control+Shift+a');
+    await page.waitForTimeout(100);
+    sel = await getSelection(page, 'sample1');
+    expect(sel.cells.length).toBe(0);
+  });
+
+  test('Partial selection does not toggle to Select None', async ({ page }) => {
+    // Select a few cells via shift+arrow, then Select All should select all (not deselect)
+    const cell = page.locator('.subwindow table tbody td.data-cell').first();
+    await cell.click();
+    await page.keyboard.press('Shift+ArrowRight');
+    await page.waitForTimeout(100);
+    let sel = await getSelection(page, 'sample1');
+    expect(sel.cells.length).toBe(2);
+    // Select All should select everything, not toggle off
+    await page.keyboard.press('Control+Shift+a');
+    await page.waitForTimeout(100);
+    sel = await getSelection(page, 'sample1');
+    expect(sel.cells.length).toBe(30);
+  });
+
   test('copy after row-select then normal select does not include header', async ({ page }) => {
     // Row-select first (sets _copyWithHeader)
     const rowNum = page.locator('.subwindow table tbody td.row-num').first();

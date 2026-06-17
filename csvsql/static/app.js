@@ -4086,9 +4086,24 @@ const app = (() => {
     win._programmaticFocus = false;
   }
 
+  function isAllSelected(win) {
+    if (!win._displayRows || !win._columns || win._columns.length === 0) return false;
+    if (win._displayRows.length === 0) return false;
+    const total = win._displayRows.length * win._columns.length;
+    return total > 0 && win.selectedCells && win.selectedCells.size === total;
+  }
+
+  function selectNoneCells(win) {
+    win.selectedCells = new Set();
+    win.anchorCell = null;
+    win._copyWithHeader = false;
+    applyCellHighlights(win);
+  }
+
   function selectAllCells(win) {
     if (!win._displayRows || !win._columns || win._columns.length === 0) return;
     if (win._displayRows.length === 0) return;
+    if (isAllSelected(win)) { selectNoneCells(win); return; }
     win.selectedCells = new Set();
     for (const row of win._displayRows) {
       for (const col of win._columns) {
@@ -5591,7 +5606,9 @@ const app = (() => {
       document.getElementById('btn-cut').disabled = !hasSel;
       document.getElementById('btn-copy').disabled = !hasSel;
       document.getElementById('btn-paste').disabled = !(win && win.anchorCell);
-      document.getElementById('btn-select-all').disabled = !(win && win.tableName && tables[win.tableName]);
+      const btnSelAll = document.getElementById('btn-select-all');
+      btnSelAll.disabled = !(win && win.tableName && tables[win.tableName]);
+      btnSelAll.firstChild.textContent = (win && isAllSelected(win)) ? 'Select None' : 'Select All';
     }
 
     function openItem(item) {
@@ -5776,7 +5793,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <h4>Editing</h4>
 <ul>
 <li><strong>Edit cells:</strong> Click a cell to select it; press <code>Enter</code>, <code>i</code>, <code>F2</code>, or <code>Ctrl</code>/<code>&#8984;</code>+<code>U</code> to enter edit mode, or <code>Ctrl</code>/<code>&#8984;</code>+click a cell to edit it directly. <code>Tab</code>/<code>Shift+Tab</code> moves between cells, <code>Enter</code> saves and moves down, <code>Escape</code> reverts the edit (and clears the selection when not editing).</li>
-<li><strong>Highlight row &amp; column:</strong> Clicking a cell also highlights its row and column. Move the selection with arrow keys or vim-style <code>h</code>/<code>j</code>/<code>k</code>/<code>l</code>; extend to a rectangle of cells with <code>Shift</code>+arrow (or <code>Shift</code>+<code>H</code>/<code>J</code>/<code>K</code>/<code>L</code>), <code>Shift</code>+click on another cell, or click-and-drag across cells &mdash; every selected cell's row and column is highlighted so you can see what lines up with what. Click a row number to select an entire row; drag across row numbers or <code>Shift</code>+click another row number to select a range. Click the <code>#</code> corner cell or press <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>A</code> to select all. Pressing an arrow key with no cell selected focuses the cell in the middle of the current view. <code>Esc</code> clears the selection.</li>
+<li><strong>Highlight row &amp; column:</strong> Clicking a cell also highlights its row and column. Move the selection with arrow keys or vim-style <code>h</code>/<code>j</code>/<code>k</code>/<code>l</code>; extend to a rectangle of cells with <code>Shift</code>+arrow (or <code>Shift</code>+<code>H</code>/<code>J</code>/<code>K</code>/<code>L</code>), <code>Shift</code>+click on another cell, or click-and-drag across cells &mdash; every selected cell's row and column is highlighted so you can see what lines up with what. Click a row number to select an entire row; drag across row numbers or <code>Shift</code>+click another row number to select a range. Click the <code>#</code> corner cell or press <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>A</code> to select all; repeat to deselect (the Edit menu shows &ldquo;Select None&rdquo; while all cells are selected). Pressing an arrow key with no cell selected focuses the cell in the middle of the current view. <code>Esc</code> clears the selection.</li>
 <li><strong>Cut / Copy / Paste:</strong> Select cells and use <code>Ctrl</code>/<code>&#8984;</code>+<code>X</code>, <code>Ctrl</code>/<code>&#8984;</code>+<code>C</code>, <code>Ctrl</code>/<code>&#8984;</code>+<code>V</code>. Data is copied as tab-separated values. Select All and row selection copies include the column header row. In edit mode, these shortcuts pass through to native browser behavior for text within the cell.</li>
 <li><strong>Undo / Redo:</strong> <code>Ctrl</code>/<code>&#8984;</code>+<code>Z</code> to undo, <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>Z</code> to redo. Undoes cell edits, paste, and cut operations. Multi-cell paste and cut undo as a single step. Also available from the Edit menu.</li>
 <li><strong>Add rows:</strong> Click <code>+ Row</code> in the toolbar, or right-click a row number to insert above.</li>
