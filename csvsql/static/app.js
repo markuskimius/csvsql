@@ -3974,8 +3974,8 @@ const app = (() => {
 
   function enterEditMode(td) {
     const tr = td.parentElement;
-    const winEl = td.closest('.subwindow');
-    const win = winEl && windows.find(w => w.el === winEl);
+    const bodyEl = td.closest('.win-body');
+    const win = bodyEl && windows.find(w => w.bodyEl === bodyEl);
     if (win && win.tableName) {
       const colIdx = parseInt(td.dataset.colIdx, 10);
       const displayIdx = parseInt(tr.dataset.displayIdx, 10);
@@ -5735,7 +5735,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.23.1 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.23.2 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
