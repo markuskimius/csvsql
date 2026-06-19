@@ -204,7 +204,7 @@ Multiple plugins can be loaded simultaneously and stack on the same table — ea
 
 **Loading:** Use **Plugins > Load Plugin** in the menu, or drag and drop a `.json` file onto the app. A toast notification confirms success or shows errors. Plugins persist across page reloads.
 
-**Plugin management:** Loaded plugins appear in the Plugins menu with an ✕ button for quick unloading. Click a plugin's name to open an About dialog showing version, author, creation date, description, matching rules, and an Unload button.
+**Plugin management:** Loaded plugins appear in the Plugins menu with an ✕ button for quick unloading — the menu stays open so you can unload multiple plugins without reopening it. Click a plugin's name to open an About dialog showing version, author, creation date, description, matching rules, and an Unload button.
 
 **Toggle:** Columns with an active transform show a pink left border in the header. The **Format** chip in the status bar toggles all transforms on/off (Ctrl/Cmd+Shift+4). Similar chips appear for Sort, Filter, and Link when active.
 

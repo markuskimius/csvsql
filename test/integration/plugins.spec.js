@@ -1049,6 +1049,92 @@ test.describe('Plugin system', () => {
     expect(pluginCount).toBe(0);
   });
 
+  test('menu stays open after clicking unload button', async ({ page }) => {
+    await page.evaluate(async () => {
+      const json = JSON.stringify({
+        name: 'Stay Open', table: '.*',
+        columns: [{ match: '^name$', display: 'upper(value)' }]
+      });
+      const file = new File([json], 'stay.json', { type: 'application/json' });
+      await app._test.loadPluginFile(file);
+    });
+    await page.click('#menu-plugins .menu-label');
+    await page.waitForTimeout(100);
+
+    const menuOpen = await page.$eval('#menu-plugins', el => el.classList.contains('open'));
+    expect(menuOpen).toBe(true);
+
+    await page.click('.plugin-unload');
+    await page.waitForTimeout(100);
+
+    const menuStillOpen = await page.$eval('#menu-plugins', el => el.classList.contains('open'));
+    expect(menuStillOpen).toBe(true);
+  });
+
+  test('menu updates plugin list after unload without closing', async ({ page }) => {
+    await page.evaluate(async () => {
+      for (const name of ['Plugin A', 'Plugin B']) {
+        const json = JSON.stringify({
+          name, table: '.*',
+          columns: [{ match: '^name$', display: 'upper(value)' }]
+        });
+        const file = new File([json], name + '.json', { type: 'application/json' });
+        await app._test.loadPluginFile(file);
+      }
+    });
+    await page.click('#menu-plugins .menu-label');
+    await page.waitForTimeout(100);
+
+    let entries = await page.$$('.plugin-entry');
+    expect(entries.length).toBe(2);
+
+    await page.click('.plugin-unload');
+    await page.waitForTimeout(100);
+
+    entries = await page.$$('.plugin-entry');
+    expect(entries.length).toBe(1);
+    const remainingName = await page.$eval('.plugin-name', el => el.textContent);
+    expect(remainingName).toBe('Plugin B');
+  });
+
+  test('can unload multiple plugins sequentially without reopening menu', async ({ page }) => {
+    await page.evaluate(async () => {
+      for (const name of ['First', 'Second', 'Third']) {
+        const json = JSON.stringify({
+          name, table: '.*',
+          columns: [{ match: '^name$', display: 'upper(value)' }]
+        });
+        const file = new File([json], name + '.json', { type: 'application/json' });
+        await app._test.loadPluginFile(file);
+      }
+    });
+    await page.click('#menu-plugins .menu-label');
+    await page.waitForTimeout(100);
+
+    expect(await page.$$('.plugin-entry').then(e => e.length)).toBe(3);
+
+    // Unload first plugin (always click the first ✕)
+    await page.click('.plugin-unload');
+    await page.waitForTimeout(100);
+    expect(await page.$$('.plugin-entry').then(e => e.length)).toBe(2);
+
+    await page.click('.plugin-unload');
+    await page.waitForTimeout(100);
+    expect(await page.$$('.plugin-entry').then(e => e.length)).toBe(1);
+
+    await page.click('.plugin-unload');
+    await page.waitForTimeout(100);
+    expect(await page.$$('.plugin-entry').then(e => e.length)).toBe(0);
+
+    // Menu should still be open, showing the empty state
+    const menuStillOpen = await page.$eval('#menu-plugins', el => el.classList.contains('open'));
+    expect(menuStillOpen).toBe(true);
+
+    const hint = await page.$('.menu-hint');
+    expect(hint).not.toBeNull();
+    expect(await hint.textContent()).toContain('No plugins loaded');
+  });
+
   test('multi-table plugin applies rules to different tables', async ({ page }) => {
     await loadPluginConfig(page, {
       name: 'Multi Table',
