@@ -584,34 +584,35 @@ body {
   color: var(--accent);
 }
 
-.data-table th.col-filtered {
-  border-bottom: 2px solid var(--success);
+.data-table th.sorted {
+  border-left: 2px solid var(--accent);
 }
 
-.data-table th.col-filtered.sorted {
-  border-bottom: 2px solid var(--accent);
-  box-shadow: inset 0 -2px 0 var(--success);
+.data-table th.col-filtered {
+  border-left: 2px solid var(--success);
 }
 
 .data-table th.col-linked {
-  border-bottom: 2px solid var(--accent);
+  border-left: 2px solid #55aadd;
 }
 
-.data-table th.col-linked.col-filtered {
-  border-bottom: 2px solid var(--accent);
-  box-shadow: inset 0 -2px 0 var(--success);
+.data-table th.col-transformed {
+  border-left: 2px solid #dd88cc;
 }
 
-.col-transform-icon {
-  margin-left: 4px;
-  font-size: 10px;
-  line-height: 1;
-  cursor: pointer;
+.data-table th.sorted.col-filtered {
+  border-left: 2px solid var(--success);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
-.col-transform-icon.disabled {
-  opacity: 0.3;
-  filter: grayscale(1);
+.data-table th.sorted.col-linked {
+  border-left: 2px solid #55aadd;
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.data-table th.feature-disabled {
+  border-left-style: dashed;
+  opacity: 0.6;
 }
 
 .col-resize-handle {
@@ -851,37 +852,55 @@ body {
   color: var(--accent-hover);
 }
 
-.status-link-filter {
-  color: var(--accent);
-  font-size: 11px;
-}
-
 .status-center {
+  display: flex;
+  gap: 3px;
   flex-shrink: 0;
 }
 
-.status-plugin-toggle {
+.status-chip {
   cursor: pointer;
-  color: var(--accent);
-  font-size: 11px;
+  font-size: 10px;
   user-select: none;
-  padding: 0 4px;
+  padding: 0 5px;
   border-radius: 3px;
+  line-height: 18px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  transition: opacity 0.15s, background 0.15s;
 }
 
-.status-plugin-toggle:hover {
-  color: var(--accent-hover);
-  background: rgba(124, 111, 247, 0.12);
+.status-chip:hover {
+  filter: brightness(1.2);
 }
 
-.status-plugin-toggle.disabled {
-  color: var(--text-dim);
+.status-chip-sort {
+  color: var(--accent);
+  background: rgba(124, 111, 247, 0.15);
+}
+
+.status-chip-filter {
+  color: var(--success);
+  background: rgba(85, 204, 136, 0.15);
+}
+
+.status-chip-link {
+  color: #55aadd;
+  background: rgba(85, 170, 221, 0.15);
+}
+
+.status-chip-format {
+  color: #dd88cc;
+  background: rgba(221, 136, 204, 0.15);
+}
+
+.status-chip.off {
+  opacity: 0.4;
+  text-decoration: line-through;
+}
+
+.status-chip.off:hover {
   opacity: 0.7;
-}
-
-.status-plugin-toggle.disabled:hover {
-  color: var(--accent-hover);
-  opacity: 1;
 }
 
 /* ---- Resize handles ---- */

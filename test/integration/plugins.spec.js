@@ -395,9 +395,9 @@ test.describe('Plugin system', () => {
     expect(result.hasTransform).toBe(true);
   });
 
-  test('plugin toggle appears in status bar when plugins match', async ({ page }) => {
-    let toggle = await page.$('.status-plugin-toggle');
-    expect(toggle).toBeNull();
+  test('format chip appears in status bar when plugins match', async ({ page }) => {
+    let chip = await page.$('.status-chip-format');
+    expect(chip).toBeNull();
 
     await loadPluginConfig(page, {
       name: 'Toggle Test', table: '.*',
@@ -406,13 +406,12 @@ test.describe('Plugin system', () => {
     await page.evaluate(() => app._test.rerenderAllWindows());
     await page.waitForTimeout(100);
 
-    toggle = await page.$('.status-plugin-toggle');
-    expect(toggle).not.toBeNull();
-    const text = await toggle.textContent();
-    expect(text).toContain('Plugins on');
+    chip = await page.$('.status-chip-format');
+    expect(chip).not.toBeNull();
+    expect(await chip.evaluate(el => !el.classList.contains('off'))).toBe(true);
   });
 
-  test('plugin toggle does not appear when no plugins match', async ({ page }) => {
+  test('format chip does not appear when no plugins match', async ({ page }) => {
     await loadPluginConfig(page, {
       name: 'No Match', table: '^nonexistent$',
       columns: [{ match: '^name$', display: 'upper(value)' }]
@@ -420,11 +419,11 @@ test.describe('Plugin system', () => {
     await page.evaluate(() => app._test.rerenderAllWindows());
     await page.waitForTimeout(100);
 
-    const toggle = await page.$('.status-plugin-toggle');
-    expect(toggle).toBeNull();
+    const chip = await page.$('.status-chip-format');
+    expect(chip).toBeNull();
   });
 
-  test('status bar toggle disables all transforms, icons become disabled', async ({ page }) => {
+  test('format chip disables all transforms, headers show feature-disabled', async ({ page }) => {
     await loadPluginConfig(page, {
       name: 'Toggle Disable', table: '.*',
       columns: [{ match: '^name$', display: 'upper(value)' }]
@@ -435,25 +434,25 @@ test.describe('Plugin system', () => {
     const before = await getCellText(page, 0, 0);
     expect(before).toBe('ALICE JOHNSON');
 
-    let icon = await page.$('.col-transform-icon');
-    expect(icon).not.toBeNull();
-    expect(await icon.evaluate(el => el.classList.contains('disabled'))).toBe(false);
+    let th = await page.$('th.col-transformed');
+    expect(th).not.toBeNull();
+    expect(await th.evaluate(el => el.classList.contains('feature-disabled'))).toBe(false);
 
-    await page.click('.status-plugin-toggle');
+    await page.click('.status-chip-format');
     await page.waitForTimeout(100);
 
     const after = await getCellText(page, 0, 0);
     expect(after).toBe('Alice Johnson');
 
-    const toggleText = await page.$eval('.status-plugin-toggle', el => el.textContent);
-    expect(toggleText).toContain('Plugins off');
+    const chip = await page.$('.status-chip-format');
+    expect(await chip.evaluate(el => el.classList.contains('off'))).toBe(true);
 
-    icon = await page.$('.col-transform-icon');
-    expect(icon).not.toBeNull();
-    expect(await icon.evaluate(el => el.classList.contains('disabled'))).toBe(true);
+    th = await page.$('th.col-transformed');
+    expect(th).not.toBeNull();
+    expect(await th.evaluate(el => el.classList.contains('feature-disabled'))).toBe(true);
   });
 
-  test('status bar toggle re-enables all transforms', async ({ page }) => {
+  test('format chip re-enables all transforms', async ({ page }) => {
     await loadPluginConfig(page, {
       name: 'Toggle Re-enable', table: '.*',
       columns: [{ match: '^name$', display: 'upper(value)' }]
@@ -461,22 +460,22 @@ test.describe('Plugin system', () => {
     await page.evaluate(() => app._test.rerenderAllWindows());
     await page.waitForTimeout(100);
 
-    await page.click('.status-plugin-toggle');
+    await page.click('.status-chip-format');
     await page.waitForTimeout(100);
-    await page.click('.status-plugin-toggle');
+    await page.click('.status-chip-format');
     await page.waitForTimeout(100);
 
     const cell = await getCellText(page, 0, 0);
     expect(cell).toBe('ALICE JOHNSON');
 
-    const toggleText = await page.$eval('.status-plugin-toggle', el => el.textContent);
-    expect(toggleText).toContain('Plugins on');
+    const chip = await page.$('.status-chip-format');
+    expect(await chip.evaluate(el => !el.classList.contains('off'))).toBe(true);
 
-    const icon = await page.$('.col-transform-icon');
-    expect(await icon.evaluate(el => el.classList.contains('disabled'))).toBe(false);
+    const th = await page.$('th.col-transformed');
+    expect(await th.evaluate(el => !el.classList.contains('feature-disabled'))).toBe(true);
   });
 
-  test('clicking column plug icon disables only that column', async ({ page }) => {
+  test('disabling a single column transform via disabledTransforms', async ({ page }) => {
     await loadPluginConfig(page, {
       name: 'Multi Col', table: '.*',
       columns: [
@@ -490,9 +489,14 @@ test.describe('Plugin system', () => {
     const nameBefore = await getCellText(page, 0, 0);
     expect(nameBefore).toBe('ALICE JOHNSON');
 
-    const icons = await page.$$('.col-transform-icon');
-    expect(icons.length).toBe(2);
-    await icons[0].click();
+    const transformedThs = await page.$$('th.col-transformed');
+    expect(transformedThs.length).toBe(2);
+
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.disabledTransforms.add('name');
+      app._test.rebuildTable(win);
+    });
     await page.waitForTimeout(100);
 
     const nameAfter = await getCellText(page, 0, 0);
@@ -501,12 +505,9 @@ test.describe('Plugin system', () => {
     const emailIdx = await page.evaluate(() => app._test.windows[0]._columns.indexOf('email'));
     const emailCell = await getCellText(page, 0, emailIdx);
     expect(emailCell).toBe('ALICE@EXAMPLE.COM');
-
-    const toggleText = await page.$eval('.status-plugin-toggle', el => el.textContent);
-    expect(toggleText).toContain('Plugins partial');
   });
 
-  test('clicking disabled column plug icon re-enables that column', async ({ page }) => {
+  test('re-enabling a disabled column transform via disabledTransforms', async ({ page }) => {
     await loadPluginConfig(page, {
       name: 'Re-enable Col', table: '.*',
       columns: [{ match: '^name$', display: 'upper(value)' }]
@@ -514,21 +515,27 @@ test.describe('Plugin system', () => {
     await page.evaluate(() => app._test.rerenderAllWindows());
     await page.waitForTimeout(100);
 
-    const icon = await page.$('.col-transform-icon');
-    await icon.click();
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.disabledTransforms.add('name');
+      app._test.rebuildTable(win);
+    });
     await page.waitForTimeout(100);
     expect(await getCellText(page, 0, 0)).toBe('Alice Johnson');
 
-    const disabledIcon = await page.$('.col-transform-icon');
-    await disabledIcon.click();
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.disabledTransforms.delete('name');
+      app._test.rebuildTable(win);
+    });
     await page.waitForTimeout(100);
     expect(await getCellText(page, 0, 0)).toBe('ALICE JOHNSON');
 
-    const reenabledIcon = await page.$('.col-transform-icon');
-    expect(await reenabledIcon.evaluate(el => el.classList.contains('disabled'))).toBe(false);
+    const th = await page.$('th.col-transformed');
+    expect(await th.evaluate(el => !el.classList.contains('feature-disabled'))).toBe(true);
   });
 
-  test('column icon only appears on transformed columns', async ({ page }) => {
+  test('col-transformed class only appears on transformed columns', async ({ page }) => {
     await loadPluginConfig(page, {
       name: 'Selective', table: '.*',
       columns: [{ match: '^name$', display: 'upper(value)' }]
@@ -536,9 +543,8 @@ test.describe('Plugin system', () => {
     await page.evaluate(() => app._test.rerenderAllWindows());
     await page.waitForTimeout(100);
 
-    const transformed = await page.$$eval('.col-transform-icon', els => els.map(el => {
-      const th = el.closest('th');
-      const colName = th && th.querySelector('.col-name');
+    const transformed = await page.$$eval('th.col-transformed', els => els.map(el => {
+      const colName = el.querySelector('.col-name');
       return colName ? colName.textContent.trim() : '';
     }));
     expect(transformed).toContain('name');
@@ -554,7 +560,11 @@ test.describe('Plugin system', () => {
     await page.evaluate(() => app._test.rerenderAllWindows());
     await page.waitForTimeout(100);
 
-    await page.click('.col-transform-icon');
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.disabledTransforms.add('name');
+      app._test.rebuildTable(win);
+    });
     await page.waitForTimeout(100);
 
     await page.evaluate(() => {
@@ -567,8 +577,8 @@ test.describe('Plugin system', () => {
     const cell = await getCellText(page, 0, 0);
     expect(cell).toBe('Alice Johnson');
 
-    const icon = await page.$('.col-transform-icon');
-    expect(await icon.evaluate(el => el.classList.contains('disabled'))).toBe(true);
+    const th = await page.$('th.col-transformed');
+    expect(await th.evaluate(el => el.classList.contains('feature-disabled'))).toBe(true);
   });
 
   test('autofilter dropdown shows display-formatted values when transform active', async ({ page }) => {
@@ -597,7 +607,11 @@ test.describe('Plugin system', () => {
     await page.evaluate(() => app._test.rerenderAllWindows());
     await page.waitForTimeout(100);
 
-    await page.click('.col-transform-icon');
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.disabledTransforms.add('name');
+      app._test.rebuildTable(win);
+    });
     await page.waitForTimeout(100);
 
     const filterBtn = await page.$('th .col-filter-btn');
@@ -658,7 +672,11 @@ test.describe('Plugin system', () => {
     await page.evaluate(() => app._test.rerenderAllWindows());
     await page.waitForTimeout(100);
 
-    await page.click('.col-transform-icon');
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.disabledTransforms.add('name');
+      app._test.rebuildTable(win);
+    });
     await page.waitForTimeout(100);
 
     const cell = page.locator('.subwindow table tbody td.data-cell').first();
@@ -674,7 +692,7 @@ test.describe('Plugin system', () => {
     expect(await cell.textContent()).toBe('Alice Johnson');
   });
 
-  test('status bar shows partial when some columns disabled', async ({ page }) => {
+  test('format chip re-enables all when some columns were disabled', async ({ page }) => {
     await loadPluginConfig(page, {
       name: 'Multi', table: '.*',
       columns: [
@@ -685,25 +703,32 @@ test.describe('Plugin system', () => {
     await page.evaluate(() => app._test.rerenderAllWindows());
     await page.waitForTimeout(100);
 
-    let toggleText = await page.$eval('.status-plugin-toggle', el => el.textContent);
-    expect(toggleText).toContain('Plugins on');
+    let chip = await page.$('.status-chip-format');
+    expect(await chip.evaluate(el => !el.classList.contains('off'))).toBe(true);
 
-    const icons = await page.$$('.col-transform-icon');
-    await icons[0].click();
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.disabledTransforms.add('name');
+      app._test.rebuildTable(win);
+    });
     await page.waitForTimeout(100);
 
-    toggleText = await page.$eval('.status-plugin-toggle', el => el.textContent);
-    expect(toggleText).toContain('Plugins partial');
-
-    await page.click('.status-plugin-toggle');
+    await page.click('.status-chip-format');
     await page.waitForTimeout(100);
 
-    toggleText = await page.$eval('.status-plugin-toggle', el => el.textContent);
-    expect(toggleText).toContain('Plugins on');
+    chip = await page.$('.status-chip-format');
+    expect(await chip.evaluate(el => el.classList.contains('off'))).toBe(true);
+    expect(await getCellText(page, 0, 0)).toBe('Alice Johnson');
+
+    await page.click('.status-chip-format');
+    await page.waitForTimeout(100);
+
+    chip = await page.$('.status-chip-format');
+    expect(await chip.evaluate(el => !el.classList.contains('off'))).toBe(true);
     expect(await getCellText(page, 0, 0)).toBe('ALICE JOHNSON');
   });
 
-  test('unloading plugin removes icons and toggle', async ({ page }) => {
+  test('unloading plugin removes transform class and format chip', async ({ page }) => {
     await loadPluginConfig(page, {
       name: 'Removable', table: '.*',
       columns: [{ match: '^name$', display: 'upper(value)' }]
@@ -711,14 +736,14 @@ test.describe('Plugin system', () => {
     await page.evaluate(() => app._test.rerenderAllWindows());
     await page.waitForTimeout(100);
 
-    expect(await page.$('.col-transform-icon')).not.toBeNull();
-    expect(await page.$('.status-plugin-toggle')).not.toBeNull();
+    expect(await page.$('th.col-transformed')).not.toBeNull();
+    expect(await page.$('.status-chip-format')).not.toBeNull();
 
     await page.evaluate(() => app._test.unloadPlugin(0));
     await page.waitForTimeout(100);
 
-    expect(await page.$('.col-transform-icon')).toBeNull();
-    expect(await page.$('.status-plugin-toggle')).toBeNull();
+    expect(await page.$('th.col-transformed')).toBeNull();
+    expect(await page.$('.status-chip-format')).toBeNull();
   });
 
   test('autofilter still filters correctly with display-formatted dropdown', async ({ page }) => {
@@ -1474,9 +1499,9 @@ test.describe('Cross-table linking', () => {
     await page.waitForTimeout(200);
 
     const custWindow = page.locator('.subwindow').filter({ hasText: 'customers' });
-    const linkLabel = custWindow.locator('.status-link-filter');
-    await expect(linkLabel).toBeVisible();
-    expect(await linkLabel.textContent()).toContain('Linked');
+    const linkChip = custWindow.locator('.status-chip-link');
+    await expect(linkChip).toBeVisible();
+    expect(await linkChip.textContent()).toBe('Link');
   });
 
   test('unloading link plugin clears link filters', async ({ page }) => {
@@ -1606,5 +1631,701 @@ test.describe('Cross-table linking', () => {
 
     // Source columns "id" and "name" both match — values are "1" and "Alice"
     expect(result).toEqual(['1', 'Alice']);
+  });
+});
+
+test.describe('Sort chip', () => {
+  test.beforeEach(async ({ page }) => {
+    await openApp(page);
+    await uploadFile(page, 'sample1.csv');
+    await waitForWindow(page, 'sample1');
+  });
+
+  async function getCellText(page, rowIdx, colIdx) {
+    return page.evaluate(({ rowIdx, colIdx }) => {
+      const rows = document.querySelectorAll('.subwindow table tbody tr:not(.virtual-pad)');
+      if (!rows[rowIdx]) return null;
+      const tds = rows[rowIdx].querySelectorAll('td.data-cell');
+      return tds[colIdx] ? tds[colIdx].textContent : null;
+    }, { rowIdx, colIdx });
+  }
+
+  test('sort chip appears when column is sorted', async ({ page }) => {
+    let chip = await page.$('.status-chip-sort');
+    expect(chip).toBeNull();
+
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.sortCols = [{ col: 'name', dir: 'asc' }];
+      app._test.rebuildTable(win);
+    });
+    await page.waitForTimeout(100);
+
+    chip = await page.$('.status-chip-sort');
+    expect(chip).not.toBeNull();
+    expect(await chip.textContent()).toBe('Sort');
+  });
+
+  test('sort chip disappears when sort is cleared', async ({ page }) => {
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.sortCols = [{ col: 'name', dir: 'asc' }];
+      app._test.rebuildTable(win);
+    });
+    await page.waitForTimeout(100);
+    expect(await page.$('.status-chip-sort')).not.toBeNull();
+
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.sortCols = [];
+      app._test.rebuildTable(win);
+    });
+    await page.waitForTimeout(100);
+    expect(await page.$('.status-chip-sort')).toBeNull();
+  });
+
+  test('clicking sort chip suspends sorting and shows .off', async ({ page }) => {
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.sortCols = [{ col: 'name', dir: 'asc' }];
+      app._test.rebuildTable(win);
+    });
+    await page.waitForTimeout(100);
+
+    // Capture sorted order
+    const sortedFirst = await getCellText(page, 0, 0);
+
+    // Click chip to suspend
+    await page.click('.status-chip-sort');
+    await page.waitForTimeout(100);
+
+    const chip = await page.$('.status-chip-sort');
+    expect(await chip.evaluate(el => el.classList.contains('off'))).toBe(true);
+
+    // Rows should revert to original order (unsorted)
+    const unsortedFirst = await getCellText(page, 0, 0);
+    // Original first row is Alice Johnson; sorted asc would also start with Alice
+    // Use descending to make the difference clear
+    const state = await page.evaluate(() => {
+      const win = app._test.windows[0];
+      return { disableSort: win.disableSort, sortCols: win.sortCols };
+    });
+    expect(state.disableSort).toBe(true);
+    expect(state.sortCols.length).toBe(1); // sort config preserved
+  });
+
+  test('sort chip suspends sorting - rows revert to original order', async ({ page }) => {
+    // Sort descending so first row changes from original
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.sortCols = [{ col: 'name', dir: 'desc' }];
+      app._test.rebuildTable(win);
+    });
+    await page.waitForTimeout(100);
+
+    const sortedFirst = await getCellText(page, 0, 0);
+    // Descending by name: last alphabetically should be first
+    expect(sortedFirst).not.toBe('Alice Johnson');
+
+    // Suspend sorting
+    await page.click('.status-chip-sort');
+    await page.waitForTimeout(100);
+
+    const unsortedFirst = await getCellText(page, 0, 0);
+    expect(unsortedFirst).toBe('Alice Johnson'); // original order restored
+  });
+
+  test('column header keeps .sorted but gains .feature-disabled when sort suspended', async ({ page }) => {
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.sortCols = [{ col: 'name', dir: 'asc' }];
+      app._test.rebuildTable(win);
+    });
+    await page.waitForTimeout(100);
+
+    let th = await page.$('th.sorted');
+    expect(th).not.toBeNull();
+    expect(await th.evaluate(el => el.classList.contains('feature-disabled'))).toBe(false);
+
+    await page.click('.status-chip-sort');
+    await page.waitForTimeout(100);
+
+    th = await page.$('th.sorted');
+    expect(th).not.toBeNull();
+    expect(await th.evaluate(el => el.classList.contains('feature-disabled'))).toBe(true);
+  });
+
+  test('clicking sort chip again re-enables sorting', async ({ page }) => {
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.sortCols = [{ col: 'name', dir: 'desc' }];
+      app._test.rebuildTable(win);
+    });
+    await page.waitForTimeout(100);
+
+    const sortedFirst = await getCellText(page, 0, 0);
+
+    // Suspend
+    await page.click('.status-chip-sort');
+    await page.waitForTimeout(100);
+
+    // Re-enable
+    await page.click('.status-chip-sort');
+    await page.waitForTimeout(100);
+
+    const chip = await page.$('.status-chip-sort');
+    expect(await chip.evaluate(el => !el.classList.contains('off'))).toBe(true);
+
+    const reEnabledFirst = await getCellText(page, 0, 0);
+    expect(reEnabledFirst).toBe(sortedFirst); // same as original sorted order
+
+    const th = await page.$('th.sorted');
+    expect(await th.evaluate(el => !el.classList.contains('feature-disabled'))).toBe(true);
+  });
+
+  test('sort configuration survives toggle (sort arrows still show)', async ({ page }) => {
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.sortCols = [{ col: 'name', dir: 'asc' }];
+      app._test.rebuildTable(win);
+    });
+    await page.waitForTimeout(100);
+
+    // Suspend and re-enable
+    await page.click('.status-chip-sort');
+    await page.waitForTimeout(100);
+    await page.click('.status-chip-sort');
+    await page.waitForTimeout(100);
+
+    // Sort arrows should still be present
+    const arrow = await page.$('th.sorted .sort-arrow');
+    expect(arrow).not.toBeNull();
+    const arrowText = await arrow.textContent();
+    expect(arrowText).toContain('▲'); // up arrow for asc
+
+    // sortCols should still be configured
+    const sortCols = await page.evaluate(() => app._test.windows[0].sortCols);
+    expect(sortCols).toEqual([{ col: 'name', dir: 'asc' }]);
+  });
+});
+
+test.describe('Filter chip', () => {
+  test.beforeEach(async ({ page }) => {
+    await openApp(page);
+    await uploadFile(page, 'sample1.csv');
+    await waitForWindow(page, 'sample1');
+  });
+
+  async function getVisibleRowCount(page) {
+    return page.evaluate(() => {
+      return document.querySelectorAll('.subwindow table tbody tr:not(.virtual-pad)').length;
+    });
+  }
+
+  test('filter chip appears when column autofilter is active', async ({ page }) => {
+    let chip = await page.$('.status-chip-filter');
+    expect(chip).toBeNull();
+
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.columnFilters = { name: new Set(['Alice Johnson']) };
+      app._test.rebuildTable(win);
+    });
+    await page.waitForTimeout(100);
+
+    chip = await page.$('.status-chip-filter');
+    expect(chip).not.toBeNull();
+    expect(await chip.textContent()).toBe('Filter');
+    expect(await chip.evaluate(el => !el.classList.contains('off'))).toBe(true);
+  });
+
+  test('filter chip appears when WHERE filter text is set', async ({ page }) => {
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.filterText = "name = 'Alice Johnson'";
+      app._test.rebuildTable(win);
+    });
+    await page.waitForTimeout(100);
+
+    const chip = await page.$('.status-chip-filter');
+    expect(chip).not.toBeNull();
+    expect(await chip.textContent()).toBe('Filter');
+  });
+
+  test('clicking filter chip shows all rows (filter suspended)', async ({ page }) => {
+    const totalRows = await getVisibleRowCount(page);
+
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.columnFilters = { name: new Set(['Alice Johnson']) };
+      app._test.rebuildTable(win);
+    });
+    await page.waitForTimeout(100);
+
+    const filteredRows = await getVisibleRowCount(page);
+    expect(filteredRows).toBe(1);
+
+    // Suspend filter
+    await page.click('.status-chip-filter');
+    await page.waitForTimeout(100);
+
+    const suspendedRows = await getVisibleRowCount(page);
+    expect(suspendedRows).toBe(totalRows);
+  });
+
+  test('filter chip shows .off class when suspended', async ({ page }) => {
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.columnFilters = { name: new Set(['Alice Johnson']) };
+      app._test.rebuildTable(win);
+    });
+    await page.waitForTimeout(100);
+
+    await page.click('.status-chip-filter');
+    await page.waitForTimeout(100);
+
+    const chip = await page.$('.status-chip-filter');
+    expect(await chip.evaluate(el => el.classList.contains('off'))).toBe(true);
+
+    // Column header should have feature-disabled
+    const th = await page.$('th.col-filtered');
+    expect(th).not.toBeNull();
+    expect(await th.evaluate(el => el.classList.contains('feature-disabled'))).toBe(true);
+  });
+
+  test('Clear Filters link hidden when filter is suspended', async ({ page }) => {
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.columnFilters = { name: new Set(['Alice Johnson']) };
+      app._test.rebuildTable(win);
+    });
+    await page.waitForTimeout(100);
+
+    // Clear Filters link should be visible
+    let clearLink = await page.$('.status-clear-filters');
+    expect(clearLink).not.toBeNull();
+
+    // Suspend filter
+    await page.click('.status-chip-filter');
+    await page.waitForTimeout(100);
+
+    // Clear Filters link should be hidden
+    clearLink = await page.$('.status-clear-filters');
+    expect(clearLink).toBeNull();
+  });
+
+  test('re-enabling filter re-applies the filter', async ({ page }) => {
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.columnFilters = { name: new Set(['Alice Johnson']) };
+      app._test.rebuildTable(win);
+    });
+    await page.waitForTimeout(100);
+
+    const filteredRows = await getVisibleRowCount(page);
+    expect(filteredRows).toBe(1);
+
+    // Suspend
+    await page.click('.status-chip-filter');
+    await page.waitForTimeout(100);
+    const totalRows = await getVisibleRowCount(page);
+    expect(totalRows).toBeGreaterThan(1);
+
+    // Re-enable
+    await page.click('.status-chip-filter');
+    await page.waitForTimeout(100);
+
+    const reFilteredRows = await getVisibleRowCount(page);
+    expect(reFilteredRows).toBe(1);
+
+    const chip = await page.$('.status-chip-filter');
+    expect(await chip.evaluate(el => !el.classList.contains('off'))).toBe(true);
+
+    const th = await page.$('th.col-filtered');
+    expect(await th.evaluate(el => !el.classList.contains('feature-disabled'))).toBe(true);
+  });
+});
+
+test.describe('Link chip', () => {
+  test.beforeEach(async ({ page }) => {
+    await openApp(page);
+    await uploadFile(page, 'customers.csv');
+    await waitForWindow(page, 'customers');
+    await uploadFile(page, 'orders.csv');
+    await waitForWindow(page, 'orders');
+  });
+
+  async function loadLinkPlugin(page, config) {
+    await page.evaluate((cfg) => {
+      const errors = app._test.validatePlugin(cfg);
+      if (errors.length) throw new Error(errors.join(', '));
+      const compiled = app._test.compilePlugin(cfg);
+      cfg._compiled = compiled;
+      app._test.plugins.push(cfg);
+      app._test.rebuildTransformCache();
+    }, config);
+  }
+
+  async function selectOrderRow(page, rowIndex) {
+    await page.evaluate((idx) => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const ordersTable = app._test.tables['orders'];
+      const row = ordersTable.rows[idx];
+      ordersWin.selectedCells = new Set();
+      for (const col of ordersTable.columns) {
+        ordersWin.selectedCells.add(`${row._rownum}:${col}`);
+      }
+      ordersWin.anchorCell = { rownum: row._rownum, col: 'order_id' };
+      app._test.applyLinkFilters(ordersWin);
+    }, rowIndex);
+  }
+
+  test('link chip appears when link filters are active', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Link Chip Test',
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+
+    // Before selection: no link chip on customers
+    const custWindow = page.locator('.subwindow').filter({ hasText: 'customers' });
+    let linkChip = await custWindow.locator('.status-chip-link').count();
+    expect(linkChip).toBe(0);
+
+    await selectOrderRow(page, 0);
+    await page.waitForTimeout(200);
+
+    linkChip = await custWindow.locator('.status-chip-link').count();
+    expect(linkChip).toBe(1);
+    const chipText = await custWindow.locator('.status-chip-link').textContent();
+    expect(chipText).toBe('Link');
+  });
+
+  test('clicking link chip shows all rows in target (link suspended)', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Link Suspend Test',
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+
+    await selectOrderRow(page, 0); // customer_id=1 -> only Alice in customers
+    await page.waitForTimeout(200);
+
+    // Verify filter is active: only 1 customer row visible
+    const filteredRows = await page.evaluate(() => {
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      return custWin._displayRows ? custWin._displayRows.length : -1;
+    });
+    expect(filteredRows).toBe(1);
+
+    // Click link chip to suspend (use evaluate to avoid occlusion issues)
+    await page.evaluate(() => {
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      const chip = custWin.statusbarEl.querySelector('.status-chip-link');
+      chip.click();
+    });
+    await page.waitForTimeout(200);
+
+    const suspendedRows = await page.evaluate(() => {
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      return custWin._displayRows ? custWin._displayRows.length : -1;
+    });
+    expect(suspendedRows).toBe(3); // all 3 customers visible
+  });
+
+  test('link chip shows .off class when suspended', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Link Off Test',
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+
+    await selectOrderRow(page, 0);
+    await page.waitForTimeout(200);
+
+    // Click link chip to suspend via evaluate
+    const result = await page.evaluate(() => {
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      const chip = custWin.statusbarEl.querySelector('.status-chip-link');
+      chip.click();
+      // Re-query after rebuild
+      const chipAfter = custWin.statusbarEl.querySelector('.status-chip-link');
+      const th = custWin.el.querySelector('th.col-linked');
+      return {
+        chipOff: chipAfter ? chipAfter.classList.contains('off') : null,
+        thDisabled: th ? th.classList.contains('feature-disabled') : null,
+      };
+    });
+
+    expect(result.chipOff).toBe(true);
+    expect(result.thDisabled).toBe(true);
+  });
+
+  test('re-enabling link chip re-applies link filter', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Link Re-enable Test',
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+
+    await selectOrderRow(page, 0);
+    await page.waitForTimeout(200);
+
+    // Suspend
+    await page.evaluate(() => {
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      custWin.statusbarEl.querySelector('.status-chip-link').click();
+    });
+    await page.waitForTimeout(100);
+    const suspendedRows = await page.evaluate(() => {
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      return custWin._displayRows.length;
+    });
+    expect(suspendedRows).toBe(3);
+
+    // Re-enable
+    await page.evaluate(() => {
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      custWin.statusbarEl.querySelector('.status-chip-link').click();
+    });
+    await page.waitForTimeout(100);
+
+    const result = await page.evaluate(() => {
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      const chip = custWin.statusbarEl.querySelector('.status-chip-link');
+      return {
+        rows: custWin._displayRows.length,
+        chipOff: chip ? chip.classList.contains('off') : null,
+      };
+    });
+    expect(result.rows).toBe(1);
+    expect(result.chipOff).toBe(false);
+  });
+});
+
+test.describe('Status chip keyboard shortcuts', () => {
+  test.beforeEach(async ({ page }) => {
+    await openApp(page);
+    await uploadFile(page, 'sample1.csv');
+    await waitForWindow(page, 'sample1');
+  });
+
+  async function getVisibleRowCount(page) {
+    return page.evaluate(() => {
+      return document.querySelectorAll('.subwindow table tbody tr:not(.virtual-pad)').length;
+    });
+  }
+
+  test('Ctrl+Shift+1 toggles sort', async ({ page }) => {
+    // Set up sort
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.sortCols = [{ col: 'name', dir: 'desc' }];
+      app._test.rebuildTable(win);
+      app._test.focusWindow(win.id);
+    });
+    await page.waitForTimeout(100);
+
+    // Focus a cell so the window is active
+    const cell = page.locator('.subwindow table tbody td.data-cell').first();
+    await cell.click();
+    await page.waitForTimeout(100);
+
+    const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+    await page.keyboard.press(`${modifier}+Shift+1`);
+    await page.waitForTimeout(100);
+
+    // Sort should be disabled
+    const state = await page.evaluate(() => {
+      const win = app._test.windows[0];
+      return { disableSort: win.disableSort };
+    });
+    expect(state.disableSort).toBe(true);
+
+    const chip = await page.$('.status-chip-sort');
+    expect(chip).not.toBeNull();
+    expect(await chip.evaluate(el => el.classList.contains('off'))).toBe(true);
+
+    // Toggle back
+    await page.keyboard.press(`${modifier}+Shift+1`);
+    await page.waitForTimeout(100);
+
+    const stateAfter = await page.evaluate(() => {
+      const win = app._test.windows[0];
+      return { disableSort: win.disableSort };
+    });
+    expect(stateAfter.disableSort).toBe(false);
+  });
+
+  test('Ctrl+Shift+2 toggles filter', async ({ page }) => {
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.columnFilters = { name: new Set(['Alice Johnson']) };
+      app._test.rebuildTable(win);
+      app._test.focusWindow(win.id);
+    });
+    await page.waitForTimeout(100);
+
+    const cell = page.locator('.subwindow table tbody td.data-cell').first();
+    await cell.click();
+    await page.waitForTimeout(100);
+
+    const filteredRows = await getVisibleRowCount(page);
+    expect(filteredRows).toBe(1);
+
+    const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+    await page.keyboard.press(`${modifier}+Shift+2`);
+    await page.waitForTimeout(100);
+
+    const suspendedRows = await getVisibleRowCount(page);
+    expect(suspendedRows).toBeGreaterThan(1);
+
+    const chip = await page.$('.status-chip-filter');
+    expect(await chip.evaluate(el => el.classList.contains('off'))).toBe(true);
+  });
+
+  test('Ctrl+Shift+3 toggles link disable flag', async ({ page }) => {
+    // Even without active link filters, the shortcut should toggle the flag
+    const cell = page.locator('.subwindow table tbody td.data-cell').first();
+    await cell.click();
+    await page.waitForTimeout(100);
+
+    const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+    await page.keyboard.press(`${modifier}+Shift+3`);
+    await page.waitForTimeout(100);
+
+    const state = await page.evaluate(() => {
+      const win = app._test.windows[0];
+      return { disableLink: win.disableLink };
+    });
+    expect(state.disableLink).toBe(true);
+
+    await page.keyboard.press(`${modifier}+Shift+3`);
+    await page.waitForTimeout(100);
+
+    const stateAfter = await page.evaluate(() => {
+      const win = app._test.windows[0];
+      return { disableLink: win.disableLink };
+    });
+    expect(stateAfter.disableLink).toBe(false);
+  });
+});
+
+test.describe('Status chip integration', () => {
+  test.beforeEach(async ({ page }) => {
+    await openApp(page);
+    await uploadFile(page, 'sample1.csv');
+    await waitForWindow(page, 'sample1');
+  });
+
+  async function getCellText(page, rowIdx, colIdx) {
+    return page.evaluate(({ rowIdx, colIdx }) => {
+      const rows = document.querySelectorAll('.subwindow table tbody tr:not(.virtual-pad)');
+      if (!rows[rowIdx]) return null;
+      const tds = rows[rowIdx].querySelectorAll('td.data-cell');
+      return tds[colIdx] ? tds[colIdx].textContent : null;
+    }, { rowIdx, colIdx });
+  }
+
+  async function getVisibleRowCount(page) {
+    return page.evaluate(() => {
+      return document.querySelectorAll('.subwindow table tbody tr:not(.virtual-pad)').length;
+    });
+  }
+
+  test('multiple chips visible simultaneously (sort + filter)', async ({ page }) => {
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.sortCols = [{ col: 'name', dir: 'asc' }];
+      win.columnFilters = { name: new Set(['Alice Johnson', 'Bob Smith']) };
+      app._test.rebuildTable(win);
+    });
+    await page.waitForTimeout(100);
+
+    const sortChip = await page.$('.status-chip-sort');
+    const filterChip = await page.$('.status-chip-filter');
+    expect(sortChip).not.toBeNull();
+    expect(filterChip).not.toBeNull();
+
+    // Both should be active (not off)
+    expect(await sortChip.evaluate(el => !el.classList.contains('off'))).toBe(true);
+    expect(await filterChip.evaluate(el => !el.classList.contains('off'))).toBe(true);
+  });
+
+  test('disabling filter does not affect sort, and vice versa', async ({ page }) => {
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.sortCols = [{ col: 'name', dir: 'desc' }];
+      win.columnFilters = { name: new Set(['Alice Johnson', 'Bob Smith', 'Eve Davis']) };
+      app._test.rebuildTable(win);
+    });
+    await page.waitForTimeout(100);
+
+    const filteredRows = await getVisibleRowCount(page);
+    expect(filteredRows).toBe(3);
+
+    // Suspend filter only
+    await page.click('.status-chip-filter');
+    await page.waitForTimeout(100);
+
+    // Filter chip should be off, sort chip still on
+    const filterChip = await page.$('.status-chip-filter');
+    const sortChip = await page.$('.status-chip-sort');
+    expect(await filterChip.evaluate(el => el.classList.contains('off'))).toBe(true);
+    expect(await sortChip.evaluate(el => !el.classList.contains('off'))).toBe(true);
+
+    // All rows should show (filter suspended) but still sorted desc
+    const allRows = await getVisibleRowCount(page);
+    expect(allRows).toBe(10); // all 10 rows in sample1.csv
+    const firstCell = await getCellText(page, 0, 0);
+    expect(firstCell).not.toBe('Alice Johnson'); // still sorted desc
+
+    // Suspend sort
+    await page.click('.status-chip-sort');
+    await page.waitForTimeout(100);
+
+    // Now first row should be original order
+    const unsortedFirst = await getCellText(page, 0, 0);
+    expect(unsortedFirst).toBe('Alice Johnson');
+
+    // Both chips should be off
+    expect(await page.$eval('.status-chip-sort', el => el.classList.contains('off'))).toBe(true);
+    expect(await page.$eval('.status-chip-filter', el => el.classList.contains('off'))).toBe(true);
+  });
+
+  test('chips persist across table rebuild (e.g., after cell edit)', async ({ page }) => {
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.sortCols = [{ col: 'name', dir: 'asc' }];
+      win.disableSort = true;
+      app._test.rebuildTable(win);
+    });
+    await page.waitForTimeout(100);
+
+    let chip = await page.$('.status-chip-sort');
+    expect(chip).not.toBeNull();
+    expect(await chip.evaluate(el => el.classList.contains('off'))).toBe(true);
+
+    // Simulate a cell edit that triggers rebuildTable
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      const t = app._test.tables[win.tableName];
+      t.rows[0].name = 'Edited Name';
+      app._test.rebuildTable(win);
+    });
+    await page.waitForTimeout(100);
+
+    // Sort chip should still be present and still off
+    chip = await page.$('.status-chip-sort');
+    expect(chip).not.toBeNull();
+    expect(await chip.evaluate(el => el.classList.contains('off'))).toBe(true);
+
+    // disableSort should still be true
+    const state = await page.evaluate(() => app._test.windows[0].disableSort);
+    expect(state).toBe(true);
   });
 });

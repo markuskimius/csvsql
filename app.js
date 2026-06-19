@@ -957,6 +957,9 @@ const app = (() => {
       anchorCell: null, // { rownum, col } — fixed corner for Ctrl+Shift+Arrow extension
       _copyWithHeader: false,
       disabledTransforms: new Set(),
+      disableSort: false,
+      disableFilter: false,
+      disableLink: false,
       dockId: null,
       dockLeaf: null,
       dockable: opts.dockable !== false,
@@ -2939,7 +2942,7 @@ const app = (() => {
     let displayRows = [...rows];
 
     // SQL WHERE filter
-    if (win.filterText && win.tableName && db) {
+    if (!win.disableFilter && win.filterText && win.tableName && db) {
       try {
         const sql = `SELECT rowid FROM [${win.tableName}] WHERE ${win.filterText}`;
         const result = db.exec(sql);
@@ -2958,7 +2961,7 @@ const app = (() => {
     }
 
     // Column autofilters (AND together)
-    const cfKeys = Object.keys(win.columnFilters);
+    const cfKeys = !win.disableFilter ? Object.keys(win.columnFilters) : [];
     if (cfKeys.length > 0) {
       displayRows = displayRows.filter(row => {
         for (const c of cfKeys) {
@@ -2969,7 +2972,7 @@ const app = (() => {
     }
 
     // Link filters (AND together, AND with column autofilters)
-    const lfKeys = Object.keys(win.linkFilters);
+    const lfKeys = !win.disableLink ? Object.keys(win.linkFilters) : [];
     if (lfKeys.length > 0) {
       displayRows = displayRows.filter(row => {
         for (const c of lfKeys) {
@@ -2980,7 +2983,7 @@ const app = (() => {
     }
 
     // Multi-column sort
-    if (win.sortCols.length > 0) {
+    if (!win.disableSort && win.sortCols.length > 0) {
       displayRows.sort((a, b) => {
         for (const { col, dir } of win.sortCols) {
           const m = dir === 'asc' ? 1 : -1;
@@ -3042,6 +3045,7 @@ const app = (() => {
       const sortIdx = win.sortCols.findIndex(s => s.col === col);
       if (sortIdx !== -1) {
         th.classList.add('sorted');
+        if (win.disableSort) th.classList.add('feature-disabled');
         const arrow = document.createElement('span');
         arrow.className = 'sort-arrow';
         const dir = win.sortCols[sortIdx].dir;
@@ -3049,27 +3053,19 @@ const app = (() => {
         if (win.sortCols.length > 1) arrow.textContent += (sortIdx + 1);
         thInner.appendChild(arrow);
       }
-      if (win.columnFilters[col]) th.classList.add('col-filtered');
-      if (win.linkFilters[col]) th.classList.add('col-linked');
-      if (win.selectedCol === col) th.classList.add('col-selected');
-
-      if (hasDisplayTransform(win.tableName, col)) {
-        const fxIcon = document.createElement('span');
-        const colDisabled = win.disabledTransforms.has(col);
-        fxIcon.className = 'col-transform-icon' + (colDisabled ? ' disabled' : '');
-        fxIcon.textContent = '\u{1F50C}';
-        fxIcon.title = colDisabled ? 'Plugin transform disabled — click to enable' : 'Plugin transform active — click to disable';
-        fxIcon.addEventListener('mousedown', (e) => { e.stopPropagation(); });
-        fxIcon.addEventListener('click', (e) => {
-          e.stopPropagation();
-          e.preventDefault();
-          if (win.disabledTransforms.has(col)) win.disabledTransforms.delete(col);
-          else win.disabledTransforms.add(col);
-          rebuildTable(win);
-        });
-        thInner.appendChild(fxIcon);
+      if (win.columnFilters[col]) {
+        th.classList.add('col-filtered');
+        if (win.disableFilter) th.classList.add('feature-disabled');
       }
-
+      if (win.linkFilters[col]) {
+        th.classList.add('col-linked');
+        if (win.disableLink) th.classList.add('feature-disabled');
+      }
+      if (hasDisplayTransform(win.tableName, col)) {
+        th.classList.add('col-transformed');
+        if (win.disabledTransforms.size > 0 && win.disabledTransforms.has(col)) th.classList.add('feature-disabled');
+      }
+      if (win.selectedCol === col) th.classList.add('col-selected');
       // AutoFilter button
       const filterBtn = document.createElement('span');
       filterBtn.className = 'col-filter-btn';
@@ -3781,9 +3777,15 @@ const app = (() => {
     const hasColumnFilters = Object.keys(win.columnFilters).length > 0;
     const hasLinkFilters = Object.keys(win.linkFilters).length > 0;
     const hasWhereFilter = !!win.filterText;
-    if (hasColumnFilters || hasLinkFilters || hasWhereFilter) {
-      statusLeft.textContent = `${displayRows.length} of ${rows.length} rows — `;
-      if (hasColumnFilters || hasWhereFilter) {
+    const hasSortCols = win.sortCols.length > 0;
+    const transformedCols = win.tableName && _columnTransformCache[win.tableName]
+      ? Object.keys(_columnTransformCache[win.tableName]) : [];
+    const hasTransforms = transformedCols.length > 0;
+    const anyFilters = hasColumnFilters || hasWhereFilter;
+    if (anyFilters || hasLinkFilters) {
+      statusLeft.textContent = `${displayRows.length} of ${rows.length} rows`;
+      if (anyFilters && !win.disableFilter) {
+        statusLeft.textContent += ' \u2014 ';
         const clearLink = document.createElement('span');
         clearLink.className = 'status-clear-filters';
         clearLink.textContent = 'Clear Filters';
@@ -3796,41 +3798,44 @@ const app = (() => {
         });
         statusLeft.appendChild(clearLink);
       }
-      if (hasLinkFilters) {
-        if (hasColumnFilters || hasWhereFilter) statusLeft.appendChild(document.createTextNode(' '));
-        const linkLabel = document.createElement('span');
-        linkLabel.className = 'status-link-filter';
-        linkLabel.textContent = '🔗 Linked';
-        linkLabel.title = 'Filtered by cross-table link — select different rows in source table to update';
-        statusLeft.appendChild(linkLabel);
-      }
     } else {
       statusLeft.textContent = `${displayRows.length} of ${rows.length} rows`;
     }
     statusRight.textContent = `${columns.length} columns`;
 
+    // Status center: toggle chips
     const statusCenter = win.statusbarEl.querySelector('.status-center');
     statusCenter.innerHTML = '';
-    const transformedCols = win.tableName && _columnTransformCache[win.tableName]
-      ? Object.keys(_columnTransformCache[win.tableName]) : [];
-    if (transformedCols.length > 0) {
-      const allOff = transformedCols.every(c => win.disabledTransforms.has(c));
-      const allOn = !transformedCols.some(c => win.disabledTransforms.has(c));
-      const toggle = document.createElement('span');
-      const state = allOn ? 'on' : allOff ? 'off' : 'partial';
-      toggle.className = 'status-plugin-toggle' + (state !== 'on' ? ' disabled' : '');
-      toggle.title = state === 'on' ? 'All plugins enabled — click to disable all'
-        : 'Some plugins disabled — click to enable all';
-      toggle.textContent = state === 'on' ? '⊕ Plugins on'
-        : state === 'off' ? '⊘ Plugins off'
-        : '⊕ Plugins partial';
-      toggle.addEventListener('click', (e) => {
+    const chips = [
+      { key: 'sort', label: 'Sort', active: hasSortCols, disabled: win.disableSort,
+        title: (on) => on ? 'Sorting enabled \u2014 click to suspend' : 'Sorting suspended \u2014 click to resume',
+        toggle: () => { win.disableSort = !win.disableSort; } },
+      { key: 'filter', label: 'Filter', active: anyFilters, disabled: win.disableFilter,
+        title: (on) => on ? 'Filters enabled \u2014 click to suspend' : 'Filters suspended \u2014 click to resume',
+        toggle: () => { win.disableFilter = !win.disableFilter; } },
+      { key: 'link', label: 'Link', active: hasLinkFilters, disabled: win.disableLink,
+        title: (on) => on ? 'Link filters enabled \u2014 click to suspend' : 'Link filters suspended \u2014 click to resume',
+        toggle: () => { win.disableLink = !win.disableLink; } },
+      { key: 'format', label: 'Format', active: hasTransforms, disabled: hasTransforms && transformedCols.every(c => win.disabledTransforms.has(c)),
+        title: (on) => on ? 'Formatting enabled \u2014 click to suspend' : 'Formatting suspended \u2014 click to resume',
+        toggle: () => {
+          const allOff = transformedCols.every(c => win.disabledTransforms.has(c));
+          if (allOff) transformedCols.forEach(c => win.disabledTransforms.delete(c));
+          else transformedCols.forEach(c => win.disabledTransforms.add(c));
+        } },
+    ];
+    for (const chip of chips) {
+      if (!chip.active) continue;
+      const el = document.createElement('span');
+      el.className = 'status-chip status-chip-' + chip.key + (chip.disabled ? ' off' : '');
+      el.textContent = chip.label;
+      el.title = chip.title(!chip.disabled);
+      el.addEventListener('click', (e) => {
         e.stopPropagation();
-        if (allOn) transformedCols.forEach(c => win.disabledTransforms.add(c));
-        else transformedCols.forEach(c => win.disabledTransforms.delete(c));
+        chip.toggle();
         rebuildTable(win);
       });
-      statusCenter.appendChild(toggle);
+      statusCenter.appendChild(el);
     }
   }
 
@@ -5010,6 +5015,26 @@ const app = (() => {
         return;
       }
       if (!(e.ctrlKey || e.metaKey)) return;
+      if (e.shiftKey && (e.key === '1' || e.key === '2' || e.key === '3' || e.key === '4')) {
+        const win = getActiveDataWindow();
+        if (win && win.tableName) {
+          e.preventDefault();
+          if (e.key === '1') win.disableSort = !win.disableSort;
+          else if (e.key === '2') win.disableFilter = !win.disableFilter;
+          else if (e.key === '3') win.disableLink = !win.disableLink;
+          else if (e.key === '4') {
+            const tc = win.tableName && _columnTransformCache[win.tableName]
+              ? Object.keys(_columnTransformCache[win.tableName]) : [];
+            if (tc.length > 0) {
+              const allOff = tc.every(c => win.disabledTransforms.has(c));
+              if (allOff) tc.forEach(c => win.disabledTransforms.delete(c));
+              else tc.forEach(c => win.disabledTransforms.add(c));
+            }
+          }
+          rebuildTable(win);
+        }
+        return;
+      }
       if (e.shiftKey && e.key.toLowerCase() === 'a') {
         const tgt = e.target;
         if (tgt && tgt.matches && tgt.matches('input, textarea, [contenteditable="true"], td.data-cell')) return;
@@ -5752,7 +5777,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.23.2 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.0 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -5820,7 +5845,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <li><strong>Multi-column sort:</strong> Shift+click additional column headers. Numbers next to arrows indicate sort priority.</li>
 <li><strong>Filter:</strong> Type a SQL <code>WHERE</code> clause in the filter bar (without the <code>WHERE</code> keyword). For example: <code>age > 30 AND name LIKE '%Smith%'</code></li>
 <li>The filter supports all SQLite expressions including <code>REGEXP</code> (see below).</li>
-<li><strong>Column autofilter:</strong> Click the <code>&#x2630;</code> icon on any column header to open a dropdown with checkboxes for each unique value. Use the search box to narrow the list. Uncheck values and click Apply to hide matching rows. Multiple column filters AND together and combine with the WHERE filter bar. Filtered columns show a green border. Click Clear to remove a column&rsquo;s filter. When any filters are active, a &ldquo;Clear Filters&rdquo; link appears in the status bar to reset all column autofilters and the WHERE filter at once.</li>
+<li><strong>Column autofilter:</strong> Click the <code>&#x2630;</code> icon on any column header to open a dropdown with checkboxes for each unique value. Use the search box to narrow the list. Uncheck values and click Apply to hide matching rows. Multiple column filters AND together and combine with the WHERE filter bar. Filtered columns show a green left border. Click Clear to remove a column&rsquo;s filter. When any filters are active, a &ldquo;Clear Filters&rdquo; link appears in the status bar to reset all column autofilters and the WHERE filter at once.</li>
+<li><strong>Toggle chips:</strong> When sorting, filtering, linking, or formatting is active on a window, labeled chips (<strong>Sort</strong>, <strong>Filter</strong>, <strong>Link</strong>, <strong>Format</strong>) appear in the status bar center. Click a chip to suspend that feature without losing its configuration; click again to resume. Suspended features show the chip with strikethrough and a dashed left border on affected column headers. Keyboard shortcuts: <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>1</code> (Sort), <code>2</code> (Filter), <code>3</code> (Link), <code>4</code> (Format).</li>
 </ul>
 
 <h4>SQL Console</h4>
@@ -5911,6 +5937,7 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>Z</code></td><td>Redo</td></tr>
 <tr><td><code>Tab</code>/<code>Shift+Tab</code> or <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>L</code>/<code>H</code> (cell selected, not editing)</td><td>Switch to next / previous table window</td></tr>
 <tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>H</code>/<code>J</code>/<code>K</code>/<code>L</code> (cell selected, not editing)</td><td>Nudge the active window 5 px left / down / up / right</td></tr>
+<tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>1</code>/<code>2</code>/<code>3</code>/<code>4</code></td><td>Toggle Sort / Filter / Link / Format</td></tr>
 <tr><td><code>Ctrl+Enter</code></td><td>Execute SQL query</td></tr>
 <tr><td><code>Enter</code></td><td>Send AI prompt</td></tr>
 <tr><td><code>Shift+Enter</code></td><td>Newline in AI prompt</td></tr>
@@ -5971,9 +5998,9 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 }</pre>
 <p>The <code>version</code>, <code>author</code>, <code>created</code>, and <code>description</code> fields are optional metadata shown in the About dialog. The <code>tables</code> array and <code>links</code> array are both optional &mdash; a plugin can have just display rules, just links, or both.</p>
 
-<p><strong>Cross-table linking:</strong> The <code>links</code> array defines relationships between tables. When you select rows in a source table, the target table is automatically filtered to matching values. All patterns are regex. The source table is excluded from its own link targets. Link filters are shown with a blue border on the column header and a &#x1F517; Linked label in the status bar. Clearing the selection clears the link filter. Link filters are separate from manual column autofilters.</p>
+<p><strong>Cross-table linking:</strong> The <code>links</code> array defines relationships between tables. When you select rows in a source table, the target table is automatically filtered to matching values. All patterns are regex. The source table is excluded from its own link targets. Link filters are shown with a blue left border on the column header and a <strong>Link</strong> chip in the status bar. Clearing the selection clears the link filter. Link filters are separate from manual column autofilters.</p>
 
-<p><strong>Per-column toggle:</strong> Columns with an active plugin transform show a &#x1F50C; icon in the header. Click the icon to disable the transform for that column &mdash; the icon dims but stays visible. Click again to re-enable. The status bar shows a bulk <strong>Plugins on/off/partial</strong> toggle to enable or disable all transforms at once.</p>
+<p><strong>Toggle:</strong> Columns with an active plugin transform show a pink left border. The <strong>Format</strong> chip in the status bar toggles all transforms on/off (<code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>4</code>). Similar chips appear for Sort, Filter, and Link when active.</p>
 
 <p><strong>Editing:</strong> When you enter edit mode on a cell with a display transform, the raw value is shown so you edit the actual data. The formatted display returns when you finish editing.</p>
 
