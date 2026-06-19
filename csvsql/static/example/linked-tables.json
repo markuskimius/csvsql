@@ -3,7 +3,7 @@
   "version": "1.1.0",
   "author": "CSVSQL",
   "created": "2025-06-13",
-  "description": "Cross-table linking with display formatting. Open customers.csv, orders.csv, and products.csv, then load this plugin. Selecting a customer filters orders and selecting an order filters both the customer and the product.",
+  "description": "Cross-table linking with display formatting. Open customers.csv, orders.csv, and products.csv, then load this plugin. Links propagate transitively — selecting a product filters orders for that product and also filters customers who ordered it.",
   "tables": [
     {
       "table": "orders",

@@ -249,7 +249,7 @@ Multiple plugins can be loaded simultaneously and stack on the same table — ea
 
 The `version`, `author`, `created`, and `description` fields are optional metadata displayed in the About dialog. The `tables` and `links` arrays are both optional — a plugin can have just display rules, just links, or both.
 
-**Cross-table linking:** The `links` array defines relationships between tables. When you select rows in a source table, the target table is automatically filtered to matching values. All table and column patterns are regex. The source table is excluded from its own link targets (even with `.*`). Link filters show a blue left border on the column header and a **Link** chip in the status bar. Clearing the selection clears the link filter. Link filters are separate from manual column autofilters and don't chain (no infinite loops).
+**Cross-table linking:** The `links` array defines relationships between tables. When you select rows in a source table, the target table is automatically filtered to matching values. All table and column patterns are regex. The source table is excluded from its own link targets (even with `.*`). Link filters show a blue left border on the column header and a **Link** chip in the status bar. Clearing the selection clears the link filter. Link filters are separate from manual column autofilters. Links propagate transitively — selecting a product filters orders for that product, which in turn filters customers who placed those orders. Cycle detection and a depth limit prevent infinite loops.
 
 Bundled example plugins and sample CSV files are in the `example/` directory: date formatting, USD currency, boolean display, ID zero-padding, and a linked-tables demo with orders, customers, and products.
 

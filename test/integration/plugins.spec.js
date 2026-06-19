@@ -1720,6 +1720,566 @@ test.describe('Cross-table linking', () => {
   });
 });
 
+test.describe('Transitive link propagation', () => {
+  test.beforeEach(async ({ page }) => {
+    await openApp(page);
+    await uploadFile(page, '../example/customers.csv');
+    await waitForWindow(page, 'customers');
+    await uploadFile(page, '../example/orders.csv');
+    await waitForWindow(page, 'orders');
+    await uploadFile(page, '../example/products.csv');
+    await waitForWindow(page, 'products');
+  });
+
+  async function loadLinkPlugin(page, config) {
+    await page.evaluate((cfg) => {
+      const errors = app._test.validatePlugin(cfg);
+      if (errors.length) throw new Error(errors.join(', '));
+      const compiled = app._test.compilePlugin(cfg);
+      cfg._compiled = compiled;
+      app._test.plugins.push(cfg);
+      app._test.rebuildTransformCache();
+    }, config);
+  }
+
+  function selectRow(page, tableName, rowIdx) {
+    return page.evaluate(({ tableName, rowIdx }) => {
+      const win = app._test.windows.find(w => w.tableName === tableName);
+      const t = app._test.tables[tableName];
+      const row = t.rows[rowIdx];
+      win.selectedCells = new Set();
+      for (const col of t.columns) {
+        win.selectedCells.add(`${row._rownum}:${col}`);
+      }
+      win.anchorCell = { rownum: row._rownum, col: t.columns[0] };
+      app._test.applyLinkFilters(win);
+    }, { tableName, rowIdx });
+  }
+
+  test('selecting product filters orders and customers transitively', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Transitive',
+      links: [
+        { source: { table: 'products', column: '^id$' }, target: { table: 'orders', column: '^product_id$' } },
+        { source: { table: 'orders', column: '^customer_id$' }, target: { table: 'customers', column: '^id$' } }
+      ]
+    });
+
+    // Select product 501 (Widget) — ordered by customers 1, 2, 5 via orders 101, 103, 107
+    const result = await page.evaluate(() => {
+      const prodWin = app._test.windows.find(w => w.tableName === 'products');
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      const prodTable = app._test.tables['products'];
+      const row = prodTable.rows[0]; // id=501
+
+      prodWin.selectedCells = new Set();
+      for (const col of prodTable.columns) {
+        prodWin.selectedCells.add(`${row._rownum}:${col}`);
+      }
+      prodWin.anchorCell = { rownum: row._rownum, col: 'id' };
+      app._test.applyLinkFilters(prodWin);
+
+      return {
+        ordersFilter: ordersWin.linkFilters['product_id'] ? [...ordersWin.linkFilters['product_id']].sort() : [],
+        customersFilter: custWin.linkFilters['id'] ? [...custWin.linkFilters['id']].sort() : []
+      };
+    });
+
+    expect(result.ordersFilter).toEqual(['501']);
+    // Customers 1, 2, 5 all ordered product 501
+    expect(result.customersFilter).toEqual(['1', '2', '5']);
+  });
+
+  test('selecting product 502 filters to correct customers', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Transitive',
+      links: [
+        { source: { table: 'products', column: '^id$' }, target: { table: 'orders', column: '^product_id$' } },
+        { source: { table: 'orders', column: '^customer_id$' }, target: { table: 'customers', column: '^id$' } }
+      ]
+    });
+
+    // Select product 502 (Gadget Pro) — ordered by customers 1, 4 via orders 102, 105
+    const result = await page.evaluate(() => {
+      const prodWin = app._test.windows.find(w => w.tableName === 'products');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      const prodTable = app._test.tables['products'];
+      const row = prodTable.rows[1]; // id=502
+
+      prodWin.selectedCells = new Set();
+      for (const col of prodTable.columns) {
+        prodWin.selectedCells.add(`${row._rownum}:${col}`);
+      }
+      prodWin.anchorCell = { rownum: row._rownum, col: 'id' };
+      app._test.applyLinkFilters(prodWin);
+
+      return custWin.linkFilters['id'] ? [...custWin.linkFilters['id']].sort() : [];
+    });
+
+    expect(result).toEqual(['1', '4']);
+  });
+
+  test('clearing selection clears all transitive filters', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Transitive',
+      links: [
+        { source: { table: 'products', column: '^id$' }, target: { table: 'orders', column: '^product_id$' } },
+        { source: { table: 'orders', column: '^customer_id$' }, target: { table: 'customers', column: '^id$' } }
+      ]
+    });
+
+    const result = await page.evaluate(() => {
+      const prodWin = app._test.windows.find(w => w.tableName === 'products');
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      const prodTable = app._test.tables['products'];
+      const row = prodTable.rows[0];
+
+      // Apply filters
+      prodWin.selectedCells = new Set();
+      for (const col of prodTable.columns) {
+        prodWin.selectedCells.add(`${row._rownum}:${col}`);
+      }
+      prodWin.anchorCell = { rownum: row._rownum, col: 'id' };
+      app._test.applyLinkFilters(prodWin);
+
+      // Verify filters are set
+      const beforeOrders = Object.keys(ordersWin.linkFilters).length > 0;
+      const beforeCust = Object.keys(custWin.linkFilters).length > 0;
+
+      // Clear selection
+      prodWin.selectedCells = new Set();
+      app._test.clearLinkFilters(prodWin);
+
+      return {
+        beforeOrders,
+        beforeCust,
+        afterOrders: Object.keys(ordersWin.linkFilters).length,
+        afterCust: Object.keys(custWin.linkFilters).length
+      };
+    });
+
+    expect(result.beforeOrders).toBe(true);
+    expect(result.beforeCust).toBe(true);
+    expect(result.afterOrders).toBe(0);
+    expect(result.afterCust).toBe(0);
+  });
+
+  test('cycle detection prevents infinite loops with bidirectional rules', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Cyclic',
+      links: [
+        { source: { table: 'products', column: '^id$' }, target: { table: 'orders', column: '^product_id$' } },
+        { source: { table: 'orders', column: '^product_id$' }, target: { table: 'products', column: '^id$' } },
+        { source: { table: 'orders', column: '^customer_id$' }, target: { table: 'customers', column: '^id$' } },
+        { source: { table: 'customers', column: '^id$' }, target: { table: 'orders', column: '^customer_id$' } }
+      ]
+    });
+
+    // Should not infinite loop — BFS visited set prevents revisiting tables
+    const result = await page.evaluate(() => {
+      const prodWin = app._test.windows.find(w => w.tableName === 'products');
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      const prodTable = app._test.tables['products'];
+      const row = prodTable.rows[0]; // id=501
+
+      prodWin.selectedCells = new Set();
+      for (const col of prodTable.columns) {
+        prodWin.selectedCells.add(`${row._rownum}:${col}`);
+      }
+      prodWin.anchorCell = { rownum: row._rownum, col: 'id' };
+      app._test.applyLinkFilters(prodWin);
+
+      return {
+        // Products is the source — should NOT get link filters applied to itself
+        prodFilters: Object.keys(prodWin.linkFilters).length,
+        // Orders should be filtered by product_id
+        ordersFilter: ordersWin.linkFilters['product_id'] ? [...ordersWin.linkFilters['product_id']] : [],
+        // Customers should be filtered transitively
+        custFilter: custWin.linkFilters['id'] ? [...custWin.linkFilters['id']].sort() : []
+      };
+    });
+
+    expect(result.prodFilters).toBe(0);
+    expect(result.ordersFilter).toEqual(['501']);
+    expect(result.custFilter).toEqual(['1', '2', '5']);
+  });
+
+  test('source table never gets filtered by its own selection', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Self-loop',
+      links: [
+        { source: { table: '.*', column: '.*id.*' }, target: { table: '.*', column: '.*id.*' } }
+      ]
+    });
+
+    const result = await page.evaluate(() => {
+      const prodWin = app._test.windows.find(w => w.tableName === 'products');
+      const prodTable = app._test.tables['products'];
+      const row = prodTable.rows[0];
+
+      prodWin.selectedCells = new Set();
+      for (const col of prodTable.columns) {
+        prodWin.selectedCells.add(`${row._rownum}:${col}`);
+      }
+      prodWin.anchorCell = { rownum: row._rownum, col: 'id' };
+      app._test.applyLinkFilters(prodWin);
+
+      return Object.keys(prodWin.linkFilters).length;
+    });
+
+    expect(result).toBe(0);
+  });
+
+  test('three-hop chain A→B→C→D propagates correctly', async ({ page }) => {
+    await uploadFile(page, 'notes.csv');
+    await waitForWindow(page, 'notes');
+
+    await loadLinkPlugin(page, {
+      name: '3-hop',
+      links: [
+        { source: { table: 'products', column: '^id$' }, target: { table: 'orders', column: '^product_id$' } },
+        { source: { table: 'orders', column: '^customer_id$' }, target: { table: 'customers', column: '^id$' } },
+        { source: { table: 'customers', column: '^id$' }, target: { table: 'notes', column: '^customer_id$' } }
+      ]
+    });
+
+    // Select product 503 (Starter Kit) — ordered by customers 3, 2 via orders 104, 106
+    const result = await page.evaluate(() => {
+      const prodWin = app._test.windows.find(w => w.tableName === 'products');
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      const notesWin = app._test.windows.find(w => w.tableName === 'notes');
+      const prodTable = app._test.tables['products'];
+      const row = prodTable.rows[2]; // id=503
+
+      prodWin.selectedCells = new Set();
+      for (const col of prodTable.columns) {
+        prodWin.selectedCells.add(`${row._rownum}:${col}`);
+      }
+      prodWin.anchorCell = { rownum: row._rownum, col: 'id' };
+      app._test.applyLinkFilters(prodWin);
+
+      return {
+        ordersFilter: ordersWin.linkFilters['product_id'] ? [...ordersWin.linkFilters['product_id']] : [],
+        custFilter: custWin.linkFilters['id'] ? [...custWin.linkFilters['id']].sort() : [],
+        notesFilter: notesWin.linkFilters['customer_id'] ? [...notesWin.linkFilters['customer_id']].sort() : []
+      };
+    });
+
+    expect(result.ordersFilter).toEqual(['503']);
+    expect(result.custFilter).toEqual(['2', '3']);
+    expect(result.notesFilter).toEqual(['2', '3']);
+  });
+
+  test('non-link-source table selection does not clear existing filters', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'One-way',
+      links: [
+        { source: { table: 'products', column: '^id$' }, target: { table: 'orders', column: '^product_id$' } }
+      ]
+    });
+
+    const result = await page.evaluate(() => {
+      const prodWin = app._test.windows.find(w => w.tableName === 'products');
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      const prodTable = app._test.tables['products'];
+      const custTable = app._test.tables['customers'];
+
+      // Select in products — orders get filtered
+      const row = prodTable.rows[0];
+      prodWin.selectedCells = new Set();
+      for (const col of prodTable.columns) {
+        prodWin.selectedCells.add(`${row._rownum}:${col}`);
+      }
+      prodWin.anchorCell = { rownum: row._rownum, col: 'id' };
+      app._test.applyLinkFilters(prodWin);
+
+      const ordersFilteredBefore = Object.keys(ordersWin.linkFilters).length > 0;
+
+      // Now select in customers — which is NOT a link source
+      const custRow = custTable.rows[0];
+      custWin.selectedCells = new Set();
+      for (const col of custTable.columns) {
+        custWin.selectedCells.add(`${custRow._rownum}:${col}`);
+      }
+      custWin.anchorCell = { rownum: custRow._rownum, col: 'id' };
+      app._test.applyLinkFilters(custWin);
+
+      // Orders should still be filtered (customers is not a link source, so no interference)
+      return {
+        ordersFilteredBefore,
+        ordersFilteredAfter: Object.keys(ordersWin.linkFilters).length > 0
+      };
+    });
+
+    expect(result.ordersFilteredBefore).toBe(true);
+    expect(result.ordersFilteredAfter).toBe(true);
+  });
+
+  test('new source selection replaces previous transitive filters', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Transitive',
+      links: [
+        { source: { table: 'products', column: '^id$' }, target: { table: 'orders', column: '^product_id$' } },
+        { source: { table: 'orders', column: '^customer_id$' }, target: { table: 'customers', column: '^id$' } }
+      ]
+    });
+
+    const result = await page.evaluate(() => {
+      const prodWin = app._test.windows.find(w => w.tableName === 'products');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      const prodTable = app._test.tables['products'];
+
+      // Select product 501 — customers 1, 2, 5
+      let row = prodTable.rows[0];
+      prodWin.selectedCells = new Set();
+      for (const col of prodTable.columns) {
+        prodWin.selectedCells.add(`${row._rownum}:${col}`);
+      }
+      prodWin.anchorCell = { rownum: row._rownum, col: 'id' };
+      app._test.applyLinkFilters(prodWin);
+      const firstFilter = custWin.linkFilters['id'] ? [...custWin.linkFilters['id']].sort() : [];
+
+      // Select product 502 — customers 1, 4
+      row = prodTable.rows[1];
+      prodWin.selectedCells = new Set();
+      for (const col of prodTable.columns) {
+        prodWin.selectedCells.add(`${row._rownum}:${col}`);
+      }
+      prodWin.anchorCell = { rownum: row._rownum, col: 'id' };
+      app._test.applyLinkFilters(prodWin);
+      const secondFilter = custWin.linkFilters['id'] ? [...custWin.linkFilters['id']].sort() : [];
+
+      return { firstFilter, secondFilter };
+    });
+
+    expect(result.firstFilter).toEqual(['1', '2', '5']);
+    expect(result.secondFilter).toEqual(['1', '4']);
+  });
+
+  test('multi-row selection propagates union of values transitively', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Transitive',
+      links: [
+        { source: { table: 'products', column: '^id$' }, target: { table: 'orders', column: '^product_id$' } },
+        { source: { table: 'orders', column: '^customer_id$' }, target: { table: 'customers', column: '^id$' } }
+      ]
+    });
+
+    const result = await page.evaluate(() => {
+      const prodWin = app._test.windows.find(w => w.tableName === 'products');
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      const prodTable = app._test.tables['products'];
+
+      // Select products 501 AND 502
+      prodWin.selectedCells = new Set();
+      for (const row of [prodTable.rows[0], prodTable.rows[1]]) {
+        for (const col of prodTable.columns) {
+          prodWin.selectedCells.add(`${row._rownum}:${col}`);
+        }
+      }
+      prodWin.anchorCell = { rownum: prodTable.rows[0]._rownum, col: 'id' };
+      app._test.applyLinkFilters(prodWin);
+
+      return {
+        ordersFilter: ordersWin.linkFilters['product_id'] ? [...ordersWin.linkFilters['product_id']].sort() : [],
+        custFilter: custWin.linkFilters['id'] ? [...custWin.linkFilters['id']].sort() : []
+      };
+    });
+
+    // Both product IDs in orders filter
+    expect(result.ordersFilter).toEqual(['501', '502']);
+    // Union of customers: product 501 → customers 1,2,5; product 502 → customers 1,4
+    expect(result.custFilter).toEqual(['1', '2', '4', '5']);
+  });
+
+  test('empty intermediate table stops propagation', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Transitive',
+      links: [
+        { source: { table: 'products', column: '^id$' }, target: { table: 'orders', column: '^product_id$' } },
+        { source: { table: 'orders', column: '^customer_id$' }, target: { table: 'customers', column: '^id$' } }
+      ]
+    });
+
+    const result = await page.evaluate(() => {
+      const prodWin = app._test.windows.find(w => w.tableName === 'products');
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      const prodTable = app._test.tables['products'];
+
+      // Add a product with no orders
+      prodTable.rows.push({ id: '999', name: 'Ghost', price: '0', category: 'None', is_active: 'false', _rownum: 4 });
+
+      // Select only the ghost product
+      const row = prodTable.rows[3];
+      prodWin.selectedCells = new Set();
+      for (const col of prodTable.columns) {
+        prodWin.selectedCells.add(`${row._rownum}:${col}`);
+      }
+      prodWin.anchorCell = { rownum: row._rownum, col: 'id' };
+      app._test.applyLinkFilters(prodWin);
+
+      return {
+        ordersFilter: ordersWin.linkFilters['product_id'] ? [...ordersWin.linkFilters['product_id']] : [],
+        // No orders match product 999, so no customer_id values propagate
+        custFilter: Object.keys(custWin.linkFilters).length
+      };
+    });
+
+    expect(result.ordersFilter).toEqual(['999']);
+    expect(result.custFilter).toBe(0);
+  });
+
+  test('transitive propagation uses full table rows not display-filtered rows', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Transitive',
+      links: [
+        { source: { table: 'products', column: '^id$' }, target: { table: 'orders', column: '^product_id$' } },
+        { source: { table: 'orders', column: '^customer_id$' }, target: { table: 'customers', column: '^id$' } }
+      ]
+    });
+
+    const result = await page.evaluate(() => {
+      const prodWin = app._test.windows.find(w => w.tableName === 'products');
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      const prodTable = app._test.tables['products'];
+
+      // Apply a column autofilter to orders that hides some orders
+      ordersWin.columnFilters = { customer_id: new Set(['1']) };
+
+      // Select product 501 — orders has autofilter but propagation should use ALL rows
+      const row = prodTable.rows[0]; // id=501
+      prodWin.selectedCells = new Set();
+      for (const col of prodTable.columns) {
+        prodWin.selectedCells.add(`${row._rownum}:${col}`);
+      }
+      prodWin.anchorCell = { rownum: row._rownum, col: 'id' };
+      app._test.applyLinkFilters(prodWin);
+
+      // Even though orders has autofilter showing only customer_id=1,
+      // the transitive propagation uses all rows in the orders table
+      return custWin.linkFilters['id'] ? [...custWin.linkFilters['id']].sort() : [];
+    });
+
+    // Product 501 ordered by customers 1, 2, 5 — ALL of them, not just the autofilter-visible ones
+    expect(result).toEqual(['1', '2', '5']);
+  });
+
+  test('linkFiltersEqual correctly compares filter objects', async ({ page }) => {
+    const result = await page.evaluate(() => {
+      const eq = app._test.linkFiltersEqual;
+      return {
+        emptyEqual: eq({}, {}),
+        sameKeySameValues: eq({ id: new Set(['1', '2']) }, { id: new Set(['1', '2']) }),
+        sameKeyDiffValues: eq({ id: new Set(['1', '2']) }, { id: new Set(['1', '3']) }),
+        diffKeys: eq({ id: new Set(['1']) }, { name: new Set(['1']) }),
+        diffSize: eq({ id: new Set(['1', '2']) }, { id: new Set(['1']) }),
+        extraKey: eq({ id: new Set(['1']) }, { id: new Set(['1']), name: new Set(['a']) }),
+        multiKeyEqual: eq(
+          { id: new Set(['1']), name: new Set(['a']) },
+          { name: new Set(['a']), id: new Set(['1']) }
+        ),
+      };
+    });
+
+    expect(result.emptyEqual).toBe(true);
+    expect(result.sameKeySameValues).toBe(true);
+    expect(result.sameKeyDiffValues).toBe(false);
+    expect(result.diffKeys).toBe(false);
+    expect(result.diffSize).toBe(false);
+    expect(result.extraKey).toBe(false);
+    expect(result.multiKeyEqual).toBe(true);
+  });
+
+  test('selecting in intermediate table applies only from that point forward', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Full chain',
+      links: [
+        { source: { table: 'products', column: '^id$' }, target: { table: 'orders', column: '^product_id$' } },
+        { source: { table: 'orders', column: '^customer_id$' }, target: { table: 'customers', column: '^id$' } },
+        { source: { table: 'orders', column: '^product_id$' }, target: { table: 'products', column: '^id$' } }
+      ]
+    });
+
+    // Selecting in orders (the middle table) should filter customers AND products
+    const result = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      const prodWin = app._test.windows.find(w => w.tableName === 'products');
+      const ordersTable = app._test.tables['orders'];
+      const row = ordersTable.rows[0]; // order 101: customer_id=1, product_id=501
+
+      ordersWin.selectedCells = new Set();
+      for (const col of ordersTable.columns) {
+        ordersWin.selectedCells.add(`${row._rownum}:${col}`);
+      }
+      ordersWin.anchorCell = { rownum: row._rownum, col: 'order_id' };
+      app._test.applyLinkFilters(ordersWin);
+
+      return {
+        custFilter: custWin.linkFilters['id'] ? [...custWin.linkFilters['id']] : [],
+        prodFilter: prodWin.linkFilters['id'] ? [...prodWin.linkFilters['id']] : [],
+        ordersFilter: Object.keys(ordersWin.linkFilters).length
+      };
+    });
+
+    expect(result.custFilter).toEqual(['1']);
+    expect(result.prodFilter).toEqual(['501']);
+    expect(result.ordersFilter).toBe(0);
+  });
+
+  test('unloading plugin clears all transitive link filters', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Transitive',
+      links: [
+        { source: { table: 'products', column: '^id$' }, target: { table: 'orders', column: '^product_id$' } },
+        { source: { table: 'orders', column: '^customer_id$' }, target: { table: 'customers', column: '^id$' } }
+      ]
+    });
+
+    const result = await page.evaluate(() => {
+      const prodWin = app._test.windows.find(w => w.tableName === 'products');
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      const prodTable = app._test.tables['products'];
+
+      // Apply transitive filters
+      const row = prodTable.rows[0];
+      prodWin.selectedCells = new Set();
+      for (const col of prodTable.columns) {
+        prodWin.selectedCells.add(`${row._rownum}:${col}`);
+      }
+      prodWin.anchorCell = { rownum: row._rownum, col: 'id' };
+      app._test.applyLinkFilters(prodWin);
+
+      const beforeOrders = Object.keys(ordersWin.linkFilters).length > 0;
+      const beforeCust = Object.keys(custWin.linkFilters).length > 0;
+
+      // Unload plugin
+      app._test.unloadPlugin(0);
+
+      return {
+        beforeOrders,
+        beforeCust,
+        afterOrders: Object.keys(ordersWin.linkFilters).length,
+        afterCust: Object.keys(custWin.linkFilters).length
+      };
+    });
+
+    expect(result.beforeOrders).toBe(true);
+    expect(result.beforeCust).toBe(true);
+    expect(result.afterOrders).toBe(0);
+    expect(result.afterCust).toBe(0);
+  });
+});
+
 test.describe('Sort chip', () => {
   test.beforeEach(async ({ page }) => {
     await openApp(page);

@@ -43,6 +43,7 @@ const app = (() => {
   let plugins = [];
   let _columnTransformCache = {};
   let _linkCache = []; // compiled link rules: [{ sourceTableRe, sourceColRe, targetTableRe, targetColRe, pluginIdx }]
+  let _applyingLinkFilters = false;
 
   // Sort optimization
   const collator = new Intl.Collator(undefined, { sensitivity: 'base' });
@@ -5847,7 +5848,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.3 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.4 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -6068,7 +6069,7 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 }</pre>
 <p>The <code>version</code>, <code>author</code>, <code>created</code>, and <code>description</code> fields are optional metadata shown in the About dialog. The <code>tables</code> array and <code>links</code> array are both optional &mdash; a plugin can have just display rules, just links, or both.</p>
 
-<p><strong>Cross-table linking:</strong> The <code>links</code> array defines relationships between tables. When you select rows in a source table, the target table is automatically filtered to matching values. All patterns are regex. The source table is excluded from its own link targets. Link filters are shown with a blue left border on the column header and a <strong>Link</strong> chip in the status bar. Clearing the selection clears the link filter. Link filters are separate from manual column autofilters.</p>
+<p><strong>Cross-table linking:</strong> The <code>links</code> array defines relationships between tables. When you select rows in a source table, the target table is automatically filtered to matching values. Links propagate transitively &mdash; selecting a product filters orders for that product, which in turn filters customers who placed those orders. All patterns are regex. The source table is excluded from its own link targets. Link filters are shown with a blue left border on the column header and a <strong>Link</strong> chip in the status bar. Clearing the selection clears the link filter. Link filters are separate from manual column autofilters.</p>
 
 <p><strong>Toggle:</strong> Columns with an active plugin transform show a pink left border. The <strong>Format</strong> chip in the status bar toggles all transforms on/off (<code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>4</code>). Similar chips appear for Sort, Filter, and Link when active.</p>
 
@@ -7851,7 +7852,25 @@ ${_aiImageContext()}`;
     return !!(tableCache && tableCache[column]);
   }
 
+  function linkFiltersEqual(a, b) {
+    const aKeys = Object.keys(a);
+    const bKeys = Object.keys(b);
+    if (aKeys.length !== bKeys.length) return false;
+    aKeys.sort();
+    bKeys.sort();
+    for (let i = 0; i < aKeys.length; i++) {
+      if (aKeys[i] !== bKeys[i]) return false;
+      const aSet = a[aKeys[i]], bSet = b[bKeys[i]];
+      if (aSet.size !== bSet.size) return false;
+      for (const v of aSet) {
+        if (!bSet.has(v)) return false;
+      }
+    }
+    return true;
+  }
+
   function applyLinkFilters(sourceWin) {
+    if (_applyingLinkFilters) return;
     if (_linkCache.length === 0) return;
     const sourceTable = sourceWin.tableName;
     if (!sourceTable || !tables[sourceTable]) return;
@@ -7864,71 +7883,101 @@ ${_aiImageContext()}`;
     }
     if (selectedRownums.size === 0) { clearLinkFilters(sourceWin); return; }
 
-    const selectedRows = t.rows.filter(r => selectedRownums.has(r._rownum));
-
+    let isLinkSource = false;
     for (const link of _linkCache) {
-      if (!link.sourceTableRe.test(sourceTable)) continue;
-      const sourceColNames = t.columns.filter(c => link.sourceColRe.test(c));
-      if (sourceColNames.length === 0) continue;
+      if (link.sourceTableRe.test(sourceTable)) { isLinkSource = true; break; }
+    }
+    if (!isLinkSource) return;
 
-      for (const targetTableName of Object.keys(tables)) {
-        if (targetTableName === sourceTable) continue;
-        if (!link.targetTableRe.test(targetTableName)) continue;
-        const tt = tables[targetTableName];
-        const targetColNames = tt.columns.filter(c => link.targetColRe.test(c));
-        if (targetColNames.length === 0) continue;
+    const selectedRows = t.rows.filter(r => selectedRownums.has(r._rownum));
+    const queue = [{ tableName: sourceTable, rows: selectedRows }];
+    const visited = new Set([sourceTable]);
+    const allFilters = new Map();
+    let depth = 0;
 
-        const sourceValues = new Set();
-        for (const row of selectedRows) {
-          for (const sc of sourceColNames) {
-            sourceValues.add(String(row[sc] ?? ''));
-          }
-        }
+    while (queue.length > 0 && depth < 10) {
+      const batch = queue.splice(0, queue.length);
+      depth++;
+      for (const { tableName: srcName, rows: srcRows } of batch) {
+        const srcT = tables[srcName];
+        if (!srcT) continue;
+        for (const link of _linkCache) {
+          if (!link.sourceTableRe.test(srcName)) continue;
+          const sourceColNames = srcT.columns.filter(c => link.sourceColRe.test(c));
+          if (sourceColNames.length === 0) continue;
 
-        for (const targetWin of windows) {
-          if (targetWin.tableName !== targetTableName) continue;
-          let changed = false;
-          const newLinkFilters = {};
-          for (const tc of targetColNames) {
-            newLinkFilters[tc] = sourceValues;
-          }
-          const oldKeys = Object.keys(targetWin.linkFilters).sort().join(',');
-          const newKeys = Object.keys(newLinkFilters).sort().join(',');
-          if (oldKeys !== newKeys) changed = true;
-          if (!changed) {
-            for (const k of Object.keys(newLinkFilters)) {
-              const oldSet = targetWin.linkFilters[k];
-              if (!oldSet || oldSet.size !== newLinkFilters[k].size) { changed = true; break; }
-              for (const v of newLinkFilters[k]) {
-                if (!oldSet.has(v)) { changed = true; break; }
-              }
-              if (changed) break;
+          const sourceValues = new Set();
+          for (const row of srcRows) {
+            for (const sc of sourceColNames) {
+              sourceValues.add(String(row[sc] ?? ''));
             }
           }
-          if (changed) {
-            targetWin.linkFilters = newLinkFilters;
-            rebuildTable(targetWin);
+          if (sourceValues.size === 0) continue;
+
+          for (const targetName of Object.keys(tables)) {
+            if (visited.has(targetName)) continue;
+            if (!link.targetTableRe.test(targetName)) continue;
+            const tt = tables[targetName];
+            const targetColNames = tt.columns.filter(c => link.targetColRe.test(c));
+            if (targetColNames.length === 0) continue;
+
+            const newFilters = {};
+            for (const tc of targetColNames) {
+              newFilters[tc] = sourceValues;
+            }
+            allFilters.set(targetName, newFilters);
+            visited.add(targetName);
+
+            const matchingRows = tt.rows.filter(row => {
+              for (const tc of targetColNames) {
+                if (!sourceValues.has(String(row[tc] ?? ''))) return false;
+              }
+              return true;
+            });
+            if (matchingRows.length > 0) {
+              queue.push({ tableName: targetName, rows: matchingRows });
+            }
           }
         }
       }
     }
+
+    _applyingLinkFilters = true;
+    try {
+      for (const win of windows) {
+        if (!win.tableName) continue;
+        const newFilters = allFilters.get(win.tableName) || {};
+        if (!linkFiltersEqual(win.linkFilters, newFilters)) {
+          win.linkFilters = newFilters;
+          rebuildTable(win);
+        }
+      }
+    } finally {
+      _applyingLinkFilters = false;
+    }
   }
 
   function clearLinkFilters(sourceWin) {
+    if (_applyingLinkFilters) return;
     if (_linkCache.length === 0) return;
-    const sourceTable = sourceWin.tableName;
-    if (!sourceTable) return;
-
-    for (const link of _linkCache) {
-      if (!link.sourceTableRe.test(sourceTable)) continue;
-      for (const targetWin of windows) {
-        if (targetWin.tableName === sourceTable) continue;
-        if (!targetWin.tableName || !link.targetTableRe.test(targetWin.tableName)) continue;
-        if (Object.keys(targetWin.linkFilters).length > 0) {
-          targetWin.linkFilters = {};
-          rebuildTable(targetWin);
+    const sourceTable = sourceWin ? sourceWin.tableName : null;
+    if (sourceTable) {
+      let isLinkSource = false;
+      for (const link of _linkCache) {
+        if (link.sourceTableRe.test(sourceTable)) { isLinkSource = true; break; }
+      }
+      if (!isLinkSource) return;
+    }
+    _applyingLinkFilters = true;
+    try {
+      for (const win of windows) {
+        if (Object.keys(win.linkFilters).length > 0) {
+          win.linkFilters = {};
+          rebuildTable(win);
         }
       }
+    } finally {
+      _applyingLinkFilters = false;
     }
   }
 
@@ -8262,7 +8311,7 @@ choose(value, 'A', 'Active', 'I', 'Inactive')
         validatePlugin, compilePlugin, loadPersistedPlugins,
         rebuildTransformCache, rebuildTransformCacheForTable, rebuildLinkCache,
         getDisplayValue, hasDisplayTransform,
-        applyLinkFilters, clearLinkFilters,
+        applyLinkFilters, clearLinkFilters, linkFiltersEqual,
         loadPluginFile, unloadPlugin, persistPlugins, updatePluginMenu,
         SNAP_THRESHOLD, getSnapEdges, findSnap, snapPosition,
         showToast, showPluginAbout, closePluginAboutWindow,
