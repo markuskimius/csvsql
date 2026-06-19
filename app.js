@@ -2109,6 +2109,7 @@ const app = (() => {
     const origDockY = parseInt(dock.el.style.top);
     let movingDock = false;
     let undocking = false;
+    let reordering = false;
     let ghostEl = null;
     let ghostOffsetX = 0, ghostOffsetY = 0, leafW = 0, leafH = 0;
 
@@ -2116,7 +2117,7 @@ const app = (() => {
       const dx = e.clientX - startX;
       const dy = e.clientY - startY;
 
-      if (!movingDock && !undocking && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) {
+      if (!movingDock && !undocking && !reordering && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) {
         if (e.shiftKey) {
           undocking = true;
           const leafRect = leaf.el.getBoundingClientRect();
@@ -2134,6 +2135,10 @@ const app = (() => {
           ghostEl.style.zIndex = '999999';
           ghostEl.innerHTML = `<div class="win-titlebar"><span class="win-title">${escHtml(getWindowTitle(windows.find(w => w.id === winId)))}</span></div>`;
           document.body.appendChild(ghostEl);
+        } else if (leaf.tabs.length > 1) {
+          reordering = true;
+          const freshTab = leaf.tabBarEl.querySelector(`.dock-tab[data-win-id="${winId}"]`);
+          if (freshTab) freshTab.classList.add('dock-tab-dragging');
         } else {
           movingDock = true;
         }
@@ -2154,6 +2159,31 @@ const app = (() => {
         if (dock.maximized) dock.maximized = false;
       }
 
+      if (reordering) {
+        const tabs = leaf.tabBarEl.querySelectorAll('.dock-tab');
+        tabs.forEach(t => t.classList.remove('dock-tab-drop-left', 'dock-tab-drop-right'));
+        let matched = false;
+        for (const t of tabs) {
+          if (t === tabEl) continue;
+          const rect = t.getBoundingClientRect();
+          if (e.clientX >= rect.left && e.clientX <= rect.right) {
+            const mid = rect.left + rect.width / 2;
+            t.classList.add(e.clientX < mid ? 'dock-tab-drop-left' : 'dock-tab-drop-right');
+            matched = true;
+            break;
+          }
+        }
+        if (!matched) {
+          const lastTab = tabs[tabs.length - 1];
+          const firstTab = tabs[0];
+          if (lastTab && lastTab !== tabEl && e.clientX > lastTab.getBoundingClientRect().right) {
+            lastTab.classList.add('dock-tab-drop-right');
+          } else if (firstTab && firstTab !== tabEl && e.clientX < firstTab.getBoundingClientRect().left) {
+            firstTab.classList.add('dock-tab-drop-left');
+          }
+        }
+      }
+
       if (undocking) {
         ghostEl.style.left = (e.clientX - ghostOffsetX) + 'px';
         ghostEl.style.top = (e.clientY - ghostOffsetY) + 'px';
@@ -2172,7 +2202,39 @@ const app = (() => {
       hideDropOverlay();
       hideSnapGuides();
 
-      if (undocking && _dockDropTarget) {
+      if (reordering) {
+        const tabs = leaf.tabBarEl.querySelectorAll('.dock-tab');
+        tabs.forEach(t => t.classList.remove('dock-tab-dragging'));
+        tabs.forEach(t => t.classList.remove('dock-tab-drop-left', 'dock-tab-drop-right'));
+        const fromIdx = leaf.tabs.indexOf(winId);
+        let dropIdx = fromIdx;
+        let found = false;
+        for (const t of tabs) {
+          const rect = t.getBoundingClientRect();
+          if (e.clientX >= rect.left && e.clientX <= rect.right) {
+            const mid = rect.left + rect.width / 2;
+            const tIdx = leaf.tabs.indexOf(parseInt(t.dataset.winId));
+            dropIdx = e.clientX < mid ? tIdx : tIdx + 1;
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          const lastTab = tabs[tabs.length - 1];
+          const firstTab = tabs[0];
+          if (lastTab && e.clientX > lastTab.getBoundingClientRect().right) {
+            dropIdx = leaf.tabs.length;
+          } else if (firstTab && e.clientX < firstTab.getBoundingClientRect().left) {
+            dropIdx = 0;
+          }
+        }
+        if (dropIdx !== fromIdx && dropIdx !== fromIdx + 1) {
+          leaf.tabs.splice(fromIdx, 1);
+          if (dropIdx > fromIdx) dropIdx--;
+          leaf.tabs.splice(dropIdx, 0, winId);
+          renderTabBar(leaf, dock);
+        }
+      } else if (undocking && _dockDropTarget) {
         const sameDock = _dockDropTarget.type === 'leaf' && _dockDropTarget.dock === dock;
         const sameLeaf = sameDock && _dockDropTarget.leaf === leaf && _dockDropTarget.zone === 'center';
         if (!sameLeaf) {
@@ -5848,7 +5910,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.4 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.5 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -5978,7 +6040,8 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <ul>
 <li><strong>Tab windows:</strong> Hold <code>Shift</code> and drag a window onto another window's title bar to merge them into a tab group. Click tabs to switch between windows.</li>
 <li><strong>Split dock:</strong> Hold <code>Shift</code> and drag a window onto the body area of another window. Drop zones are divided diagonally &mdash; drop on the top, right, bottom, or left region to split that direction.</li>
-<li><strong>Rearrange:</strong> Hold <code>Shift</code> and drag a tab to move it to another window or dock pane. A ghost preview shows where the window will land.</li>
+<li><strong>Reorder tabs:</strong> Drag a tab left or right within the tab bar to rearrange it.</li>
+<li><strong>Move tabs:</strong> Hold <code>Shift</code> and drag a tab to move it to another window or dock pane. A ghost preview shows where the window will land.</li>
 <li><strong>Undock:</strong> Hold <code>Shift</code> and drag a tab outside its dock container to detach it as a standalone window. The undocked window retains the pane's size.</li>
 <li><strong>Splitter:</strong> Drag the divider between split panes to resize. Double-click to reset to 50/50.</li>
 <li><strong>Maximize:</strong> Double-click a tab or the empty tab bar area to maximize/restore the dock container.</li>

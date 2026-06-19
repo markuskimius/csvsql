@@ -1028,6 +1028,7 @@ body {
   cursor: grab;
 }
 .dock-tab-bar::-webkit-scrollbar { display: none; }
+.dock-tab-bar::after { content: ''; min-width: 40px; flex-shrink: 0; }
 
 .dock-leaf:first-child > .dock-tab-bar {
   border-radius: 6px 0 0 0;
@@ -1054,7 +1055,7 @@ body {
   color: var(--text-dim);
   cursor: pointer;
   white-space: nowrap;
-  flex: 1 1 0;
+  flex: 0 1 auto;
   min-width: 0;
   gap: 4px;
   border-right: 1px solid rgba(255,255,255,0.06);
@@ -1109,6 +1110,9 @@ body {
 .dock-tab:hover .dock-tab-close,
 .dock-tab.active .dock-tab-close { opacity: 1; }
 .dock-tab-close:hover { background: var(--danger); color: #fff; }
+.dock-tab.dock-tab-dragging { opacity: 0.35; cursor: grabbing; }
+.dock-tab.dock-tab-drop-left { border-left: 2px solid var(--accent-hover); }
+.dock-tab.dock-tab-drop-right { border-right: 2px solid var(--accent-hover); }
 
 .dock-controls {
   position: absolute;
@@ -1139,7 +1143,7 @@ body {
 .dock-controls .btn-close:hover { background: var(--danger); color: #fff; }
 .dock-tab-bar.has-controls { padding-right: 84px; }
 .dock-tab-bar.single-tab:not(.has-controls) { cursor: default; }
-.dock-tab-bar.single-tab:not(.has-controls) .dock-tab { flex: 1; }
+.dock-tab-bar.single-tab:not(.has-controls) .dock-tab { cursor: default; }
 
 /* ---- Dock Drop Overlay ---- */
 .dock-drop-overlay {
