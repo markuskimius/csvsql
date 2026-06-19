@@ -752,7 +752,7 @@ body {
   color: var(--text-dim);
   text-align: center;
   width: 50px;
-  min-width: 50px;
+  min-width: 30px;
 }
 
 .data-table th.row-num-header:hover {

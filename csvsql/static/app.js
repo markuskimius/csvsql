@@ -3009,7 +3009,7 @@ const app = (() => {
 
     const colgroup = document.createElement('colgroup');
     const rowNumColEl = document.createElement('col');
-    rowNumColEl.style.width = '50px';
+    rowNumColEl.style.width = (win.rowNumWidth || 50) + 'px';
     colgroup.appendChild(rowNumColEl);
     columns.forEach((col, colIdx) => {
       const colEl = document.createElement('col');
@@ -3022,7 +3022,7 @@ const app = (() => {
     win._colgroup = colgroup;
     if (win.colWidths) {
       table.classList.add('fixed-layout');
-      table.style.width = (50 + win.colWidths.reduce((a, b) => a + b, 0)) + 'px';
+      table.style.width = ((win.rowNumWidth || 50) + win.colWidths.reduce((a, b) => a + b, 0)) + 'px';
     }
 
     // Header
@@ -3031,6 +3031,23 @@ const app = (() => {
     const rowNumTh = document.createElement('th');
     rowNumTh.className = 'row-num-header';
     rowNumTh.textContent = '#';
+    const rowNumResizeHandle = document.createElement('div');
+    rowNumResizeHandle.className = 'col-resize-handle';
+    rowNumResizeHandle.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      e.preventDefault();
+      startRowNumResize(win, e);
+    });
+    rowNumResizeHandle.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      autoFitRowNumColumn(win);
+    });
+    rowNumResizeHandle.addEventListener('click', (e) => {
+      e.stopPropagation();
+    });
+    rowNumTh.appendChild(rowNumResizeHandle);
     headerRow.appendChild(rowNumTh);
 
     columns.forEach((col, colIdx) => {
@@ -3416,6 +3433,7 @@ const app = (() => {
     table.addEventListener('click', (e) => {
       const th = e.target.closest && e.target.closest('th.row-num-header');
       if (!th || !table.contains(th)) return;
+      if (th._didDrag) { th._didDrag = false; return; }
       selectAllCells(win);
     });
 
@@ -4490,7 +4508,7 @@ const app = (() => {
 
   function updateTableWidth(win) {
     if (!win._table || !win.colWidths) return;
-    win._table.style.width = (50 + win.colWidths.reduce((a, b) => a + b, 0)) + 'px';
+    win._table.style.width = ((win.rowNumWidth || 50) + win.colWidths.reduce((a, b) => a + b, 0)) + 'px';
   }
 
   function startColResize(win, colIdx, e) {
@@ -4508,6 +4526,35 @@ const app = (() => {
     const onMove = (me) => {
       const newWidth = Math.max(MIN_COL_WIDTH, startWidth + me.clientX - startX);
       win.colWidths[colIdx] = newWidth;
+      colEl.style.width = newWidth + 'px';
+      updateTableWidth(win);
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.classList.remove('col-resizing');
+      if (handle) handle.classList.remove('active');
+      if (th) th._didDrag = true;
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
+
+  function startRowNumResize(win, e) {
+    closeAutoFilter();
+    const colEl = win._colgroup.children[0];
+    const startX = e.clientX;
+    const startWidth = win.rowNumWidth || 50;
+    const MIN_COL_WIDTH = 30;
+
+    document.body.classList.add('col-resizing');
+    const th = win._table.querySelector('thead th.row-num-header');
+    const handle = th && th.querySelector('.col-resize-handle');
+    if (handle) handle.classList.add('active');
+
+    const onMove = (me) => {
+      const newWidth = Math.max(MIN_COL_WIDTH, startWidth + me.clientX - startX);
+      win.rowNumWidth = newWidth;
       colEl.style.width = newWidth + 'px';
       updateTableWidth(win);
     };
@@ -4545,6 +4592,29 @@ const app = (() => {
     const finalWidth = Math.min(MAX_COL_WIDTH, Math.max(MIN_COL_WIDTH, maxW));
     win.colWidths[colIdx] = finalWidth;
     win._colgroup.children[colIdx + 1].style.width = finalWidth + 'px';
+    updateTableWidth(win);
+  }
+
+  function autoFitRowNumColumn(win) {
+    const MIN_COL_WIDTH = 30;
+    const MAX_COL_WIDTH = 200;
+    const measurer = document.createElement('span');
+    measurer.style.cssText = 'visibility:hidden;position:absolute;white-space:nowrap;padding:0 8px;font-size:11px;font-family:inherit;';
+    document.body.appendChild(measurer);
+
+    measurer.textContent = '#';
+    let maxW = measurer.offsetWidth + 16;
+
+    const displayRows = win._displayRows;
+    if (displayRows.length > 0) {
+      measurer.textContent = String(displayRows.length);
+      maxW = Math.max(maxW, measurer.offsetWidth);
+    }
+    measurer.remove();
+
+    const finalWidth = Math.min(MAX_COL_WIDTH, Math.max(MIN_COL_WIDTH, maxW));
+    win.rowNumWidth = finalWidth;
+    win._colgroup.children[0].style.width = finalWidth + 'px';
     updateTableWidth(win);
   }
 
@@ -5777,7 +5847,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.0 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.1 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -5827,7 +5897,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <li><strong>Rename columns:</strong> <code>Ctrl</code>/<code>&#8984;</code>+click a column header.</li>
 <li><strong>Select a column:</strong> Click a column header to select it (highlighted) and sort it. Selection is the target for Ctrl+&larr;/&rarr;.</li>
 <li><strong>Reorder columns:</strong> Drag a column header to a new position. With a column selected by clicking its header, press <code>Ctrl</code>/<code>&#8984;</code>+<code>&larr;</code>/<code>&rarr;</code> to nudge it. With cells selected (in select mode, not editing), <code>Ctrl</code>/<code>&#8984;</code>+<code>&larr;</code>/<code>&rarr;</code> moves the columns spanned by the selection.</li>
-<li><strong>Resize columns:</strong> Drag the right edge of a column header to resize. Double-click the edge to auto-fit the column to its content. Column widths are fixed after initial load and survive sorting and filtering.</li>
+<li><strong>Resize columns:</strong> Drag the right edge of any column header to resize, including the <code>#</code> row-number column. Double-click the edge to auto-fit the column to its content. Column widths are fixed after initial load and survive sorting and filtering.</li>
 <li><strong>Rename tables:</strong> <code>Ctrl</code>/<code>&#8984;</code>+click the window title.</li>
 </ul>
 

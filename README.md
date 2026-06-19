@@ -15,7 +15,7 @@ A browser-based CSV database application. Open CSV, Excel, and compressed files 
 - **Inline editing** — Click a cell to select it; press Enter, i, F2, or Ctrl/Cmd+U to edit; or Ctrl/Cmd+click a cell to edit directly. Tab/Enter to navigate, Escape to revert
 - **Sort and filter** — Click column headers to sort (multi-column with Shift+click). Filter with SQL WHERE expressions including REGEXP. Excel-style column autofilter dropdowns with searchable checkboxes for point-and-click filtering. Toggle chips in the status bar let you suspend and resume sorting, filtering, linking, and formatting individually per window
 - **Multi-window workspace** — Draggable, resizable subwindows with edge snapping. Tile, Grid, or Cascade layouts. Tabbing and docking support for IDE-style split layouts
-- **Row and column management** — Add/delete rows, insert at position (right-click), add/rename/reorder columns (drag or keyboard), resize columns by dragging header edges (double-click to auto-fit)
+- **Row and column management** — Add/delete rows, insert at position (right-click), add/rename/reorder columns (drag or keyboard), resize any column by dragging header edges — including the row-number column (double-click to auto-fit)
 - **Cell selection** — Click a cell to highlight its row, column, and row number. Move the selection with arrow keys or vim-style h/j/k/l, extend to a rectangle with Shift+arrow (or Shift+H/J/K/L), Shift+click, or click-and-drag. Click a row number to select the entire row (drag or Shift+click for multiple rows). Click the `#` corner cell or press Ctrl+Shift+A to select all; repeat to deselect (the Edit menu shows "Select None" while all cells are selected). With no cell selected, any arrow key focuses the cell in the middle of the view. Ctrl+←/→ moves the selected columns as a block
 - **Clipboard** — Cut (Ctrl+X), Copy (Ctrl+C), and Paste (Ctrl+V) work on selected cells. Data is copied as tab-separated values. Copying with Select All or row selection includes the header row
 - **Undo / Redo** — Ctrl+Z undoes cell edits, paste, and cut operations. Ctrl+Shift+Z redoes. Multi-cell paste and cut undo as a single step
@@ -86,7 +86,7 @@ Use **File > Open** (Ctrl+O / Cmd+O), **File > Open URL**, or drag and drop file
 - **Add columns** — Click `+ Col` in the toolbar
 - **Rename columns** — Ctrl/Cmd+click a column header
 - **Reorder columns** — Drag a column header to a new position. With a header selected, press Ctrl/Cmd+←/→ to nudge it. With cells selected, Ctrl/Cmd+←/→ moves the columns spanned by the selection
-- **Resize columns** — Drag the right edge of a column header to resize. Double-click to auto-fit the column to its content
+- **Resize columns** — Drag the right edge of any column header to resize, including the `#` row-number column. Double-click to auto-fit the column to its content
 - **Rename tables** — Ctrl/Cmd+click the window title
 - **Highlight row & column** — Clicking a cell highlights its row and column. Move the selection with arrow keys or vim h/j/k/l; extend to a rectangle with Shift+arrow (or Shift+H/J/K/L), Shift+click, or click-and-drag. Click a row number to select an entire row (drag or Shift+click for ranges). Click the `#` corner cell or press Ctrl+Shift+A to select all; repeat to deselect (the Edit menu shows "Select None" while all cells are selected). Esc clears the selection
 - **Cut / Copy / Paste** — Select cells and use Ctrl+X, Ctrl+C, Ctrl+V (Cmd on Mac). Data is copied as TSV. Select All and row selection copies include the header row
