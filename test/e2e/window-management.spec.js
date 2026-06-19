@@ -19,7 +19,7 @@ test.describe('Window Management', () => {
   test('close removes window', async ({ page }) => {
     // Set up dialog handler BEFORE clicking close
     page.on('dialog', dialog => dialog.accept());
-    const closeBtn = page.locator('.subwindow .btn-close').first();
+    const closeBtn = page.locator('.subwindow.active .btn-close');
     await closeBtn.click();
     await page.waitForTimeout(500);
     const count = await getWindowCount(page);

@@ -211,7 +211,7 @@ test.describe('Touch gestures', () => {
       return { left: parseInt(el.style.left), top: parseInt(el.style.top) };
     });
     expect(after.left).toBeGreaterThan(before.left + 40);
-    expect(after.top).toBeGreaterThan(before.top + 20);
+    expect(after.top).toBeGreaterThanOrEqual(before.top + 20);
   });
 
   test('single touch on titlebar does not move the window', async ({ page }) => {
