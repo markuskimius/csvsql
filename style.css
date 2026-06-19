@@ -1983,6 +1983,7 @@ body {
   margin: 6px 0;
   overflow-x: auto;
   font-size: 12px;
+  flex-shrink: 0;
 }
 
 .help-body ul,
