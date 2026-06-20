@@ -3176,7 +3176,7 @@ const app = (() => {
         e.stopPropagation();
         e.preventDefault();
         if (colIdx === 0) autoFitRowNumColumn(win);
-        else autoFitColumn(win, colIdx - 1);
+        else autoFitSelectedOrSingle(win, colIdx - 1);
       });
       leftHandle.addEventListener('click', (e) => { e.stopPropagation(); });
       th.appendChild(leftHandle);
@@ -3192,7 +3192,7 @@ const app = (() => {
       resizeHandle.addEventListener('dblclick', (e) => {
         e.stopPropagation();
         e.preventDefault();
-        autoFitColumn(win, colIdx);
+        autoFitSelectedOrSingle(win, colIdx);
       });
       th.appendChild(resizeHandle);
 
@@ -4633,6 +4633,29 @@ const app = (() => {
       document.body.classList.remove('col-resizing');
       if (handle) handle.classList.remove('active');
       if (th) th._didDrag = true;
+      const finalWidth = win.colWidths[colIdx];
+      const selectedCols = new Set();
+      if (win.selectedCells) {
+        for (const key of win.selectedCells) {
+          selectedCols.add(key.slice(key.indexOf(':') + 1));
+        }
+      }
+      selectedCols.add(win._columns[colIdx]);
+      if (selectedCols.size > 1) {
+        const container = win._container;
+        const offsetBefore = th ? th.offsetLeft - container.scrollLeft : null;
+        for (const colName of selectedCols) {
+          const idx = win._columns.indexOf(colName);
+          if (idx !== -1 && idx !== colIdx) {
+            win.colWidths[idx] = finalWidth;
+            win._colgroup.children[idx + 1].style.width = finalWidth + 'px';
+          }
+        }
+        updateTableWidth(win);
+        if (th && offsetBefore !== null) {
+          container.scrollLeft = Math.max(0, th.offsetLeft - offsetBefore);
+        }
+      }
     };
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
@@ -4692,6 +4715,24 @@ const app = (() => {
     win.colWidths[colIdx] = finalWidth;
     win._colgroup.children[colIdx + 1].style.width = finalWidth + 'px';
     updateTableWidth(win);
+  }
+
+  function autoFitSelectedOrSingle(win, colIdx) {
+    if (win.selectedCells && win.selectedCells.size > 1) {
+      const clickedCol = win._columns[colIdx];
+      const selectedCols = new Set();
+      for (const key of win.selectedCells) {
+        selectedCols.add(key.slice(key.indexOf(':') + 1));
+      }
+      if (selectedCols.has(clickedCol)) {
+        for (const colName of selectedCols) {
+          const idx = win._columns.indexOf(colName);
+          if (idx !== -1) autoFitColumn(win, idx);
+        }
+        return;
+      }
+    }
+    autoFitColumn(win, colIdx);
   }
 
   function autoFitRowNumColumn(win) {
@@ -6042,7 +6083,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.15 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.16 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -6092,7 +6133,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <li><strong>Rename columns:</strong> <code>Ctrl</code>/<code>&#8984;</code>+click a column header.</li>
 <li><strong>Select a column:</strong> Click a column header to select it (highlighted) and sort it. Selection is the target for Ctrl+&larr;/&rarr;.</li>
 <li><strong>Reorder columns:</strong> Drag a column header to a new position. With a column selected by clicking its header, press <code>Ctrl</code>/<code>&#8984;</code>+<code>&larr;</code>/<code>&rarr;</code> to nudge it. With cells selected (in select mode, not editing), <code>Ctrl</code>/<code>&#8984;</code>+<code>&larr;</code>/<code>&rarr;</code> moves the columns spanned by the selection.</li>
-<li><strong>Resize columns:</strong> Drag any column border to resize &mdash; the resize handle spans both sides of the divider line, including the <code>#</code> row-number column. Double-click the border to auto-fit the column to its content. The column filter (<code>&#9776;</code>) menu also has <strong>Auto Fit This Column</strong> and <strong>Auto Fit All Columns</strong> &mdash; the latter resizes every column (and the row-number column) to fit its content, capped at 75% of the window width. Column widths are fixed after initial load and survive sorting and filtering.</li>
+<li><strong>Resize columns:</strong> Drag any column border to resize &mdash; the resize handle spans both sides of the divider line, including the <code>#</code> row-number column. Double-click the border to auto-fit the column to its content. When multiple columns are selected (e.g. via Ctrl+A), double-click auto-fits all selected columns, and drag-resize sets all selected columns to the dragged column&rsquo;s width on release. The column filter (<code>&#9776;</code>) menu also has <strong>Auto Fit This Column</strong> and <strong>Auto Fit All Columns</strong> &mdash; the latter resizes every column (and the row-number column) to fit its content, capped at 75% of the window width. Column widths are fixed after initial load and survive sorting and filtering.</li>
 <li><strong>Rename tables:</strong> <code>Ctrl</code>/<code>&#8984;</code>+click the window title.</li>
 </ul>
 
@@ -8559,6 +8600,7 @@ choose(value, 'A', 'Active', 'I', 'Inactive')
         removeTabFromLeaf, cleanupAfterTabRemoval,
         toggleMaximizeDock, getDropZone, detectDropTarget,
         autoFitAllColumns,
+        updateTableWidth, selectAllCells, selectNoneCells,
       }
     } : {}),
   };
