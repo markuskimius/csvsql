@@ -3949,3 +3949,471 @@ test.describe('Status chip integration', () => {
     expect(sortCols).toEqual([]);
   });
 });
+
+test.describe('Chip toggle link re-entrancy guard', () => {
+  test.beforeEach(async ({ page }) => {
+    await openApp(page);
+    await uploadFile(page, 'customers.csv');
+    await waitForWindow(page, 'customers');
+    await uploadFile(page, 'orders.csv');
+    await waitForWindow(page, 'orders');
+  });
+
+  async function loadPlugin(page, config) {
+    await page.evaluate((cfg) => {
+      const errors = app._test.validatePlugin(cfg);
+      if (errors.length) throw new Error(errors.join(', '));
+      const compiled = app._test.compilePlugin(cfg);
+      cfg._compiled = compiled;
+      app._test.plugins.push(cfg);
+      app._test.rebuildTransformCache();
+    }, config);
+  }
+
+  async function selectRowInWindow(page, tableName, rowIdx) {
+    await page.evaluate(({ tableName, rowIdx }) => {
+      const win = app._test.windows.find(w => w.tableName === tableName);
+      const t = app._test.tables[tableName];
+      const row = t.rows[rowIdx];
+      win.selectedCells = new Set();
+      for (const col of t.columns) {
+        win.selectedCells.add(`${row._rownum}:${col}`);
+      }
+      win.anchorCell = { rownum: row._rownum, col: t.columns[0] };
+    }, { tableName, rowIdx });
+  }
+
+  test('clicking Formatted chip does not make the table the link source', async ({ page }) => {
+    await loadPlugin(page, {
+      name: 'Format + Link',
+      tables: [{ table: '.*', columns: [{ match: '^name$', display: 'upper(value)' }] }],
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+    await page.evaluate(() => app._test.rerenderAllWindows());
+    await page.waitForTimeout(100);
+
+    await selectRowInWindow(page, 'customers', 0);
+
+    const custWin = await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'customers');
+      return { id: w.id };
+    });
+
+    const beforeSourceId = await page.evaluate(() => app._test._activeLinkSourceId);
+    expect(beforeSourceId).toBeNull();
+
+    await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'customers');
+      const chip = w.statusbarEl.querySelector('.status-chip-format');
+      chip.click();
+    });
+    await page.waitForTimeout(200);
+
+    const afterSourceId = await page.evaluate(() => app._test._activeLinkSourceId);
+    expect(afterSourceId).toBeNull();
+
+    const linkingChip = await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'customers');
+      return w.statusbarEl.querySelector('.status-chip-link-source') !== null;
+    });
+    expect(linkingChip).toBe(false);
+  });
+
+  test('clicking Formatted chip does not clear existing link filters on other tables', async ({ page }) => {
+    await loadPlugin(page, {
+      name: 'Format + Link',
+      tables: [{ table: '.*', columns: [{ match: '^name$', display: 'upper(value)' }] }],
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+    await page.evaluate(() => app._test.rerenderAllWindows());
+    await page.waitForTimeout(100);
+
+    await selectRowInWindow(page, 'orders', 0);
+    await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'orders');
+      app._test.applyLinkFilters(w);
+    });
+    await page.waitForTimeout(200);
+
+    const custFilteredBefore = await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'customers');
+      return { rows: w._displayRows.length, linkFilterKeys: Object.keys(w.linkFilters).length };
+    });
+    expect(custFilteredBefore.rows).toBe(1);
+    expect(custFilteredBefore.linkFilterKeys).toBe(1);
+
+    await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'customers');
+      const chip = w.statusbarEl.querySelector('.status-chip-format');
+      chip.click();
+    });
+    await page.waitForTimeout(200);
+
+    const custFilteredAfter = await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'customers');
+      return { rows: w._displayRows.length, linkFilterKeys: Object.keys(w.linkFilters).length };
+    });
+    expect(custFilteredAfter.rows).toBe(1);
+    expect(custFilteredAfter.linkFilterKeys).toBe(1);
+
+    const sourceId = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      return { sourceId: app._test._activeLinkSourceId, ordersId: ordersWin.id };
+    });
+    expect(sourceId.sourceId).toBe(sourceId.ordersId);
+  });
+
+  test('clicking Sorted chip does not make the table the link source', async ({ page }) => {
+    await loadPlugin(page, {
+      name: 'Link Only',
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+
+    await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'customers');
+      w.sortCols = [{ col: 'name', dir: 'asc' }];
+      app._test.rebuildTable(w);
+    });
+    await page.waitForTimeout(100);
+
+    await selectRowInWindow(page, 'customers', 0);
+
+    await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'customers');
+      const chip = w.statusbarEl.querySelector('.status-chip-sort');
+      chip.click();
+    });
+    await page.waitForTimeout(200);
+
+    const sourceId = await page.evaluate(() => app._test._activeLinkSourceId);
+    expect(sourceId).toBeNull();
+  });
+
+  test('clicking Filtered chip does not make the table the link source', async ({ page }) => {
+    await loadPlugin(page, {
+      name: 'Link Only',
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+
+    await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'customers');
+      w.columnFilters = { name: new Set(['Alice']) };
+      app._test.rebuildTable(w);
+    });
+    await page.waitForTimeout(100);
+
+    await selectRowInWindow(page, 'customers', 0);
+
+    await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'customers');
+      const chip = w.statusbarEl.querySelector('.status-chip-filter');
+      chip.click();
+    });
+    await page.waitForTimeout(200);
+
+    const sourceId = await page.evaluate(() => app._test._activeLinkSourceId);
+    expect(sourceId).toBeNull();
+  });
+
+  test('clicking Sorted chip does not clear existing link filters', async ({ page }) => {
+    await loadPlugin(page, {
+      name: 'Link Only',
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+
+    await selectRowInWindow(page, 'orders', 0);
+    await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'orders');
+      app._test.applyLinkFilters(w);
+    });
+    await page.waitForTimeout(200);
+
+    const custBefore = await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'customers');
+      return w._displayRows.length;
+    });
+    expect(custBefore).toBe(1);
+
+    await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'orders');
+      w.sortCols = [{ col: 'order_id', dir: 'asc' }];
+      app._test.rebuildTable(w);
+    });
+    await page.waitForTimeout(100);
+
+    await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'orders');
+      const chip = w.statusbarEl.querySelector('.status-chip-sort');
+      chip.click();
+    });
+    await page.waitForTimeout(200);
+
+    const custAfter = await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'customers');
+      return w._displayRows.length;
+    });
+    expect(custAfter).toBe(1);
+
+    const sourceId = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      return { sourceId: app._test._activeLinkSourceId, ordersId: ordersWin.id };
+    });
+    expect(sourceId.sourceId).toBe(sourceId.ordersId);
+  });
+
+  test('Ctrl+Shift+4 (format toggle) does not make table the link source', async ({ page }) => {
+    await loadPlugin(page, {
+      name: 'Format + Link',
+      tables: [{ table: '.*', columns: [{ match: '^name$', display: 'upper(value)' }] }],
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+    await page.evaluate(() => app._test.rerenderAllWindows());
+    await page.waitForTimeout(100);
+
+    await selectRowInWindow(page, 'customers', 0);
+
+    await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'customers');
+      app._test.focusWindow(w.id);
+      const cell = w.bodyEl.querySelector('td.data-cell');
+      if (cell) cell.focus();
+    });
+    await page.waitForTimeout(100);
+
+    const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+    await page.keyboard.press(`${modifier}+Shift+4`);
+    await page.waitForTimeout(200);
+
+    const sourceId = await page.evaluate(() => app._test._activeLinkSourceId);
+    expect(sourceId).toBeNull();
+  });
+
+  test('Ctrl+Shift+1 (clear sort) does not make table the link source', async ({ page }) => {
+    await loadPlugin(page, {
+      name: 'Link Only',
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+
+    await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'customers');
+      w.sortCols = [{ col: 'name', dir: 'asc' }];
+      app._test.rebuildTable(w);
+    });
+    await page.waitForTimeout(100);
+
+    await selectRowInWindow(page, 'customers', 0);
+
+    await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'customers');
+      app._test.focusWindow(w.id);
+      const cell = w.bodyEl.querySelector('td.data-cell');
+      if (cell) cell.focus();
+    });
+    await page.waitForTimeout(100);
+
+    const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+    await page.keyboard.press(`${modifier}+Shift+1`);
+    await page.waitForTimeout(200);
+
+    const sourceId = await page.evaluate(() => app._test._activeLinkSourceId);
+    expect(sourceId).toBeNull();
+  });
+
+  test('Ctrl+Shift+2 (clear filters) does not make table the link source', async ({ page }) => {
+    await loadPlugin(page, {
+      name: 'Link Only',
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+
+    await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'customers');
+      w.columnFilters = { name: new Set(['Alice']) };
+      app._test.rebuildTable(w);
+    });
+    await page.waitForTimeout(100);
+
+    await selectRowInWindow(page, 'customers', 0);
+
+    await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'customers');
+      app._test.focusWindow(w.id);
+      const cell = w.bodyEl.querySelector('td.data-cell');
+      if (cell) cell.focus();
+    });
+    await page.waitForTimeout(100);
+
+    const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+    await page.keyboard.press(`${modifier}+Shift+2`);
+    await page.waitForTimeout(200);
+
+    const sourceId = await page.evaluate(() => app._test._activeLinkSourceId);
+    expect(sourceId).toBeNull();
+  });
+
+  test('Ctrl+Shift+4 does not clear existing link filters', async ({ page }) => {
+    await loadPlugin(page, {
+      name: 'Format + Link',
+      tables: [{ table: '.*', columns: [{ match: '^name$', display: 'upper(value)' }] }],
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+    await page.evaluate(() => app._test.rerenderAllWindows());
+    await page.waitForTimeout(100);
+
+    await selectRowInWindow(page, 'orders', 0);
+    await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'orders');
+      app._test.applyLinkFilters(w);
+    });
+    await page.waitForTimeout(200);
+
+    const custBefore = await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'customers');
+      return w._displayRows.length;
+    });
+    expect(custBefore).toBe(1);
+
+    await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'customers');
+      app._test.focusWindow(w.id);
+      const cell = w.bodyEl.querySelector('td.data-cell');
+      if (cell) cell.focus();
+    });
+    await page.waitForTimeout(100);
+
+    const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+    await page.keyboard.press(`${modifier}+Shift+4`);
+    await page.waitForTimeout(200);
+
+    const custAfter = await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'customers');
+      return w._displayRows.length;
+    });
+    expect(custAfter).toBe(1);
+
+    const sourceId = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      return { sourceId: app._test._activeLinkSourceId, ordersId: ordersWin.id };
+    });
+    expect(sourceId.sourceId).toBe(sourceId.ordersId);
+  });
+
+  test('Linking chip toggle still works (not blocked by guard)', async ({ page }) => {
+    await loadPlugin(page, {
+      name: 'Link Only',
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+
+    await selectRowInWindow(page, 'orders', 0);
+    await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'orders');
+      app._test.applyLinkFilters(w);
+    });
+    await page.waitForTimeout(200);
+
+    const custBefore = await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'customers');
+      return w._displayRows.length;
+    });
+    expect(custBefore).toBe(1);
+
+    await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'orders');
+      const chip = w.statusbarEl.querySelector('.status-chip-link-source');
+      chip.click();
+    });
+    await page.waitForTimeout(200);
+
+    const custAfter = await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'customers');
+      return w._displayRows.length;
+    });
+    expect(custAfter).toBe(3);
+
+    await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'orders');
+      const chip = w.statusbarEl.querySelector('.status-chip-link-source');
+      chip.click();
+    });
+    await page.waitForTimeout(200);
+
+    const custReEnabled = await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'customers');
+      return w._displayRows.length;
+    });
+    expect(custReEnabled).toBe(1);
+  });
+
+  test('toggling Formatted chip on source table preserves its Linking status', async ({ page }) => {
+    await loadPlugin(page, {
+      name: 'Format + Link',
+      tables: [{ table: '.*', columns: [{ match: '^order_id$', display: '"#" + value' }] }],
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+    await page.evaluate(() => app._test.rerenderAllWindows());
+    await page.waitForTimeout(100);
+
+    await selectRowInWindow(page, 'orders', 0);
+    await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'orders');
+      app._test.applyLinkFilters(w);
+    });
+    await page.waitForTimeout(200);
+
+    const before = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      return {
+        sourceId: app._test._activeLinkSourceId,
+        ordersId: ordersWin.id,
+        custRows: custWin._displayRows.length,
+        hasLinkingChip: ordersWin.statusbarEl.querySelector('.status-chip-link-source') !== null,
+      };
+    });
+    expect(before.sourceId).toBe(before.ordersId);
+    expect(before.custRows).toBe(1);
+    expect(before.hasLinkingChip).toBe(true);
+
+    await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'orders');
+      const chip = w.statusbarEl.querySelector('.status-chip-format');
+      chip.click();
+    });
+    await page.waitForTimeout(200);
+
+    const after = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      return {
+        sourceId: app._test._activeLinkSourceId,
+        ordersId: ordersWin.id,
+        custRows: custWin._displayRows.length,
+        hasLinkingChip: ordersWin.statusbarEl.querySelector('.status-chip-link-source') !== null,
+      };
+    });
+    expect(after.sourceId).toBe(after.ordersId);
+    expect(after.custRows).toBe(1);
+    expect(after.hasLinkingChip).toBe(true);
+  });
+});
