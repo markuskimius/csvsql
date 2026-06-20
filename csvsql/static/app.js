@@ -3908,6 +3908,12 @@ const app = (() => {
     const statusCenter = win.statusbarEl.querySelector('.status-center');
     statusCenter.innerHTML = '';
     const chips = [
+      { key: 'link-source', label: 'Linking', active: win.id === _activeLinkSourceId || win.disableLinkSource, disabled: win.disableLinkSource,
+        title: (on) => on ? 'Linking to other tables \u2014 click to suspend' : 'Linking suspended \u2014 click to resume',
+        toggle: () => {
+          win.disableLinkSource = !win.disableLinkSource;
+          if (win.disableLinkSource) clearLinkFilters(win);
+        } },
       { key: 'sort', label: 'Sorted', active: hasSortCols, disabled: false,
         title: () => 'Click to clear sort',
         toggle: () => { win.sortCols = []; win.disableSort = false; } },
@@ -6017,7 +6023,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.8 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.10 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -6239,7 +6245,7 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 }</pre>
 <p>The <code>version</code>, <code>author</code>, <code>created</code>, and <code>description</code> fields are optional metadata shown in the About dialog. The <code>tables</code> array and <code>links</code> array are both optional &mdash; a plugin can have just display rules, just links, or both.</p>
 
-<p><strong>Cross-table linking:</strong> The <code>links</code> array defines relationships between tables. When you select rows in a source table, the target table is automatically filtered to matching values. Links propagate transitively &mdash; selecting a product filters orders for that product, which in turn filters customers who placed those orders. All patterns are regex. The source table is excluded from its own link targets. Link filters are shown with a blue left border on the column header and a <strong>Linked</strong> chip on target tables. A <strong>Linking</strong> chip appears on the source table driving the filters; click to suspend/resume outbound linking. Clearing the selection clears the link filter. Link filters are separate from manual column autofilters.</p>
+<p><strong>Cross-table linking:</strong> The <code>links</code> array defines relationships between tables. When you select rows in a source table, the target table is automatically filtered to matching values. Links propagate transitively &mdash; selecting a product filters orders for that product, which in turn filters customers who placed those orders. All patterns are regex. The source table is excluded from its own link targets. Link filters are shown with a blue left border on the column header and a <strong>Linked</strong> chip (blue) on target tables. A <strong>Linking</strong> chip (teal) appears on the source table driving the filters; click to suspend/resume outbound linking &mdash; the chip stays visible when suspended so it can be re-enabled. When a table receives link filters from a new source, any previously suspended Linking state on that table is reset. Clearing the selection clears the link filter. Link filters are separate from manual column autofilters.</p>
 
 <p><strong>Toggle:</strong> Columns with an active plugin transform show a pink left border. The <strong>Formatted</strong> chip in the status bar toggles all transforms on/off (<code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>4</code>). A <strong>Sorted</strong> chip appears when sort is active (click to clear), and a <strong>Filtered</strong> chip when filters are active (click to clear).</p>
 
@@ -8145,6 +8151,9 @@ ${_aiImageContext()}`;
       for (const win of windows) {
         if (!win.tableName) continue;
         const newFilters = allFilters.get(win.tableName) || {};
+        if (Object.keys(newFilters).length > 0 && win.disableLinkSource) {
+          win.disableLinkSource = false;
+        }
         if (!linkFiltersEqual(win.linkFilters, newFilters)) {
           win.linkFilters = newFilters;
           rebuildTable(win);
@@ -8513,6 +8522,7 @@ choose(value, 'A', 'Active', 'I', 'Inactive')
         validatePlugin, compilePlugin, loadPersistedPlugins,
         rebuildTransformCache, rebuildTransformCacheForTable, rebuildLinkCache,
         getDisplayValue, hasDisplayTransform,
+        get _activeLinkSourceId() { return _activeLinkSourceId; },
         applyLinkFilters, clearLinkFilters, linkFiltersEqual,
         loadPluginFile, unloadPlugin, persistPlugins, updatePluginMenu,
         SNAP_THRESHOLD, getSnapEdges, findSnap, snapPosition,

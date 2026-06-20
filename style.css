@@ -912,10 +912,14 @@ body {
   background: rgba(85, 204, 136, 0.15);
 }
 
-.status-chip-link,
-.status-chip-link-source {
+.status-chip-link {
   color: #55aadd;
   background: rgba(85, 170, 221, 0.15);
+}
+
+.status-chip-link-source {
+  color: #55cccc;
+  background: rgba(85, 204, 204, 0.15);
 }
 
 .status-chip-format {

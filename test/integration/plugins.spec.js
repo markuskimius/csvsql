@@ -3112,6 +3112,229 @@ test.describe('Linking chip', () => {
     });
     expect(linkFilterCount).toBe(0);
   });
+
+  test('Linking chip has distinct teal color, different from blue Linked chip', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Linking Color Test',
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+
+    await selectOrderRow(page, 0);
+    await page.waitForTimeout(200);
+
+    const colors = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      const linkingChip = ordersWin.statusbarEl.querySelector('.status-chip-link-source');
+      const linkedChip = custWin.statusbarEl.querySelector('.status-chip-link');
+      return {
+        linkingColor: linkingChip ? getComputedStyle(linkingChip).color : null,
+        linkedColor: linkedChip ? getComputedStyle(linkedChip).color : null,
+      };
+    });
+    expect(colors.linkingColor).not.toBeNull();
+    expect(colors.linkedColor).not.toBeNull();
+    expect(colors.linkingColor).not.toBe(colors.linkedColor);
+  });
+
+  test('Linking chip stays visible with off class after clicking to disable', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Linking Persist Chip Test',
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+
+    await selectOrderRow(page, 0);
+    await page.waitForTimeout(200);
+
+    // Click Linking chip to disable
+    await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      ordersWin.statusbarEl.querySelector('.status-chip-link-source').click();
+    });
+    await page.waitForTimeout(200);
+
+    // Chip should still exist with 'off' class
+    const state = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const chip = ordersWin.statusbarEl.querySelector('.status-chip-link-source');
+      return {
+        exists: chip !== null,
+        hasOff: chip ? chip.classList.contains('off') : null,
+        text: chip ? chip.textContent : null,
+      };
+    });
+    expect(state.exists).toBe(true);
+    expect(state.hasOff).toBe(true);
+    expect(state.text).toBe('Linking');
+  });
+
+  test('Linking chip persists after rebuild when disabled', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Linking Rebuild Persist Test',
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+
+    await selectOrderRow(page, 0);
+    await page.waitForTimeout(200);
+
+    // Disable linking via chip click
+    await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      ordersWin.statusbarEl.querySelector('.status-chip-link-source').click();
+    });
+    await page.waitForTimeout(200);
+
+    // Force multiple rebuilds
+    await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      app._test.rebuildTable(ordersWin);
+      app._test.rebuildTable(ordersWin);
+    });
+    await page.waitForTimeout(200);
+
+    // Chip should still be present with 'off' class
+    const state = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const chip = ordersWin.statusbarEl.querySelector('.status-chip-link-source');
+      return {
+        exists: chip !== null,
+        hasOff: chip ? chip.classList.contains('off') : null,
+      };
+    });
+    expect(state.exists).toBe(true);
+    expect(state.hasOff).toBe(true);
+  });
+
+  test('clicking disabled Linking chip re-enables and reapplies link filters', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Linking Re-enable Click Test',
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+
+    await selectOrderRow(page, 0);
+    await page.waitForTimeout(200);
+
+    // Disable via chip
+    await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      ordersWin.statusbarEl.querySelector('.status-chip-link-source').click();
+    });
+    await page.waitForTimeout(200);
+
+    // Verify disabled state
+    let custRows = await page.evaluate(() => {
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      return custWin._displayRows ? custWin._displayRows.length : -1;
+    });
+    expect(custRows).toBe(3);
+
+    // Click again to re-enable
+    await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      ordersWin.statusbarEl.querySelector('.status-chip-link-source').click();
+    });
+    await page.waitForTimeout(200);
+
+    // Link filters should be reapplied, chip should be active (no off class)
+    const state = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      const chip = ordersWin.statusbarEl.querySelector('.status-chip-link-source');
+      return {
+        custRows: custWin._displayRows ? custWin._displayRows.length : -1,
+        chipExists: chip !== null,
+        hasOff: chip ? chip.classList.contains('off') : null,
+        disableLinkSource: ordersWin.disableLinkSource,
+      };
+    });
+    expect(state.custRows).toBe(1);
+    expect(state.chipExists).toBe(true);
+    expect(state.hasOff).toBe(false);
+    expect(state.disableLinkSource).toBe(false);
+  });
+
+  test('disableLinkSource resets when table receives link filters from new source', async ({ page }) => {
+    // Bidirectional links: orders -> customers, customers -> orders
+    await loadLinkPlugin(page, {
+      name: 'Linking Reset Test',
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } },
+        { source: { table: 'customers', column: 'id' }, target: { table: 'orders', column: 'customer_id' } }
+      ]
+    });
+
+    // Select in orders first to make it the link source
+    await selectOrderRow(page, 0);
+    await page.waitForTimeout(200);
+
+    // Disable linking on orders via chip click
+    await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      ordersWin.statusbarEl.querySelector('.status-chip-link-source').click();
+    });
+    await page.waitForTimeout(200);
+
+    // Verify orders has disableLinkSource = true
+    let ordersDisabled = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      return ordersWin.disableLinkSource;
+    });
+    expect(ordersDisabled).toBe(true);
+
+    // Now select in customers — this makes customers the link source,
+    // and orders becomes a link target. This should reset orders' disableLinkSource.
+    await selectCustomerRow(page, 0);
+    await page.waitForTimeout(200);
+
+    const state = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      return {
+        ordersDisableLinkSource: ordersWin.disableLinkSource,
+        ordersHasLinkFilters: Object.keys(ordersWin.linkFilters).length > 0,
+        custIsLinkSource: custWin.id === app._test._activeLinkSourceId,
+      };
+    });
+    expect(state.ordersDisableLinkSource).toBe(false);
+    expect(state.ordersHasLinkFilters).toBe(true);
+    expect(state.custIsLinkSource).toBe(true);
+  });
+
+  test('disableLinkSource is NOT reset on table that does not receive link filters', async ({ page }) => {
+    // One-directional: orders -> customers only. A third table would not be a target.
+    // Use bidirectional but disable on customers, then re-link from orders (customers is source, not target)
+    await loadLinkPlugin(page, {
+      name: 'No Reset Non-Target Test',
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+
+    // Set disableLinkSource on customers (not a target of the link)
+    await page.evaluate(() => {
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      custWin.disableLinkSource = true;
+    });
+
+    // Select in orders — customers is the TARGET, so its disableLinkSource SHOULD be reset
+    await selectOrderRow(page, 0);
+    await page.waitForTimeout(200);
+
+    // customers is a target here, so disableLinkSource should be reset
+    const custDisabled = await page.evaluate(() => {
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      return custWin.disableLinkSource;
+    });
+    expect(custDisabled).toBe(false);
+  });
 });
 
 test.describe('Status chip keyboard shortcuts', () => {
