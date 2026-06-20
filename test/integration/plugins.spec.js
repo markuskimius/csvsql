@@ -3335,6 +3335,71 @@ test.describe('Linking chip', () => {
     });
     expect(custDisabled).toBe(false);
   });
+
+  test('pre-existing selection does not trigger linking when plugin is loaded', async ({ page }) => {
+    // Select a row in orders BEFORE loading any plugin
+    await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const ordersTable = app._test.tables['orders'];
+      const row = ordersTable.rows[0];
+      ordersWin.selectedCells = new Set();
+      for (const col of ordersTable.columns) {
+        ordersWin.selectedCells.add(`${row._rownum}:${col}`);
+      }
+      ordersWin.anchorCell = { rownum: row._rownum, col: 'order_id' };
+      app._test.rebuildTable(ordersWin);
+    });
+    await page.waitForTimeout(200);
+
+    // Load plugin via loadPluginFile (simulated with a File object)
+    await page.evaluate(() => {
+      const config = {
+        name: 'Post-Selection Plugin',
+        links: [
+          { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+        ]
+      };
+      const blob = new Blob([JSON.stringify(config)], { type: 'application/json' });
+      const file = new File([blob], 'test-plugin.json', { type: 'application/json' });
+      return app._test.loadPluginFile(file);
+    });
+    await page.waitForTimeout(200);
+
+    // Linking chip should NOT appear on orders (selection predates plugin)
+    const state = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      const linkingChip = ordersWin.statusbarEl.querySelector('.status-chip-link-source');
+      const linkedChip = custWin.statusbarEl.querySelector('.status-chip-link');
+      return {
+        hasLinkingChip: linkingChip !== null,
+        hasLinkedChip: linkedChip !== null,
+        activeLinkSourceId: app._test._activeLinkSourceId,
+        custLinkFilters: Object.keys(custWin.linkFilters).length,
+      };
+    });
+    expect(state.hasLinkingChip).toBe(false);
+    expect(state.hasLinkedChip).toBe(false);
+    expect(state.activeLinkSourceId).toBeNull();
+    expect(state.custLinkFilters).toBe(0);
+
+    // Now select rows AFTER plugin is loaded — linking should work
+    await selectOrderRow(page, 0);
+    await page.waitForTimeout(200);
+
+    const afterSelect = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      return {
+        hasLinkingChip: ordersWin.statusbarEl.querySelector('.status-chip-link-source') !== null,
+        hasLinkedChip: custWin.statusbarEl.querySelector('.status-chip-link') !== null,
+        custLinkFilters: Object.keys(custWin.linkFilters).length,
+      };
+    });
+    expect(afterSelect.hasLinkingChip).toBe(true);
+    expect(afterSelect.hasLinkedChip).toBe(true);
+    expect(afterSelect.custLinkFilters).toBeGreaterThan(0);
+  });
 });
 
 test.describe('Status chip keyboard shortcuts', () => {

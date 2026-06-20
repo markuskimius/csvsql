@@ -3512,12 +3512,13 @@ const app = (() => {
       document.addEventListener('mouseup', onDragEnd);
     });
 
-    // Select-all via corner cell click
+    // Select-all/none toggle via corner cell click
     table.addEventListener('click', (e) => {
       const th = e.target.closest && e.target.closest('th.row-num-header');
       if (!th || !table.contains(th)) return;
       if (th._didDrag) { th._didDrag = false; return; }
-      selectAllCells(win);
+      if (isAllSelected(win)) selectNoneCells(win);
+      else selectAllCells(win);
     });
 
     // Row selection via row-number cell click/drag
@@ -3774,7 +3775,8 @@ const app = (() => {
         if (k === 'v' && !e.shiftKey) { e.preventDefault(); pasteAtAnchor(win); return; }
         if (k === 'z' && !e.shiftKey) { e.preventDefault(); undoTable(win.tableName, win); return; }
         if (k === 'z' && e.shiftKey) { e.preventDefault(); redoTable(win.tableName, win); return; }
-        if (k === 'a' && e.shiftKey) { e.preventDefault(); selectAllCells(win); return; }
+        if (k === 'a' && !e.shiftKey) { e.preventDefault(); selectAllCells(win); return; }
+        if (k === 'a' && e.shiftKey) { e.preventDefault(); selectNoneCells(win); return; }
       }
 
       if (e.key === 'Tab') {
@@ -4221,7 +4223,6 @@ const app = (() => {
   function selectAllCells(win) {
     if (!win._displayRows || !win._columns || win._columns.length === 0) return;
     if (win._displayRows.length === 0) return;
-    if (isAllSelected(win)) { selectNoneCells(win); return; }
     win.selectedCells = new Set();
     for (const row of win._displayRows) {
       for (const col of win._columns) {
@@ -5281,11 +5282,16 @@ const app = (() => {
         }
         return;
       }
-      if (e.shiftKey && e.key.toLowerCase() === 'a') {
+      if (e.key.toLowerCase() === 'a') {
         const tgt = e.target;
         if (tgt && tgt.matches && tgt.matches('input, textarea, [contenteditable="true"], td.data-cell')) return;
         const win = getActiveDataWindow();
-        if (win && win.tableName) { e.preventDefault(); selectAllCells(win); return; }
+        if (win && win.tableName) {
+          e.preventDefault();
+          if (e.shiftKey) selectNoneCells(win);
+          else selectAllCells(win);
+          return;
+        }
       }
       switch (e.key) {
         case 's': e.preventDefault(); saveActiveTable(); break;
@@ -5849,6 +5855,10 @@ const app = (() => {
       const win = getActiveDataWindow();
       if (win && win.tableName) selectAllCells(win);
     });
+    document.getElementById('btn-select-none').addEventListener('click', () => {
+      const win = getActiveDataWindow();
+      if (win && win.tableName) selectNoneCells(win);
+    });
 
     function updateMenuState() {
       const hasActive = !!activeWinId;
@@ -5877,9 +5887,8 @@ const app = (() => {
       document.getElementById('btn-cut').disabled = !hasSel;
       document.getElementById('btn-copy').disabled = !hasSel;
       document.getElementById('btn-paste').disabled = !(win && win.anchorCell);
-      const btnSelAll = document.getElementById('btn-select-all');
-      btnSelAll.disabled = !(win && win.tableName && tables[win.tableName]);
-      btnSelAll.firstChild.textContent = (win && isAllSelected(win)) ? 'Select None' : 'Select All';
+      document.getElementById('btn-select-all').disabled = !(win && win.tableName && tables[win.tableName]);
+      document.getElementById('btn-select-none').disabled = !hasSel;
     }
 
     function openItem(item) {
@@ -6023,7 +6032,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.12 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.13 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -6064,7 +6073,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <h4>Editing</h4>
 <ul>
 <li><strong>Edit cells:</strong> Click a cell to select it; press <code>Enter</code>, <code>i</code>, <code>F2</code>, or <code>Ctrl</code>/<code>&#8984;</code>+<code>U</code> to enter edit mode, or <code>Ctrl</code>/<code>&#8984;</code>+click a cell to edit it directly. <code>Tab</code>/<code>Shift+Tab</code> moves between cells, <code>Enter</code> saves and moves down, <code>Escape</code> reverts the edit (and clears the selection when not editing).</li>
-<li><strong>Highlight row &amp; column:</strong> Clicking a cell also highlights its row and column. Move the selection with arrow keys or vim-style <code>h</code>/<code>j</code>/<code>k</code>/<code>l</code>; extend to a rectangle of cells with <code>Shift</code>+arrow (or <code>Shift</code>+<code>H</code>/<code>J</code>/<code>K</code>/<code>L</code>), <code>Shift</code>+click on another cell, or click-and-drag across cells &mdash; every selected cell's row and column is highlighted so you can see what lines up with what. Click a row number to select an entire row; drag across row numbers or <code>Shift</code>+click another row number to select a range. Click the <code>#</code> corner cell or press <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>A</code> to select all; repeat to deselect (the Edit menu shows &ldquo;Select None&rdquo; while all cells are selected). Pressing an arrow key with no cell selected focuses the cell in the middle of the current view. <code>Esc</code> clears the selection.</li>
+<li><strong>Highlight row &amp; column:</strong> Clicking a cell also highlights its row and column. Move the selection with arrow keys or vim-style <code>h</code>/<code>j</code>/<code>k</code>/<code>l</code>; extend to a rectangle of cells with <code>Shift</code>+arrow (or <code>Shift</code>+<code>H</code>/<code>J</code>/<code>K</code>/<code>L</code>), <code>Shift</code>+click on another cell, or click-and-drag across cells &mdash; every selected cell's row and column is highlighted so you can see what lines up with what. Click a row number to select an entire row; drag across row numbers or <code>Shift</code>+click another row number to select a range. <code>Ctrl</code>/<code>&#8984;</code>+<code>A</code> selects all cells; <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>A</code> deselects all. Clicking the <code>#</code> corner cell toggles between select all and select none. Pressing an arrow key with no cell selected focuses the cell in the middle of the current view. <code>Esc</code> clears the selection.</li>
 <li><strong>Cut / Copy / Paste:</strong> Select cells and use <code>Ctrl</code>/<code>&#8984;</code>+<code>X</code>, <code>Ctrl</code>/<code>&#8984;</code>+<code>C</code>, <code>Ctrl</code>/<code>&#8984;</code>+<code>V</code>. Data is copied as tab-separated values. Select All and row selection copies include the column header row. In edit mode, these shortcuts pass through to native browser behavior for text within the cell.</li>
 <li><strong>Undo / Redo:</strong> <code>Ctrl</code>/<code>&#8984;</code>+<code>Z</code> to undo, <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>Z</code> to redo. Undoes cell edits, paste, and cut operations. Multi-cell paste and cut undo as a single step. Also available from the Edit menu.</li>
 <li><strong>Add rows:</strong> Click <code>+ Row</code> in the toolbar, or right-click a row number to insert above.</li>
@@ -6176,7 +6185,8 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <tr><td>Arrow keys (no cell selected)</td><td>Focus the cell in the middle of the visible table</td></tr>
 <tr><td>Arrow keys or <code>h</code>/<code>j</code>/<code>k</code>/<code>l</code> (cell selected, not editing)</td><td>Move selection to the adjacent cell</td></tr>
 <tr><td><code>Shift+</code>arrow or <code>Shift+H</code>/<code>J</code>/<code>K</code>/<code>L</code></td><td>Extend cell selection (highlights row &amp; column of every selected cell)</td></tr>
-<tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>A</code></td><td>Select all cells</td></tr>
+<tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>A</code></td><td>Select all cells</td></tr>
+<tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>A</code></td><td>Deselect all cells</td></tr>
 <tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>X</code></td><td>Cut selected cells</td></tr>
 <tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>C</code></td><td>Copy selected cells</td></tr>
 <tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>V</code></td><td>Paste at selected cell</td></tr>
@@ -8204,7 +8214,8 @@ ${_aiImageContext()}`;
       config._filename = file.name;
       plugins.push(config);
       rebuildTransformCache();
-      rerenderAllWindows();
+      _applyingLinkFilters = true;
+      try { rerenderAllWindows(); } finally { _applyingLinkFilters = false; }
       persistPlugins();
       updatePluginMenu();
       showToast('Plugin "' + (config.name || file.name) + '" loaded');

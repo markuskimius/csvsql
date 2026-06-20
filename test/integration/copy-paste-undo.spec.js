@@ -222,10 +222,10 @@ test.describe('Copy, Paste, Undo, Redo', () => {
     expect(data.rows[5].email).toBe('bob@example.com');
   });
 
-  test('Ctrl+Shift+A selects all cells', async ({ page }) => {
+  test('Ctrl+A selects all cells', async ({ page }) => {
     const firstCell = page.locator('.subwindow table tbody td.data-cell').first();
     await firstCell.click();
-    await page.keyboard.press('Control+Shift+a');
+    await page.keyboard.press('Control+a');
     await page.waitForTimeout(100);
     const sel = await getSelection(page, 'sample1');
     // 10 rows x 3 columns = 30 cells
@@ -367,24 +367,24 @@ test.describe('Copy, Paste, Undo, Redo', () => {
     expect(sel.cells.length).toBe(30);
   });
 
-  test('Ctrl+Shift+A from global handler works without cell focus', async ({ page }) => {
+  test('Ctrl+A from global handler works without cell focus', async ({ page }) => {
     // Click somewhere that's not a data cell (e.g., the window title bar)
     await page.locator('.subwindow .win-title').first().click();
     await page.waitForTimeout(100);
-    await page.keyboard.press('Control+Shift+a');
+    await page.keyboard.press('Control+a');
     await page.waitForTimeout(100);
     const sel = await getSelection(page, 'sample1');
     expect(sel.cells.length).toBe(30);
   });
 
-  test('Select All toggles to Select None on second invocation via keyboard', async ({ page }) => {
+  test('Ctrl+Shift+A deselects all cells via keyboard', async ({ page }) => {
     const cell = page.locator('.subwindow table tbody td.data-cell').first();
     await cell.click();
-    await page.keyboard.press('Control+Shift+a');
+    await page.keyboard.press('Control+a');
     await page.waitForTimeout(100);
     let sel = await getSelection(page, 'sample1');
     expect(sel.cells.length).toBe(30);
-    // Second invocation deselects all
+    // Ctrl+Shift+A deselects all
     await page.keyboard.press('Control+Shift+a');
     await page.waitForTimeout(100);
     sel = await getSelection(page, 'sample1');
@@ -392,18 +392,18 @@ test.describe('Copy, Paste, Undo, Redo', () => {
     expect(sel.anchor).toBeNull();
   });
 
-  test('Select All toggles to Select None via Edit menu button', async ({ page }) => {
-    // First click: select all
+  test('Edit menu Select None button deselects all cells', async ({ page }) => {
+    // Select all first
     await page.locator('#menu-edit .menu-label').click();
     await page.waitForTimeout(100);
     await page.locator('#btn-select-all').click();
     await page.waitForTimeout(100);
     let sel = await getSelection(page, 'sample1');
     expect(sel.cells.length).toBe(30);
-    // Second click: select none
+    // Click Select None
     await page.locator('#menu-edit .menu-label').click();
     await page.waitForTimeout(100);
-    await page.locator('#btn-select-all').click();
+    await page.locator('#btn-select-none').click();
     await page.waitForTimeout(100);
     sel = await getSelection(page, 'sample1');
     expect(sel.cells.length).toBe(0);
@@ -424,46 +424,41 @@ test.describe('Copy, Paste, Undo, Redo', () => {
     expect(sel.anchor).toBeNull();
   });
 
-  test('Edit menu shows Select None when all cells are selected', async ({ page }) => {
-    const cell = page.locator('.subwindow table tbody td.data-cell').first();
-    await cell.click();
-    await page.keyboard.press('Control+Shift+a');
-    await page.waitForTimeout(100);
+  test('Edit menu Select None is disabled when no cells are selected', async ({ page }) => {
     await page.locator('#menu-edit .menu-label').click();
     await page.waitForTimeout(100);
-    const btnText = await page.locator('#btn-select-all').evaluate(el => el.firstChild.textContent);
-    expect(btnText).toBe('Select None');
+    const isDisabled = await page.locator('#btn-select-none').evaluate(el => el.disabled);
+    expect(isDisabled).toBe(true);
   });
 
-  test('Edit menu shows Select All when not all cells are selected', async ({ page }) => {
-    // With just one cell selected
+  test('Edit menu Select None is enabled when cells are selected', async ({ page }) => {
     const cell = page.locator('.subwindow table tbody td.data-cell').first();
     await cell.click();
     await page.waitForTimeout(100);
     await page.locator('#menu-edit .menu-label').click();
     await page.waitForTimeout(100);
-    const btnText = await page.locator('#btn-select-all').evaluate(el => el.firstChild.textContent);
-    expect(btnText).toBe('Select All');
+    const isDisabled = await page.locator('#btn-select-none').evaluate(el => el.disabled);
+    expect(isDisabled).toBe(false);
   });
 
-  test('Edit menu reverts to Select All after toggling off', async ({ page }) => {
-    // Select all, then deselect, then check menu label
+  test('Select All always selects even when already all selected', async ({ page }) => {
     const cell = page.locator('.subwindow table tbody td.data-cell').first();
     await cell.click();
-    await page.keyboard.press('Control+Shift+a');
+    await page.keyboard.press('Control+a');
     await page.waitForTimeout(100);
-    await page.keyboard.press('Control+Shift+a');
+    let sel = await getSelection(page, 'sample1');
+    expect(sel.cells.length).toBe(30);
+    // Pressing Ctrl+A again does not deselect
+    await page.keyboard.press('Control+a');
     await page.waitForTimeout(100);
-    await page.locator('#menu-edit .menu-label').click();
-    await page.waitForTimeout(100);
-    const btnText = await page.locator('#btn-select-all').evaluate(el => el.firstChild.textContent);
-    expect(btnText).toBe('Select All');
+    sel = await getSelection(page, 'sample1');
+    expect(sel.cells.length).toBe(30);
   });
 
   test('Select None clears _copyWithHeader flag', async ({ page }) => {
     const cell = page.locator('.subwindow table tbody td.data-cell').first();
     await cell.click();
-    await page.keyboard.press('Control+Shift+a');
+    await page.keyboard.press('Control+a');
     await page.waitForTimeout(100);
     // Verify _copyWithHeader is set
     let copyWithHeader = await page.evaluate(() => {
@@ -471,7 +466,7 @@ test.describe('Copy, Paste, Undo, Redo', () => {
       return w._copyWithHeader;
     });
     expect(copyWithHeader).toBe(true);
-    // Toggle off
+    // Ctrl+Shift+A to select none
     await page.keyboard.press('Control+Shift+a');
     await page.waitForTimeout(100);
     copyWithHeader = await page.evaluate(() => {
@@ -481,15 +476,15 @@ test.describe('Copy, Paste, Undo, Redo', () => {
     expect(copyWithHeader).toBe(false);
   });
 
-  test('Select None via global handler without cell focus', async ({ page }) => {
+  test('Ctrl+Shift+A from global handler deselects without cell focus', async ({ page }) => {
     // Select all from title bar (global handler)
     await page.locator('.subwindow .win-title').first().click();
     await page.waitForTimeout(100);
-    await page.keyboard.press('Control+Shift+a');
+    await page.keyboard.press('Control+a');
     await page.waitForTimeout(100);
     let sel = await getSelection(page, 'sample1');
     expect(sel.cells.length).toBe(30);
-    // Toggle off from title bar (global handler)
+    // Deselect from title bar (global handler)
     await page.locator('.subwindow .win-title').first().click();
     await page.waitForTimeout(100);
     await page.keyboard.press('Control+Shift+a');
@@ -498,16 +493,16 @@ test.describe('Copy, Paste, Undo, Redo', () => {
     expect(sel.cells.length).toBe(0);
   });
 
-  test('Partial selection does not toggle to Select None', async ({ page }) => {
-    // Select a few cells via shift+arrow, then Select All should select all (not deselect)
+  test('Ctrl+A selects all from partial selection', async ({ page }) => {
+    // Select a few cells via shift+arrow, then Ctrl+A should select all
     const cell = page.locator('.subwindow table tbody td.data-cell').first();
     await cell.click();
     await page.keyboard.press('Shift+ArrowRight');
     await page.waitForTimeout(100);
     let sel = await getSelection(page, 'sample1');
     expect(sel.cells.length).toBe(2);
-    // Select All should select everything, not toggle off
-    await page.keyboard.press('Control+Shift+a');
+    // Ctrl+A should select everything
+    await page.keyboard.press('Control+a');
     await page.waitForTimeout(100);
     sel = await getSelection(page, 'sample1');
     expect(sel.cells.length).toBe(30);

@@ -16,7 +16,7 @@ A browser-based CSV database application. Open CSV, Excel, and compressed files 
 - **Sort and filter** — Click column headers to sort (multi-column with Shift+click). Filter with SQL WHERE expressions including REGEXP. Excel-style column autofilter dropdowns with searchable checkboxes for point-and-click filtering. Status chips in the status bar show active features. Click Sorted or Filtered to clear; click Linked or Formatted to suspend/resume
 - **Multi-window workspace** — Draggable, resizable subwindows with edge snapping. Tile, Grid, or Cascade layouts. Tabbing and docking support for IDE-style split layouts
 - **Row and column management** — Add/delete rows, insert at position (right-click), add/rename/reorder columns (drag or keyboard), resize any column by dragging column borders — including the row-number column (double-click to auto-fit). Auto Fit This Column and Auto Fit All Columns available in the column filter (☰) menu
-- **Cell selection** — Click a cell to highlight its row, column, and row number. Move the selection with arrow keys or vim-style h/j/k/l, extend to a rectangle with Shift+arrow (or Shift+H/J/K/L), Shift+click, or click-and-drag. Click a row number to select the entire row (drag or Shift+click for multiple rows). Click the `#` corner cell or press Ctrl+Shift+A to select all; repeat to deselect (the Edit menu shows "Select None" while all cells are selected). With no cell selected, any arrow key focuses the cell in the middle of the view. Ctrl+←/→ moves the selected columns as a block
+- **Cell selection** — Click a cell to highlight its row, column, and row number. Move the selection with arrow keys or vim-style h/j/k/l, extend to a rectangle with Shift+arrow (or Shift+H/J/K/L), Shift+click, or click-and-drag. Click a row number to select the entire row (drag or Shift+click for multiple rows). Ctrl+A selects all cells; Ctrl+Shift+A deselects all. Clicking the `#` corner cell toggles between select all and select none. With no cell selected, any arrow key focuses the cell in the middle of the view. Ctrl+←/→ moves the selected columns as a block
 - **Clipboard** — Cut (Ctrl+X), Copy (Ctrl+C), and Paste (Ctrl+V) work on selected cells. Data is copied as tab-separated values. Copying with Select All or row selection includes the header row
 - **Undo / Redo** — Ctrl+Z undoes cell edits, paste, and cut operations. Ctrl+Shift+Z redoes. Multi-cell paste and cut undo as a single step
 - **SELECT INTO** — Create new tables from query results (`SELECT ... INTO tablename ...`)
@@ -88,7 +88,7 @@ Use **File > Open** (Ctrl+O / Cmd+O), **File > Open URL**, or drag and drop file
 - **Reorder columns** — Drag a column header to a new position. With a header selected, press Ctrl/Cmd+←/→ to nudge it. With cells selected, Ctrl/Cmd+←/→ moves the columns spanned by the selection
 - **Resize columns** — Drag any column border to resize — the resize handle spans both sides of the divider line, including the `#` row-number column. Double-click to auto-fit the column to its content. The column filter (☰) menu also has **Auto Fit This Column** and **Auto Fit All Columns** — the latter resizes every column (and the row-number column) to fit its content, capped at 75% of the window width
 - **Rename tables** — Ctrl/Cmd+click the window title
-- **Highlight row & column** — Clicking a cell highlights its row and column. Move the selection with arrow keys or vim h/j/k/l; extend to a rectangle with Shift+arrow (or Shift+H/J/K/L), Shift+click, or click-and-drag. Click a row number to select an entire row (drag or Shift+click for ranges). Click the `#` corner cell or press Ctrl+Shift+A to select all; repeat to deselect (the Edit menu shows "Select None" while all cells are selected). Esc clears the selection
+- **Highlight row & column** — Clicking a cell highlights its row and column. Move the selection with arrow keys or vim h/j/k/l; extend to a rectangle with Shift+arrow (or Shift+H/J/K/L), Shift+click, or click-and-drag. Click a row number to select an entire row (drag or Shift+click for ranges). Ctrl+A selects all; Ctrl+Shift+A deselects all. Clicking the `#` corner cell toggles between select all and select none. Esc clears the selection
 - **Cut / Copy / Paste** — Select cells and use Ctrl+X, Ctrl+C, Ctrl+V (Cmd on Mac). Data is copied as TSV. Select All and row selection copies include the header row
 - **Undo / Redo** — Ctrl+Z / Ctrl+Shift+Z (Cmd on Mac). Undoes cell edits, paste, and cut. Multi-cell operations undo as a single step
 
@@ -274,7 +274,8 @@ The in-app **Plugins > Expression Reference** has the full language documentatio
 | Arrow keys (no cell selected) | Focus the cell in the middle of the view |
 | Arrow keys or h/j/k/l (cell selected, not editing) | Move selection to the adjacent cell |
 | Shift+arrow or Shift+H/J/K/L | Extend cell selection — highlights each selected cell's row & column |
-| Ctrl+Shift+A / Cmd+Shift+A | Select all cells |
+| Ctrl+A / Cmd+A | Select all cells |
+| Ctrl+Shift+A / Cmd+Shift+A | Deselect all cells |
 | Ctrl+X / Cmd+X | Cut selected cells |
 | Ctrl+C / Cmd+C | Copy selected cells |
 | Ctrl+V / Cmd+V | Paste at selected cell |
