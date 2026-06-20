@@ -13,7 +13,7 @@ A browser-based CSV database application. Open CSV, Excel, and compressed files 
 - **SQL queries** — Full SQLite syntax from the built-in console, including joins, subqueries, aggregates, UNION, CASE, and REGEXP. Query results are queryable tables too
 - **SQL syntax highlighting** — Keywords, strings, numbers, comments, and identifiers are color-coded in the SQL console and filter inputs
 - **Inline editing** — Click a cell to select it; press Enter, i, F2, or Ctrl/Cmd+U to edit; or Ctrl/Cmd+click a cell to edit directly. Tab/Enter to navigate, Escape to revert
-- **Sort and filter** — Click column headers to sort (multi-column with Shift+click). Filter with SQL WHERE expressions including REGEXP. Excel-style column autofilter dropdowns with searchable checkboxes for point-and-click filtering. Toggle chips in the status bar let you suspend and resume sorting, filtering, linking, and formatting individually per window
+- **Sort and filter** — Click column headers to sort (multi-column with Shift+click). Filter with SQL WHERE expressions including REGEXP. Excel-style column autofilter dropdowns with searchable checkboxes for point-and-click filtering. Status chips in the status bar show active features. Click Sorted or Filtered to clear; click Linked or Formatted to suspend/resume
 - **Multi-window workspace** — Draggable, resizable subwindows with edge snapping. Tile, Grid, or Cascade layouts. Tabbing and docking support for IDE-style split layouts
 - **Row and column management** — Add/delete rows, insert at position (right-click), add/rename/reorder columns (drag or keyboard), resize any column by dragging column borders — including the row-number column (double-click to auto-fit). Auto Fit This Column and Auto Fit All Columns available in the column filter (☰) menu
 - **Cell selection** — Click a cell to highlight its row, column, and row number. Move the selection with arrow keys or vim-style h/j/k/l, extend to a rectangle with Shift+arrow (or Shift+H/J/K/L), Shift+click, or click-and-drag. Click a row number to select the entire row (drag or Shift+click for multiple rows). Click the `#` corner cell or press Ctrl+Shift+A to select all; repeat to deselect (the Edit menu shows "Select None" while all cells are selected). With no cell selected, any arrow key focuses the cell in the middle of the view. Ctrl+←/→ moves the selected columns as a block
@@ -111,7 +111,7 @@ Use **File > Open** (Ctrl+O / Cmd+O), **File > Open URL**, or drag and drop file
   name REGEXP 'smith|jones'
   ```
 - **Column autofilter** — Click the ☰ icon on any column header to open an Excel-style dropdown with searchable checkboxes for each unique value. Uncheck values to hide matching rows. Multiple column filters AND together and combine with the WHERE filter. Filtered columns show a green left-border indicator. Click "Clear Filters" in the status bar to reset all filters at once. The dropdown also includes **Auto Fit This Column** and **Auto Fit All Columns** buttons below a divider
-- **Toggle chips** — When sorting, filtering, linking, or formatting is active, labeled chips appear in the status bar center. Click a chip to suspend that feature without losing its configuration; click again to resume. Keyboard shortcuts: Ctrl/Cmd+Shift+1 (Sort), 2 (Filter), 3 (Link), 4 (Format). Suspended features show the chip with strikethrough and a dashed border on affected column headers
+- **Status chips** — When sorting, filtering, linking, or formatting is active, labeled chips appear in the status bar center. **Sorted** and **Filtered** chips clear the sort or filters when clicked (the chip disappears). **Linked** (on target tables receiving link filters) and **Formatted** chips toggle suspend/resume — suspended features show the chip with strikethrough and a dashed border on affected column headers. A **Linking** chip appears on the source table whose selection drives link filters; click to suspend/resume outbound linking. Keyboard shortcuts: Ctrl/Cmd+Shift+1 (clear sort), 2 (clear filters), 3 (toggle link), 4 (toggle format)
 
 <!-- ![Sorting and filtering](screenshots/filter.png) -->
 
@@ -207,7 +207,7 @@ Multiple plugins can be loaded simultaneously and stack on the same table — ea
 
 **Plugin management:** Loaded plugins appear in the Plugins menu with an ✕ button for quick unloading — the menu stays open so you can unload multiple plugins without reopening it. Click a plugin's name to open an About dialog showing version, author, creation date, description, matching rules, and an Unload button.
 
-**Toggle:** Columns with an active transform show a pink left border in the header. The **Format** chip in the status bar toggles all transforms on/off (Ctrl/Cmd+Shift+4). Similar chips appear for Sort, Filter, and Link when active.
+**Toggle:** Columns with an active transform show a pink left border in the header. The **Formatted** chip in the status bar toggles all transforms on/off (Ctrl/Cmd+Shift+4). A **Sorted** chip appears when sort is active (click to clear), and a **Filtered** chip when filters are active (click to clear).
 
 **Autofilter integration:** When a transform is active, the column's autofilter dropdown shows formatted display values and searches against them.
 
@@ -250,7 +250,7 @@ Multiple plugins can be loaded simultaneously and stack on the same table — ea
 
 The `version`, `author`, `created`, and `description` fields are optional metadata displayed in the About dialog. The `tables` and `links` arrays are both optional — a plugin can have just display rules, just links, or both.
 
-**Cross-table linking:** The `links` array defines relationships between tables. When you select rows in a source table, the target table is automatically filtered to matching values. All table and column patterns are regex. The source table is excluded from its own link targets (even with `.*`). Link filters show a blue left border on the column header and a **Link** chip in the status bar. Clearing the selection clears the link filter. Link filters are separate from manual column autofilters. Links propagate transitively — selecting a product filters orders for that product, which in turn filters customers who placed those orders. Cycle detection and a depth limit prevent infinite loops.
+**Cross-table linking:** The `links` array defines relationships between tables. When you select rows in a source table, the target table is automatically filtered to matching values. All table and column patterns are regex. The source table is excluded from its own link targets (even with `.*`). Link filters show a blue left border on the column header and a **Linked** chip on target tables. A **Linking** chip appears on the source table whose selection is driving the filters; click to suspend/resume outbound linking. Clearing the selection clears the link filter. Link filters are separate from manual column autofilters. Links propagate transitively — selecting a product filters orders for that product, which in turn filters customers who placed those orders. Cycle detection and a depth limit prevent infinite loops.
 
 Bundled example plugins and sample CSV files are in the `example/` directory: date formatting, USD currency, boolean display, ID zero-padding, and a linked-tables demo with orders, customers, and products.
 
@@ -280,7 +280,7 @@ The in-app **Plugins > Expression Reference** has the full language documentatio
 | Ctrl+V / Cmd+V | Paste at selected cell |
 | Ctrl+Z / Cmd+Z | Undo |
 | Ctrl+Shift+Z / Cmd+Shift+Z | Redo |
-| Ctrl+Shift+1 / Cmd+Shift+1 through 4 | Toggle Sort / Filter / Link / Format |
+| Ctrl+Shift+1 / Cmd+Shift+1 through 4 | Clear Sort / Clear Filters / Toggle Link / Toggle Format |
 | Ctrl+Enter / Cmd+Enter | Execute SQL query |
 | Enter (AI tab) | Send AI prompt |
 | Shift+Enter (AI tab) | Newline in AI prompt |

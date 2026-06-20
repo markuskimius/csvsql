@@ -44,6 +44,7 @@ const app = (() => {
   let _columnTransformCache = {};
   let _linkCache = []; // compiled link rules: [{ sourceTableRe, sourceColRe, targetTableRe, targetColRe, pluginIdx }]
   let _applyingLinkFilters = false;
+  let _activeLinkSourceId = null;
 
   // Sort optimization
   const collator = new Intl.Collator(undefined, { sensitivity: 'base' });
@@ -961,6 +962,7 @@ const app = (() => {
       disableSort: false,
       disableFilter: false,
       disableLink: false,
+      disableLinkSource: false,
       dockId: null,
       dockLeaf: null,
       dockable: opts.dockable !== false,
@@ -3906,16 +3908,22 @@ const app = (() => {
     const statusCenter = win.statusbarEl.querySelector('.status-center');
     statusCenter.innerHTML = '';
     const chips = [
-      { key: 'sort', label: 'Sort', active: hasSortCols, disabled: win.disableSort,
-        title: (on) => on ? 'Sorting enabled \u2014 click to suspend' : 'Sorting suspended \u2014 click to resume',
-        toggle: () => { win.disableSort = !win.disableSort; } },
-      { key: 'filter', label: 'Filter', active: anyFilters, disabled: win.disableFilter,
-        title: (on) => on ? 'Filters enabled \u2014 click to suspend' : 'Filters suspended \u2014 click to resume',
-        toggle: () => { win.disableFilter = !win.disableFilter; } },
-      { key: 'link', label: 'Link', active: hasLinkFilters, disabled: win.disableLink,
+      { key: 'sort', label: 'Sorted', active: hasSortCols, disabled: false,
+        title: () => 'Click to clear sort',
+        toggle: () => { win.sortCols = []; win.disableSort = false; } },
+      { key: 'filter', label: 'Filtered', active: anyFilters, disabled: false,
+        title: () => 'Click to clear filters',
+        toggle: () => {
+          win.columnFilters = {};
+          win.filterText = '';
+          win.disableFilter = false;
+          const filterInput = win.bodyEl.querySelector('.filter-input');
+          if (filterInput) filterInput.value = '';
+        } },
+      { key: 'link', label: 'Linked', active: hasLinkFilters || win.disableLink, disabled: win.disableLink,
         title: (on) => on ? 'Link filters enabled \u2014 click to suspend' : 'Link filters suspended \u2014 click to resume',
         toggle: () => { win.disableLink = !win.disableLink; } },
-      { key: 'format', label: 'Format', active: hasTransforms, disabled: hasTransforms && transformedCols.every(c => win.disabledTransforms.has(c)),
+      { key: 'format', label: 'Formatted', active: hasTransforms, disabled: hasTransforms && transformedCols.every(c => win.disabledTransforms.has(c)),
         title: (on) => on ? 'Formatting enabled \u2014 click to suspend' : 'Formatting suspended \u2014 click to resume',
         toggle: () => {
           const allOff = transformedCols.every(c => win.disabledTransforms.has(c));
@@ -4504,7 +4512,7 @@ const app = (() => {
       }
     }
     if (_linkCache.length > 0) {
-      if (selected.size > 0) applyLinkFilters(win);
+      if (selected.size > 0 && !win.disableLinkSource) applyLinkFilters(win);
       else clearLinkFilters(win);
     }
   }
@@ -5245,8 +5253,14 @@ const app = (() => {
         const win = getActiveDataWindow();
         if (win && win.tableName) {
           e.preventDefault();
-          if (e.key === '1') win.disableSort = !win.disableSort;
-          else if (e.key === '2') win.disableFilter = !win.disableFilter;
+          if (e.key === '1') { win.sortCols = []; win.disableSort = false; }
+          else if (e.key === '2') {
+            win.columnFilters = {};
+            win.filterText = '';
+            win.disableFilter = false;
+            const filterInput = win.bodyEl.querySelector('.filter-input');
+            if (filterInput) filterInput.value = '';
+          }
           else if (e.key === '3') win.disableLink = !win.disableLink;
           else if (e.key === '4') {
             const tc = win.tableName && _columnTransformCache[win.tableName]
@@ -6072,7 +6086,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <li><strong>Filter:</strong> Type a SQL <code>WHERE</code> clause in the filter bar (without the <code>WHERE</code> keyword). For example: <code>age > 30 AND name LIKE '%Smith%'</code></li>
 <li>The filter supports all SQLite expressions including <code>REGEXP</code> (see below).</li>
 <li><strong>Column autofilter:</strong> Click the <code>&#x2630;</code> icon on any column header to open a dropdown with checkboxes for each unique value. Use the search box to narrow the list. Uncheck values and click Apply to hide matching rows. Multiple column filters AND together and combine with the WHERE filter bar. Filtered columns show a green left border. Click Clear to remove a column&rsquo;s filter. When any filters are active, a &ldquo;Clear Filters&rdquo; link appears in the status bar to reset all column autofilters and the WHERE filter at once.</li>
-<li><strong>Toggle chips:</strong> When sorting, filtering, linking, or formatting is active on a window, labeled chips (<strong>Sort</strong>, <strong>Filter</strong>, <strong>Link</strong>, <strong>Format</strong>) appear in the status bar center. Click a chip to suspend that feature without losing its configuration; click again to resume. Suspended features show the chip with strikethrough and a dashed left border on affected column headers. Keyboard shortcuts: <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>1</code> (Sort), <code>2</code> (Filter), <code>3</code> (Link), <code>4</code> (Format).</li>
+<li><strong>Status chips:</strong> When sorting, filtering, linking, or formatting is active on a window, labeled chips appear in the status bar center. <strong>Sorted</strong> and <strong>Filtered</strong> chips clear the sort or filters when clicked (the chip disappears). <strong>Linked</strong> (on target tables receiving link filters) and <strong>Formatted</strong> chips toggle suspend/resume &mdash; suspended features show the chip with strikethrough and a dashed left border on affected column headers. A <strong>Linking</strong> chip appears on the source table driving link filters; click to suspend/resume outbound linking. Keyboard shortcuts: <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>1</code> (clear sort), <code>2</code> (clear filters), <code>3</code> (toggle link), <code>4</code> (toggle format).</li>
 </ul>
 
 <h4>SQL Console</h4>
@@ -6164,7 +6178,7 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>Z</code></td><td>Redo</td></tr>
 <tr><td><code>Tab</code>/<code>Shift+Tab</code> or <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>L</code>/<code>H</code> (cell selected, not editing)</td><td>Switch to next / previous table window</td></tr>
 <tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>H</code>/<code>J</code>/<code>K</code>/<code>L</code> (cell selected, not editing)</td><td>Nudge the active window 5 px left / down / up / right</td></tr>
-<tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>1</code>/<code>2</code>/<code>3</code>/<code>4</code></td><td>Toggle Sort / Filter / Link / Format</td></tr>
+<tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>1</code>/<code>2</code>/<code>3</code>/<code>4</code></td><td>Clear Sort / Clear Filters / Toggle Link / Toggle Format</td></tr>
 <tr><td><code>Ctrl+Enter</code></td><td>Execute SQL query</td></tr>
 <tr><td><code>Enter</code></td><td>Send AI prompt</td></tr>
 <tr><td><code>Shift+Enter</code></td><td>Newline in AI prompt</td></tr>
@@ -6225,9 +6239,9 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 }</pre>
 <p>The <code>version</code>, <code>author</code>, <code>created</code>, and <code>description</code> fields are optional metadata shown in the About dialog. The <code>tables</code> array and <code>links</code> array are both optional &mdash; a plugin can have just display rules, just links, or both.</p>
 
-<p><strong>Cross-table linking:</strong> The <code>links</code> array defines relationships between tables. When you select rows in a source table, the target table is automatically filtered to matching values. Links propagate transitively &mdash; selecting a product filters orders for that product, which in turn filters customers who placed those orders. All patterns are regex. The source table is excluded from its own link targets. Link filters are shown with a blue left border on the column header and a <strong>Link</strong> chip in the status bar. Clearing the selection clears the link filter. Link filters are separate from manual column autofilters.</p>
+<p><strong>Cross-table linking:</strong> The <code>links</code> array defines relationships between tables. When you select rows in a source table, the target table is automatically filtered to matching values. Links propagate transitively &mdash; selecting a product filters orders for that product, which in turn filters customers who placed those orders. All patterns are regex. The source table is excluded from its own link targets. Link filters are shown with a blue left border on the column header and a <strong>Linked</strong> chip on target tables. A <strong>Linking</strong> chip appears on the source table driving the filters; click to suspend/resume outbound linking. Clearing the selection clears the link filter. Link filters are separate from manual column autofilters.</p>
 
-<p><strong>Toggle:</strong> Columns with an active plugin transform show a pink left border. The <strong>Format</strong> chip in the status bar toggles all transforms on/off (<code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>4</code>). Similar chips appear for Sort, Filter, and Link when active.</p>
+<p><strong>Toggle:</strong> Columns with an active plugin transform show a pink left border. The <strong>Formatted</strong> chip in the status bar toggles all transforms on/off (<code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>4</code>). A <strong>Sorted</strong> chip appears when sort is active (click to clear), and a <strong>Filtered</strong> chip when filters are active (click to clear).</p>
 
 <p><strong>Editing:</strong> When you enter edit mode on a cell with a display transform, the raw value is shown so you edit the actual data. The formatted display returns when you finish editing.</p>
 
@@ -8025,6 +8039,33 @@ ${_aiImageContext()}`;
     return true;
   }
 
+  function updateLinkingChips() {
+    for (const win of windows) {
+      const statusCenter = win.statusbarEl && win.statusbarEl.querySelector('.status-center');
+      if (!statusCenter) continue;
+      const existing = statusCenter.querySelector('.status-chip-link-source');
+      const shouldShow = win.id === _activeLinkSourceId || win.disableLinkSource;
+      if (shouldShow && !existing) {
+        const el = document.createElement('span');
+        el.className = 'status-chip status-chip-link-source' + (win.disableLinkSource ? ' off' : '');
+        el.textContent = 'Linking';
+        el.title = win.disableLinkSource ? 'Linking suspended — click to resume' : 'Linking to other tables — click to suspend';
+        el.addEventListener('click', (e) => {
+          e.stopPropagation();
+          win.disableLinkSource = !win.disableLinkSource;
+          if (win.disableLinkSource) clearLinkFilters(win);
+          rebuildTable(win);
+        });
+        statusCenter.insertBefore(el, statusCenter.firstChild);
+      } else if (!shouldShow && existing) {
+        existing.remove();
+      } else if (shouldShow && existing) {
+        existing.className = 'status-chip status-chip-link-source' + (win.disableLinkSource ? ' off' : '');
+        existing.title = win.disableLinkSource ? 'Linking suspended — click to resume' : 'Linking to other tables — click to suspend';
+      }
+    }
+  }
+
   function applyLinkFilters(sourceWin) {
     if (_applyingLinkFilters) return;
     if (_linkCache.length === 0) return;
@@ -8098,6 +8139,7 @@ ${_aiImageContext()}`;
       }
     }
 
+    _activeLinkSourceId = sourceWin.id;
     _applyingLinkFilters = true;
     try {
       for (const win of windows) {
@@ -8111,6 +8153,7 @@ ${_aiImageContext()}`;
     } finally {
       _applyingLinkFilters = false;
     }
+    updateLinkingChips();
   }
 
   function clearLinkFilters(sourceWin) {
@@ -8124,6 +8167,8 @@ ${_aiImageContext()}`;
       }
       if (!isLinkSource) return;
     }
+    if (sourceWin && _activeLinkSourceId === sourceWin.id) _activeLinkSourceId = null;
+    else if (!sourceWin) _activeLinkSourceId = null;
     _applyingLinkFilters = true;
     try {
       for (const win of windows) {
@@ -8135,6 +8180,7 @@ ${_aiImageContext()}`;
     } finally {
       _applyingLinkFilters = false;
     }
+    updateLinkingChips();
   }
 
   async function loadPluginFile(file) {
