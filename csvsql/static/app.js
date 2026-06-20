@@ -4635,6 +4635,7 @@ const app = (() => {
   function autoFitColumn(win, colIdx) {
     const MIN_COL_WIDTH = 40;
     const MAX_COL_WIDTH = 600;
+    const CELL_BORDER = 2;
     const measurer = document.createElement('span');
     measurer.style.cssText = 'visibility:hidden;position:absolute;white-space:nowrap;padding:0 8px;font-size:12px;font-family:inherit;';
     document.body.appendChild(measurer);
@@ -4648,7 +4649,7 @@ const app = (() => {
     const end = Math.min(win._renderEnd || displayRows.length, displayRows.length);
     for (let i = start; i < end; i++) {
       measurer.textContent = String(displayRows[i][col] ?? '');
-      maxW = Math.max(maxW, measurer.offsetWidth);
+      maxW = Math.max(maxW, measurer.offsetWidth + CELL_BORDER);
     }
     measurer.remove();
 
@@ -4678,6 +4679,61 @@ const app = (() => {
     const finalWidth = Math.min(MAX_COL_WIDTH, Math.max(MIN_COL_WIDTH, maxW));
     win.rowNumWidth = finalWidth;
     win._colgroup.children[0].style.width = finalWidth + 'px';
+    updateTableWidth(win);
+  }
+
+  function autoFitAllColumns(win) {
+    const MIN_COL_WIDTH = 40;
+    const MIN_ROWNUM_WIDTH = 30;
+    const MAX_ROWNUM_WIDTH = 200;
+    const CELL_BORDER = 2;
+
+    const containerWidth = win.dockId
+      ? win.dockLeaf.el.getBoundingClientRect().width
+      : win.el.offsetWidth;
+    const maxColWidth = Math.max(MIN_COL_WIDTH, Math.floor(containerWidth * 0.75));
+
+    const measurer = document.createElement('span');
+    measurer.style.cssText = 'visibility:hidden;position:absolute;white-space:nowrap;padding:0 8px;font-size:12px;font-family:inherit;';
+    document.body.appendChild(measurer);
+
+    const columns = win._columns;
+    const displayRows = win._displayRows;
+    const start = win._renderStart || 0;
+    const end = Math.min(win._renderEnd || displayRows.length, displayRows.length);
+
+    for (let colIdx = 0; colIdx < columns.length; colIdx++) {
+      const col = columns[colIdx];
+      measurer.textContent = col;
+      let maxW = measurer.offsetWidth + 40;
+
+      const useTransform = !win.disabledTransforms.has(col) && hasDisplayTransform(win.tableName, col);
+
+      for (let i = start; i < end; i++) {
+        const row = displayRows[i];
+        measurer.textContent = useTransform
+          ? String(getDisplayValue(win.tableName, col, row))
+          : String(row[col] ?? '');
+        maxW = Math.max(maxW, measurer.offsetWidth + CELL_BORDER);
+      }
+
+      const finalWidth = Math.min(maxColWidth, Math.max(MIN_COL_WIDTH, maxW));
+      win.colWidths[colIdx] = finalWidth;
+      win._colgroup.children[colIdx + 1].style.width = finalWidth + 'px';
+    }
+
+    measurer.style.fontSize = '11px';
+    measurer.textContent = '#';
+    let rowNumW = measurer.offsetWidth + 16;
+    if (displayRows.length > 0) {
+      measurer.textContent = String(displayRows.length);
+      rowNumW = Math.max(rowNumW, measurer.offsetWidth);
+    }
+    const finalRowNumWidth = Math.min(MAX_ROWNUM_WIDTH, Math.max(MIN_ROWNUM_WIDTH, rowNumW));
+    win.rowNumWidth = finalRowNumWidth;
+    win._colgroup.children[0].style.width = finalRowNumWidth + 'px';
+
+    measurer.remove();
     updateTableWidth(win);
   }
 
@@ -5000,6 +5056,25 @@ const app = (() => {
     buttons.appendChild(clearBtn);
     buttons.appendChild(applyBtn);
     dropdown.appendChild(buttons);
+
+    const sizing = document.createElement('div');
+    sizing.className = 'autofilter-sizing';
+    const colIdx = t.columns.indexOf(col);
+    const fitOneBtn = document.createElement('button');
+    fitOneBtn.textContent = 'Auto Fit This Column';
+    fitOneBtn.addEventListener('click', () => {
+      if (colIdx !== -1) autoFitColumn(win, colIdx);
+      closeAutoFilter();
+    });
+    sizing.appendChild(fitOneBtn);
+    const fitAllBtn = document.createElement('button');
+    fitAllBtn.textContent = 'Auto Fit All Columns';
+    fitAllBtn.addEventListener('click', () => {
+      autoFitAllColumns(win);
+      closeAutoFilter();
+    });
+    sizing.appendChild(fitAllBtn);
+    dropdown.appendChild(sizing);
 
     renderList();
     document.body.appendChild(dropdown);
@@ -5910,7 +5985,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.6 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.7 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -5960,7 +6035,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <li><strong>Rename columns:</strong> <code>Ctrl</code>/<code>&#8984;</code>+click a column header.</li>
 <li><strong>Select a column:</strong> Click a column header to select it (highlighted) and sort it. Selection is the target for Ctrl+&larr;/&rarr;.</li>
 <li><strong>Reorder columns:</strong> Drag a column header to a new position. With a column selected by clicking its header, press <code>Ctrl</code>/<code>&#8984;</code>+<code>&larr;</code>/<code>&rarr;</code> to nudge it. With cells selected (in select mode, not editing), <code>Ctrl</code>/<code>&#8984;</code>+<code>&larr;</code>/<code>&rarr;</code> moves the columns spanned by the selection.</li>
-<li><strong>Resize columns:</strong> Drag the right edge of any column header to resize, including the <code>#</code> row-number column. Double-click the edge to auto-fit the column to its content. Column widths are fixed after initial load and survive sorting and filtering.</li>
+<li><strong>Resize columns:</strong> Drag the right edge of any column header to resize, including the <code>#</code> row-number column. Double-click the edge to auto-fit the column to its content. The column filter (<code>&#9776;</code>) menu also has <strong>Auto Fit This Column</strong> and <strong>Auto Fit All Columns</strong> &mdash; the latter resizes every column (and the row-number column) to fit its content, capped at 75% of the window width. Column widths are fixed after initial load and survive sorting and filtering.</li>
 <li><strong>Rename tables:</strong> <code>Ctrl</code>/<code>&#8984;</code>+click the window title.</li>
 </ul>
 
@@ -8388,6 +8463,7 @@ choose(value, 'A', 'Active', 'I', 'Inactive')
         undockWindow, closeDock,
         removeTabFromLeaf, cleanupAfterTabRemoval,
         toggleMaximizeDock, getDropZone, detectDropTarget,
+        autoFitAllColumns,
       }
     } : {}),
   };
