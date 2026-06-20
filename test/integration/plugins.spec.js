@@ -3113,7 +3113,7 @@ test.describe('Linking chip', () => {
     expect(linkFilterCount).toBe(0);
   });
 
-  test('Linking chip has distinct teal color, different from blue Linked chip', async ({ page }) => {
+  test('Linking chip has distinct blue color, different from teal Linked chip', async ({ page }) => {
     await loadLinkPlugin(page, {
       name: 'Linking Color Test',
       links: [
