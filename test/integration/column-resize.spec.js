@@ -31,21 +31,35 @@ test.describe('Column resize', () => {
     widths.forEach(w => expect(w).toBeGreaterThan(0));
   });
 
-  test('resize handles exist on each column header', async ({ page }) => {
-    const handleCount = await page.locator('.col-resize-handle').count();
+  test('right-side resize handles exist on each column header and row-num header', async ({ page }) => {
+    const handleCount = await page.evaluate(() =>
+      document.querySelectorAll('.col-resize-handle:not(.col-resize-left)').length);
     const colCount = await page.evaluate(() => app._test.tables.sample1.columns.length);
     expect(handleCount).toBe(colCount + 1); // +1 for the row-num header
   });
 
+  test('left-side resize handles exist on each data column header', async ({ page }) => {
+    const leftHandleCount = await page.evaluate(() =>
+      document.querySelectorAll('.col-resize-handle.col-resize-left').length);
+    const colCount = await page.evaluate(() => app._test.tables.sample1.columns.length);
+    expect(leftHandleCount).toBe(colCount);
+  });
+
   test('resize handle has col-resize cursor', async ({ page }) => {
-    const cursor = await page.locator('th:not(.row-num-header) .col-resize-handle').first().evaluate(
+    const cursor = await page.locator('th:not(.row-num-header) .col-resize-handle:not(.col-resize-left)').first().evaluate(
       el => getComputedStyle(el).cursor);
     expect(cursor).toBe('col-resize');
   });
 
-  test('dragging a resize handle changes that column width', async ({ page }) => {
+  test('left-side resize handle has col-resize cursor', async ({ page }) => {
+    const cursor = await page.locator('th:not(.row-num-header) .col-resize-handle.col-resize-left').first().evaluate(
+      el => getComputedStyle(el).cursor);
+    expect(cursor).toBe('col-resize');
+  });
+
+  test('dragging a right-side resize handle changes that column width', async ({ page }) => {
     const before = await getColWidths(page);
-    const handle = page.locator('th:not(.row-num-header) .col-resize-handle').first();
+    const handle = page.locator('th:not(.row-num-header) .col-resize-handle:not(.col-resize-left)').first();
     const box = await handle.boundingBox();
 
     await page.mouse.move(box.x + 2, box.y + box.height / 2);
@@ -58,9 +72,41 @@ test.describe('Column resize', () => {
     expect(after[0]).toBeGreaterThan(before[0] + 50);
   });
 
+  test('dragging a left-side resize handle changes the previous column width', async ({ page }) => {
+    const before = await getColWidths(page);
+    // Left handle on the second data column (index 1) should resize column 0
+    const handle = page.locator('th:not(.row-num-header) .col-resize-handle.col-resize-left').nth(1);
+    const box = await handle.boundingBox();
+
+    await page.mouse.move(box.x + 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 102, box.y + box.height / 2, { steps: 5 });
+    await page.mouse.up();
+    await page.waitForTimeout(200);
+
+    const after = await getColWidths(page);
+    expect(after[0]).toBeGreaterThan(before[0] + 50);
+    expect(after[1]).toBe(before[1]);
+  });
+
+  test('left-side handle on first data column resizes row-num column', async ({ page }) => {
+    const beforeRowNum = await page.evaluate(() => app._test.windows[0].rowNumWidth || 50);
+    const handle = page.locator('th:not(.row-num-header) .col-resize-handle.col-resize-left').first();
+    const box = await handle.boundingBox();
+
+    await page.mouse.move(box.x + 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 82, box.y + box.height / 2, { steps: 5 });
+    await page.mouse.up();
+    await page.waitForTimeout(200);
+
+    const afterRowNum = await page.evaluate(() => app._test.windows[0].rowNumWidth || 50);
+    expect(afterRowNum).toBeGreaterThan(beforeRowNum + 40);
+  });
+
   test('resizing one column does not affect other columns', async ({ page }) => {
     const before = await getColWidths(page);
-    const handle = page.locator('th:not(.row-num-header) .col-resize-handle').first();
+    const handle = page.locator('th:not(.row-num-header) .col-resize-handle:not(.col-resize-left)').first();
     const box = await handle.boundingBox();
 
     await page.mouse.move(box.x + 2, box.y + box.height / 2);
@@ -79,7 +125,7 @@ test.describe('Column resize', () => {
     await page.waitForTimeout(300);
 
     const before = await getColWidths(page);
-    const handle = page.locator('th:not(.row-num-header) .col-resize-handle').first();
+    const handle = page.locator('th:not(.row-num-header) .col-resize-handle:not(.col-resize-left)').first();
     const box = await handle.boundingBox();
 
     await page.mouse.move(box.x + 2, box.y + box.height / 2);
@@ -95,7 +141,7 @@ test.describe('Column resize', () => {
   });
 
   test('column widths survive sort (rebuild)', async ({ page }) => {
-    const handle = page.locator('th:not(.row-num-header) .col-resize-handle').first();
+    const handle = page.locator('th:not(.row-num-header) .col-resize-handle:not(.col-resize-left)').first();
     const box = await handle.boundingBox();
 
     await page.mouse.move(box.x + 2, box.y + box.height / 2);
@@ -140,7 +186,7 @@ test.describe('Column resize', () => {
   });
 
   test('minimum column width is enforced', async ({ page }) => {
-    const handle = page.locator('th:not(.row-num-header) .col-resize-handle').first();
+    const handle = page.locator('th:not(.row-num-header) .col-resize-handle:not(.col-resize-left)').first();
     const box = await handle.boundingBox();
 
     await page.mouse.move(box.x + 2, box.y + box.height / 2);
@@ -153,9 +199,9 @@ test.describe('Column resize', () => {
     expect(after[0]).toBeGreaterThanOrEqual(40);
   });
 
-  test('double-click resize handle auto-fits column width', async ({ page }) => {
+  test('double-click right-side resize handle auto-fits column width', async ({ page }) => {
     // First make column 0 very wide
-    const handle = page.locator('th:not(.row-num-header) .col-resize-handle').first();
+    const handle = page.locator('th:not(.row-num-header) .col-resize-handle:not(.col-resize-left)').first();
     const box = await handle.boundingBox();
 
     await page.mouse.move(box.x + 2, box.y + box.height / 2);
@@ -176,8 +222,55 @@ test.describe('Column resize', () => {
     expect(autoFit[0]).toBeGreaterThanOrEqual(40);
   });
 
+  test('double-click left-side resize handle auto-fits the previous column', async ({ page }) => {
+    // First make column 0 very wide via right-side handle
+    const rightHandle = page.locator('th:not(.row-num-header) .col-resize-handle:not(.col-resize-left)').first();
+    const rBox = await rightHandle.boundingBox();
+
+    await page.mouse.move(rBox.x + 2, rBox.y + rBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(rBox.x + 202, rBox.y + rBox.height / 2, { steps: 5 });
+    await page.mouse.up();
+    await page.waitForTimeout(200);
+
+    const widened = await getColWidths(page);
+
+    // Double-click left handle on column 1 to auto-fit column 0
+    const leftHandle = page.locator('th:not(.row-num-header) .col-resize-handle.col-resize-left').nth(1);
+    const lBox = await leftHandle.boundingBox();
+    await page.mouse.dblclick(lBox.x + 2, lBox.y + lBox.height / 2);
+    await page.waitForTimeout(300);
+
+    const autoFit = await getColWidths(page);
+    expect(autoFit[0]).toBeLessThan(widened[0]);
+    expect(autoFit[0]).toBeGreaterThanOrEqual(40);
+  });
+
+  test('double-click left-side handle on first column auto-fits row-num column', async ({ page }) => {
+    // Widen row-num column
+    const rnHandle = page.locator('th.row-num-header .col-resize-handle');
+    const rnBox = await rnHandle.boundingBox();
+    await page.mouse.move(rnBox.x + 2, rnBox.y + rnBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(rnBox.x + 152, rnBox.y + rnBox.height / 2, { steps: 5 });
+    await page.mouse.up();
+    await page.waitForTimeout(200);
+
+    const widened = await page.evaluate(() => app._test.windows[0].rowNumWidth || 50);
+    expect(widened).toBeGreaterThan(150);
+
+    // Double-click left handle on first data column
+    const leftHandle = page.locator('th:not(.row-num-header) .col-resize-handle.col-resize-left').first();
+    const lBox = await leftHandle.boundingBox();
+    await page.mouse.dblclick(lBox.x + 2, lBox.y + lBox.height / 2);
+    await page.waitForTimeout(300);
+
+    const autoFit = await page.evaluate(() => app._test.windows[0].rowNumWidth || 50);
+    expect(autoFit).toBeLessThan(widened);
+  });
+
   test('resize drag does not trigger column sort', async ({ page }) => {
-    const handle = page.locator('th:not(.row-num-header) .col-resize-handle').first();
+    const handle = page.locator('th:not(.row-num-header) .col-resize-handle:not(.col-resize-left)').first();
     const box = await handle.boundingBox();
 
     await page.mouse.move(box.x + 2, box.y + box.height / 2);
@@ -187,6 +280,23 @@ test.describe('Column resize', () => {
     await page.waitForTimeout(300);
 
     // Check that no sort was applied
+    const sorted = await page.evaluate(() => {
+      const win = app._test.windows[0];
+      return win.sortCols.length;
+    });
+    expect(sorted).toBe(0);
+  });
+
+  test('left-side resize drag does not trigger column sort', async ({ page }) => {
+    const handle = page.locator('th:not(.row-num-header) .col-resize-handle.col-resize-left').nth(1);
+    const box = await handle.boundingBox();
+
+    await page.mouse.move(box.x + 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 52, box.y + box.height / 2, { steps: 5 });
+    await page.mouse.up();
+    await page.waitForTimeout(300);
+
     const sorted = await page.evaluate(() => {
       const win = app._test.windows[0];
       return win.sortCols.length;

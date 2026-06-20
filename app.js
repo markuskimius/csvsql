@@ -3161,6 +3161,24 @@ const app = (() => {
       thInner.appendChild(filterBtn);
       th.appendChild(thInner);
 
+      const leftHandle = document.createElement('div');
+      leftHandle.className = 'col-resize-handle col-resize-left';
+      leftHandle.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        e.stopPropagation();
+        e.preventDefault();
+        if (colIdx === 0) startRowNumResize(win, e);
+        else startColResize(win, colIdx - 1, e);
+      });
+      leftHandle.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        if (colIdx === 0) autoFitRowNumColumn(win);
+        else autoFitColumn(win, colIdx - 1);
+      });
+      leftHandle.addEventListener('click', (e) => { e.stopPropagation(); });
+      th.appendChild(leftHandle);
+
       const resizeHandle = document.createElement('div');
       resizeHandle.className = 'col-resize-handle';
       resizeHandle.addEventListener('mousedown', (e) => {
@@ -5985,7 +6003,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.7 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.8 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -6035,7 +6053,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <li><strong>Rename columns:</strong> <code>Ctrl</code>/<code>&#8984;</code>+click a column header.</li>
 <li><strong>Select a column:</strong> Click a column header to select it (highlighted) and sort it. Selection is the target for Ctrl+&larr;/&rarr;.</li>
 <li><strong>Reorder columns:</strong> Drag a column header to a new position. With a column selected by clicking its header, press <code>Ctrl</code>/<code>&#8984;</code>+<code>&larr;</code>/<code>&rarr;</code> to nudge it. With cells selected (in select mode, not editing), <code>Ctrl</code>/<code>&#8984;</code>+<code>&larr;</code>/<code>&rarr;</code> moves the columns spanned by the selection.</li>
-<li><strong>Resize columns:</strong> Drag the right edge of any column header to resize, including the <code>#</code> row-number column. Double-click the edge to auto-fit the column to its content. The column filter (<code>&#9776;</code>) menu also has <strong>Auto Fit This Column</strong> and <strong>Auto Fit All Columns</strong> &mdash; the latter resizes every column (and the row-number column) to fit its content, capped at 75% of the window width. Column widths are fixed after initial load and survive sorting and filtering.</li>
+<li><strong>Resize columns:</strong> Drag any column border to resize &mdash; the resize handle spans both sides of the divider line, including the <code>#</code> row-number column. Double-click the border to auto-fit the column to its content. The column filter (<code>&#9776;</code>) menu also has <strong>Auto Fit This Column</strong> and <strong>Auto Fit All Columns</strong> &mdash; the latter resizes every column (and the row-number column) to fit its content, capped at 75% of the window width. Column widths are fixed after initial load and survive sorting and filtering.</li>
 <li><strong>Rename tables:</strong> <code>Ctrl</code>/<code>&#8984;</code>+click the window title.</li>
 </ul>
 

@@ -66,7 +66,7 @@ test.describe('Auto Fit This Column — via filter dropdown', () => {
     const before = await getColWidths(page);
 
     // Make column 0 very wide
-    const handle = page.locator('th:not(.row-num-header) .col-resize-handle').first();
+    const handle = page.locator('th:not(.row-num-header) .col-resize-handle:not(.col-resize-left)').first();
     const box = await handle.boundingBox();
     await page.mouse.move(box.x + 2, box.y + box.height / 2);
     await page.mouse.down();
@@ -116,7 +116,7 @@ test.describe('Auto Fit All Columns', () => {
 
   test('auto fit all columns resizes every column', async ({ page }) => {
     // Make column 0 very wide
-    const handle = page.locator('th:not(.row-num-header) .col-resize-handle').first();
+    const handle = page.locator('th:not(.row-num-header) .col-resize-handle:not(.col-resize-left)').first();
     const box = await handle.boundingBox();
     await page.mouse.move(box.x + 2, box.y + box.height / 2);
     await page.mouse.down();

@@ -465,6 +465,9 @@ body {
   white-space: nowrap;
   font-size: 12px;
   max-width: 300px;
+}
+
+.data-table td {
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -623,6 +626,11 @@ body {
   height: 100%;
   cursor: col-resize;
   z-index: 3;
+}
+
+.col-resize-handle.col-resize-left {
+  right: auto;
+  left: -2px;
 }
 
 .col-resize-handle:hover,
