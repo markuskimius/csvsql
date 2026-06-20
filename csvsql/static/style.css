@@ -870,15 +870,6 @@ body {
   flex-shrink: 0;
 }
 
-.status-clear-filters {
-  color: var(--accent);
-  cursor: pointer;
-}
-
-.status-clear-filters:hover {
-  text-decoration: underline;
-  color: var(--accent-hover);
-}
 
 .status-center {
   display: flex;

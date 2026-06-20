@@ -2736,27 +2736,6 @@ test.describe('Filter chip', () => {
     expect(th).toBeNull();
   });
 
-  test('clicking filter chip also removes Clear Filters link', async ({ page }) => {
-    await page.evaluate(() => {
-      const win = app._test.windows[0];
-      win.columnFilters = { name: new Set(['Alice Johnson']) };
-      app._test.rebuildTable(win);
-    });
-    await page.waitForTimeout(100);
-
-    // Clear Filters link should be visible
-    let clearLink = await page.$('.status-clear-filters');
-    expect(clearLink).not.toBeNull();
-
-    // Click chip to clear filters
-    await page.click('.status-chip-filter');
-    await page.waitForTimeout(100);
-
-    // Clear Filters link should be gone (no filters remain)
-    clearLink = await page.$('.status-clear-filters');
-    expect(clearLink).toBeNull();
-  });
-
   test('clicking filter chip clears WHERE filter text', async ({ page }) => {
     await page.evaluate(() => {
       const win = app._test.windows[0];

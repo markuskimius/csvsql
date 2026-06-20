@@ -3885,25 +3885,7 @@ const app = (() => {
       ? Object.keys(_columnTransformCache[win.tableName]) : [];
     const hasTransforms = transformedCols.length > 0;
     const anyFilters = hasColumnFilters || hasWhereFilter;
-    if (anyFilters || hasLinkFilters) {
-      statusLeft.textContent = `${displayRows.length} of ${rows.length} rows`;
-      if (anyFilters && !win.disableFilter) {
-        statusLeft.textContent += ' \u2014 ';
-        const clearLink = document.createElement('span');
-        clearLink.className = 'status-clear-filters';
-        clearLink.textContent = 'Clear Filters';
-        clearLink.addEventListener('click', () => {
-          win.columnFilters = {};
-          win.filterText = '';
-          const filterInput = win.bodyEl.querySelector('.filter-input');
-          if (filterInput) filterInput.value = '';
-          rebuildTable(win);
-        });
-        statusLeft.appendChild(clearLink);
-      }
-    } else {
-      statusLeft.textContent = `${displayRows.length} of ${rows.length} rows`;
-    }
+    statusLeft.textContent = `${displayRows.length} of ${rows.length} rows`;
     statusRight.textContent = `${columns.length} columns`;
 
     // Status center: toggle chips
@@ -6083,7 +6065,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.17 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.18 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -6151,7 +6133,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <li><strong>Multi-column sort:</strong> Shift+click additional column headers. Numbers next to arrows indicate sort priority.</li>
 <li><strong>Filter:</strong> Type a SQL <code>WHERE</code> clause in the filter bar (without the <code>WHERE</code> keyword). For example: <code>age > 30 AND name LIKE '%Smith%'</code></li>
 <li>The filter supports all SQLite expressions including <code>REGEXP</code> (see below).</li>
-<li><strong>Column autofilter:</strong> Click the <code>&#x2630;</code> icon on any column header to open a dropdown with checkboxes for each unique value. Use the search box to narrow the list. Uncheck values and click Apply to hide matching rows. Multiple column filters AND together and combine with the WHERE filter bar. Filtered columns show a green left border. Click Clear to remove a column&rsquo;s filter. When any filters are active, a &ldquo;Clear Filters&rdquo; link appears in the status bar to reset all column autofilters and the WHERE filter at once.</li>
+<li><strong>Column autofilter:</strong> Click the <code>&#x2630;</code> icon on any column header to open a dropdown with checkboxes for each unique value. Use the search box to narrow the list. Uncheck values and click Apply to hide matching rows. Multiple column filters AND together and combine with the WHERE filter bar. Filtered columns show a green left border. Click Clear to remove a column&rsquo;s filter. Click the Filtered chip in the status bar to clear all column autofilters and the WHERE filter at once.</li>
 <li><strong>Status chips:</strong> When sorting, filtering, linking, or formatting is active on a window, labeled chips appear in the status bar center. <strong>Sorted</strong> and <strong>Filtered</strong> chips clear the sort or filters when clicked (the chip disappears). <strong>Linked</strong> (on target tables receiving link filters) and <strong>Formatted</strong> chips toggle suspend/resume &mdash; suspended features show the chip with strikethrough and a dashed left border on affected column headers. A <strong>Linking</strong> chip appears on the source table driving link filters; click to suspend/resume outbound linking. Keyboard shortcuts: <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>1</code> (clear sort), <code>2</code> (clear filters), <code>3</code> (toggle link), <code>4</code> (toggle format).</li>
 </ul>
 

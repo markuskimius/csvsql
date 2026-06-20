@@ -350,13 +350,13 @@ test.describe('Column AutoFilter', () => {
     expect(Math.abs(arrowCenter - btnCenter)).toBeLessThan(2);
   });
 
-  test('Clear Filters link not shown when no filters active', async ({ page }) => {
-    await expect(page.locator('.status-clear-filters')).toHaveCount(0);
+  test('Filtered chip not shown when no filters active', async ({ page }) => {
+    await expect(page.locator('.status-chip-filter')).toHaveCount(0);
     const statusText = await page.locator('.status-left').textContent();
     expect(statusText).toBe('10 of 10 rows');
   });
 
-  test('Clear Filters link appears with column autofilter', async ({ page }) => {
+  test('Filtered chip appears with column autofilter', async ({ page }) => {
     const th = page.locator('.data-table th:not(.row-num-header)').first();
     await th.locator('.col-filter-btn').click();
     await page.waitForTimeout(300);
@@ -364,19 +364,19 @@ test.describe('Column AutoFilter', () => {
     await page.locator('.autofilter-dropdown .autofilter-apply').click();
     await page.waitForTimeout(300);
 
-    await expect(page.locator('.status-clear-filters')).toHaveCount(1);
-    expect(await page.locator('.status-left').textContent()).toContain('Clear Filters');
+    await expect(page.locator('.status-chip-filter')).toHaveCount(1);
+    expect(await page.locator('.status-chip-filter').textContent()).toBe('Filtered');
   });
 
-  test('Clear Filters link appears with WHERE filter', async ({ page }) => {
+  test('Filtered chip appears with WHERE filter', async ({ page }) => {
     const filterInput = page.locator('.subwindow .filter-input');
     await filterInput.fill("name LIKE '%Alice%'");
     await page.waitForTimeout(500);
 
-    await expect(page.locator('.status-clear-filters')).toHaveCount(1);
+    await expect(page.locator('.status-chip-filter')).toHaveCount(1);
   });
 
-  test('Clear Filters clears column autofilters', async ({ page }) => {
+  test('Filtered chip clears column autofilters when clicked', async ({ page }) => {
     // Apply column filter on two columns
     const nameTh = page.locator('.data-table th:not(.row-num-header)').nth(0);
     await nameTh.locator('.col-filter-btn').click();
@@ -394,32 +394,32 @@ test.describe('Column AutoFilter', () => {
 
     await expect(page.locator('.data-table th.col-filtered')).toHaveCount(2);
 
-    // Click Clear Filters
-    await page.locator('.status-clear-filters').click();
+    // Click Filtered chip
+    await page.locator('.status-chip-filter').click();
     await page.waitForTimeout(300);
 
-    // All rows back, no filtered indicators, link gone
+    // All rows back, no filtered indicators, chip gone
     expect(await page.locator('.data-table tbody tr:not(.virtual-pad)').count()).toBe(10);
     await expect(page.locator('.data-table th.col-filtered')).toHaveCount(0);
     await expect(page.locator('.col-filter-btn.active')).toHaveCount(0);
-    await expect(page.locator('.status-clear-filters')).toHaveCount(0);
+    await expect(page.locator('.status-chip-filter')).toHaveCount(0);
   });
 
-  test('Clear Filters clears WHERE filter text', async ({ page }) => {
+  test('Filtered chip clears WHERE filter text when clicked', async ({ page }) => {
     const filterInput = page.locator('.subwindow .filter-input');
     await filterInput.fill("name LIKE '%Alice%'");
     await page.waitForTimeout(500);
     expect(await page.locator('.data-table tbody tr:not(.virtual-pad)').count()).toBe(1);
 
-    await page.locator('.status-clear-filters').click();
+    await page.locator('.status-chip-filter').click();
     await page.waitForTimeout(300);
 
     expect(await filterInput.inputValue()).toBe('');
     expect(await page.locator('.data-table tbody tr:not(.virtual-pad)').count()).toBe(10);
-    await expect(page.locator('.status-clear-filters')).toHaveCount(0);
+    await expect(page.locator('.status-chip-filter')).toHaveCount(0);
   });
 
-  test('Clear Filters clears both column autofilters and WHERE at once', async ({ page }) => {
+  test('Filtered chip clears both column autofilters and WHERE at once', async ({ page }) => {
     // Apply column filter
     const th = page.locator('.data-table th:not(.row-num-header)').first();
     await th.locator('.col-filter-btn').click();
@@ -438,14 +438,38 @@ test.describe('Column AutoFilter', () => {
     expect(await page.locator('.data-table tbody tr:not(.virtual-pad)').count()).toBe(1);
     await expect(page.locator('.data-table th.col-filtered')).toHaveCount(1);
 
-    // Click Clear Filters — both should be gone
-    await page.locator('.status-clear-filters').click();
+    // Click Filtered chip — both should be gone
+    await page.locator('.status-chip-filter').click();
     await page.waitForTimeout(300);
 
     expect(await page.locator('.data-table tbody tr:not(.virtual-pad)').count()).toBe(10);
     await expect(page.locator('.data-table th.col-filtered')).toHaveCount(0);
     expect(await filterInput.inputValue()).toBe('');
+    await expect(page.locator('.status-chip-filter')).toHaveCount(0);
+  });
+
+  test('no Clear Filters link in status bar', async ({ page }) => {
+    // Apply a filter and verify the old Clear Filters link is gone
+    const th = page.locator('.data-table th:not(.row-num-header)').first();
+    await th.locator('.col-filter-btn').click();
+    await page.waitForTimeout(300);
+    await page.locator('.autofilter-dropdown .autofilter-item input[type="checkbox"]').first().uncheck();
+    await page.locator('.autofilter-dropdown .autofilter-apply').click();
+    await page.waitForTimeout(300);
+
     await expect(page.locator('.status-clear-filters')).toHaveCount(0);
+    const statusText = await page.locator('.status-left').textContent();
+    expect(statusText).not.toContain('Clear Filters');
+  });
+
+  test('status bar shows filtered row count without trailing dash', async ({ page }) => {
+    const filterInput = page.locator('.subwindow .filter-input');
+    await filterInput.fill("name LIKE '%Alice%'");
+    await page.waitForTimeout(500);
+
+    const statusText = await page.locator('.status-left').textContent();
+    expect(statusText).toBe('1 of 10 rows');
+    expect(statusText).not.toContain('—');
   });
 
   test('dropdown is right-aligned to column header', async ({ page }) => {
