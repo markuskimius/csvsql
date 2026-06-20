@@ -272,4 +272,173 @@ test.describe('Cell row/column highlight', () => {
     expect(sel.cells).toEqual(['5:email']);
     expect(sel.anchor).toEqual({ rownum: 5, col: 'email' });
   });
+
+  test('Select All preserves horizontal scroll position', async ({ page }) => {
+    // Create a wide table so the container has a horizontal scrollbar
+    await executeSQL(page, "SELECT 'a' AS c1, 'b' AS c2, 'c' AS c3, 'd' AS c4, 'e' AS c5, 'f' AS c6, 'g' AS c7, 'h' AS c8, 'i' AS c9, 'j' AS c10, 'k' AS c11, 'l' AS c12, 'm' AS c13, 'n' AS c14, 'o' AS c15");
+    const qName = await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.isQuery);
+      return w ? w.tableName : null;
+    });
+    expect(qName).toBeTruthy();
+
+    // Make the window narrow enough to need horizontal scrolling
+    await page.evaluate((name) => {
+      const win = app._test.windows.find(w => w.tableName === name);
+      const el = document.getElementById('win-' + win.id);
+      el.style.width = '400px';
+      win.width = 400;
+    }, qName);
+
+    // Get the table container and scroll it right
+    const container = page.locator('.subwindow.active .table-container');
+    await container.evaluate(el => { el.scrollLeft = 200; });
+    await page.waitForTimeout(100);
+
+    const scrollBefore = await container.evaluate(el => el.scrollLeft);
+    expect(scrollBefore).toBeGreaterThan(0);
+
+    // Click a visible cell to give focus to the table
+    const cell = page.locator('.subwindow.active table tbody td.data-cell').first();
+    await cell.click();
+    await page.waitForTimeout(50);
+
+    // Re-scroll since clicking may have changed scroll
+    await container.evaluate(el => { el.scrollLeft = 200; });
+    await page.waitForTimeout(100);
+    const scrollBeforeSelectAll = await container.evaluate(el => el.scrollLeft);
+    expect(scrollBeforeSelectAll).toBeGreaterThan(0);
+
+    // Select All via Ctrl+A
+    await page.keyboard.press('Control+a');
+    await page.waitForTimeout(150);
+
+    // Verify all cells are selected
+    const sel = await page.evaluate((name) => {
+      const w = app._test.windows.find(w => w.tableName === name);
+      return w ? w.selectedCells.size : 0;
+    }, qName);
+    expect(sel).toBe(15); // 1 row × 15 columns
+
+    // Verify horizontal scroll position was preserved
+    const scrollAfter = await container.evaluate(el => el.scrollLeft);
+    expect(scrollAfter).toBe(scrollBeforeSelectAll);
+  });
+
+  test('Select All via _test API preserves horizontal scroll position', async ({ page }) => {
+    await executeSQL(page, "SELECT 'a' AS c1, 'b' AS c2, 'c' AS c3, 'd' AS c4, 'e' AS c5, 'f' AS c6, 'g' AS c7, 'h' AS c8, 'i' AS c9, 'j' AS c10, 'k' AS c11, 'l' AS c12, 'm' AS c13, 'n' AS c14, 'o' AS c15");
+    const qName = await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.isQuery);
+      return w ? w.tableName : null;
+    });
+    expect(qName).toBeTruthy();
+
+    await page.evaluate((name) => {
+      const win = app._test.windows.find(w => w.tableName === name);
+      const el = document.getElementById('win-' + win.id);
+      el.style.width = '400px';
+      win.width = 400;
+    }, qName);
+
+    const container = page.locator('.subwindow.active .table-container');
+    await container.evaluate(el => { el.scrollLeft = 200; });
+    await page.waitForTimeout(100);
+    const scrollBefore = await container.evaluate(el => el.scrollLeft);
+    expect(scrollBefore).toBeGreaterThan(0);
+
+    // Call selectAllCells directly to test the code path without click side effects
+    await page.evaluate((name) => {
+      const win = app._test.windows.find(w => w.tableName === name);
+      app._test.selectAllCells(win);
+    }, qName);
+    await page.waitForTimeout(150);
+
+    const sel = await page.evaluate((name) => {
+      const w = app._test.windows.find(w => w.tableName === name);
+      return w ? w.selectedCells.size : 0;
+    }, qName);
+    expect(sel).toBe(15);
+
+    const scrollAfter = await container.evaluate(el => el.scrollLeft);
+    expect(scrollAfter).toBe(scrollBefore);
+  });
+
+  test('Select All via Edit menu preserves horizontal scroll position', async ({ page }) => {
+    await executeSQL(page, "SELECT 'a' AS c1, 'b' AS c2, 'c' AS c3, 'd' AS c4, 'e' AS c5, 'f' AS c6, 'g' AS c7, 'h' AS c8, 'i' AS c9, 'j' AS c10, 'k' AS c11, 'l' AS c12, 'm' AS c13, 'n' AS c14, 'o' AS c15");
+    const qName = await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.isQuery);
+      return w ? w.tableName : null;
+    });
+    expect(qName).toBeTruthy();
+
+    await page.evaluate((name) => {
+      const win = app._test.windows.find(w => w.tableName === name);
+      const el = document.getElementById('win-' + win.id);
+      el.style.width = '400px';
+      win.width = 400;
+    }, qName);
+
+    const container = page.locator('.subwindow.active .table-container');
+    await container.evaluate(el => { el.scrollLeft = 200; });
+    await page.waitForTimeout(100);
+    const scrollBefore = await container.evaluate(el => el.scrollLeft);
+    expect(scrollBefore).toBeGreaterThan(0);
+
+    // Use Edit menu Select All button
+    await page.locator('#menu-edit .menu-label').click();
+    await page.waitForTimeout(100);
+    await page.locator('#btn-select-all').click();
+    await page.waitForTimeout(150);
+
+    const sel = await page.evaluate((name) => {
+      const w = app._test.windows.find(w => w.tableName === name);
+      return w ? w.selectedCells.size : 0;
+    }, qName);
+    expect(sel).toBe(15);
+
+    const scrollAfter = await container.evaluate(el => el.scrollLeft);
+    expect(scrollAfter).toBe(scrollBefore);
+  });
+
+  test('Select None preserves horizontal scroll position', async ({ page }) => {
+    await executeSQL(page, "SELECT 'a' AS c1, 'b' AS c2, 'c' AS c3, 'd' AS c4, 'e' AS c5, 'f' AS c6, 'g' AS c7, 'h' AS c8, 'i' AS c9, 'j' AS c10, 'k' AS c11, 'l' AS c12, 'm' AS c13, 'n' AS c14, 'o' AS c15");
+    const qName = await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.isQuery);
+      return w ? w.tableName : null;
+    });
+    expect(qName).toBeTruthy();
+
+    await page.evaluate((name) => {
+      const win = app._test.windows.find(w => w.tableName === name);
+      const el = document.getElementById('win-' + win.id);
+      el.style.width = '400px';
+      win.width = 400;
+    }, qName);
+
+    // Select all first
+    await page.evaluate((name) => {
+      const win = app._test.windows.find(w => w.tableName === name);
+      app._test.selectAllCells(win);
+    }, qName);
+    await page.waitForTimeout(100);
+
+    const container = page.locator('.subwindow.active .table-container');
+    await container.evaluate(el => { el.scrollLeft = 200; });
+    await page.waitForTimeout(100);
+    const scrollBefore = await container.evaluate(el => el.scrollLeft);
+    expect(scrollBefore).toBeGreaterThan(0);
+
+    // Deselect via Ctrl+Shift+A
+    await page.keyboard.press('Control+Shift+a');
+    await page.waitForTimeout(150);
+
+    const sel = await page.evaluate((name) => {
+      const w = app._test.windows.find(w => w.tableName === name);
+      return w ? w.selectedCells.size : 0;
+    }, qName);
+    expect(sel).toBe(0);
+
+    const scrollAfter = await container.evaluate(el => el.scrollLeft);
+    expect(scrollAfter).toBe(scrollBefore);
+  });
 });
