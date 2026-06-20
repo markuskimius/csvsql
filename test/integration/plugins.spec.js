@@ -2278,6 +2278,213 @@ test.describe('Transitive link propagation', () => {
     expect(result.afterOrders).toBe(0);
     expect(result.afterCust).toBe(0);
   });
+
+  test('suspending Linked chip on one target does not clear other targets', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Transitive',
+      links: [
+        { source: { table: 'products', column: '^id$' }, target: { table: 'orders', column: '^product_id$' } },
+        { source: { table: 'orders', column: '^customer_id$' }, target: { table: 'customers', column: '^id$' } }
+      ]
+    });
+
+    await selectRow(page, 'products', 0); // id=501
+    await page.waitForTimeout(200);
+
+    // Both orders and customers should be filtered
+    const before = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      return {
+        ordersFiltered: Object.keys(ordersWin.linkFilters).length > 0,
+        custFiltered: Object.keys(custWin.linkFilters).length > 0,
+        ordersRows: ordersWin._displayRows.length,
+        custRows: custWin._displayRows.length,
+      };
+    });
+    expect(before.ordersFiltered).toBe(true);
+    expect(before.custFiltered).toBe(true);
+
+    // Click Linked chip on orders to suspend its link filter
+    await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const chip = ordersWin.statusbarEl.querySelector('.status-chip-link');
+      chip.click();
+    });
+    await page.waitForTimeout(200);
+
+    const after = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      return {
+        ordersDisableLink: ordersWin.disableLink,
+        ordersRows: ordersWin._displayRows.length,
+        custFiltered: Object.keys(custWin.linkFilters).length > 0,
+        custRows: custWin._displayRows.length,
+        custDisableLink: custWin.disableLink,
+      };
+    });
+    expect(after.ordersDisableLink).toBe(true);
+    expect(after.ordersRows).toBe(7); // all orders visible (suspended)
+    expect(after.custFiltered).toBe(true); // customers still filtered
+    expect(after.custDisableLink).toBe(false);
+  });
+
+  test('suspending Linked chip preserves _activeLinkSourceId', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Transitive',
+      links: [
+        { source: { table: 'products', column: '^id$' }, target: { table: 'orders', column: '^product_id$' } },
+        { source: { table: 'orders', column: '^customer_id$' }, target: { table: 'customers', column: '^id$' } }
+      ]
+    });
+
+    await selectRow(page, 'products', 0);
+    await page.waitForTimeout(200);
+
+    const sourceIdBefore = await page.evaluate(() => {
+      const prodWin = app._test.windows.find(w => w.tableName === 'products');
+      return { sourceId: app._test._activeLinkSourceId, prodId: prodWin.id };
+    });
+    expect(sourceIdBefore.sourceId).toBe(sourceIdBefore.prodId);
+
+    // Suspend Linked on orders
+    await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      ordersWin.statusbarEl.querySelector('.status-chip-link').click();
+    });
+    await page.waitForTimeout(200);
+
+    const sourceIdAfter = await page.evaluate(() => {
+      const prodWin = app._test.windows.find(w => w.tableName === 'products');
+      return { sourceId: app._test._activeLinkSourceId, prodId: prodWin.id };
+    });
+    expect(sourceIdAfter.sourceId).toBe(sourceIdAfter.prodId);
+  });
+
+  test('re-enabling Linked chip on one target does not disrupt other targets', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Transitive',
+      links: [
+        { source: { table: 'products', column: '^id$' }, target: { table: 'orders', column: '^product_id$' } },
+        { source: { table: 'orders', column: '^customer_id$' }, target: { table: 'customers', column: '^id$' } }
+      ]
+    });
+
+    await selectRow(page, 'products', 0);
+    await page.waitForTimeout(200);
+
+    // Suspend orders
+    await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      ordersWin.statusbarEl.querySelector('.status-chip-link').click();
+    });
+    await page.waitForTimeout(200);
+
+    // Re-enable orders
+    await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      ordersWin.statusbarEl.querySelector('.status-chip-link').click();
+    });
+    await page.waitForTimeout(200);
+
+    const result = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      return {
+        ordersDisableLink: ordersWin.disableLink,
+        ordersFiltered: Object.keys(ordersWin.linkFilters).length > 0,
+        custFiltered: Object.keys(custWin.linkFilters).length > 0,
+        custDisableLink: custWin.disableLink,
+      };
+    });
+    expect(result.ordersDisableLink).toBe(false);
+    expect(result.ordersFiltered).toBe(true);
+    expect(result.custFiltered).toBe(true);
+    expect(result.custDisableLink).toBe(false);
+  });
+
+  test('Ctrl+Shift+3 on link target does not clear other targets', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Transitive',
+      links: [
+        { source: { table: 'products', column: '^id$' }, target: { table: 'orders', column: '^product_id$' } },
+        { source: { table: 'orders', column: '^customer_id$' }, target: { table: 'customers', column: '^id$' } }
+      ]
+    });
+
+    await selectRow(page, 'products', 0);
+    await page.waitForTimeout(200);
+
+    // Focus a cell in the orders window, then toggle link via keyboard
+    await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      app._test.focusWindow(ordersWin.id);
+    });
+    await page.waitForTimeout(100);
+
+    // Click a cell in orders to ensure keyboard events route there
+    const ordersCell = page.locator('.subwindow').filter({ hasText: 'orders' }).locator('td.data-cell').first();
+    await ordersCell.click();
+    await page.waitForTimeout(100);
+
+    const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+    await page.keyboard.press(`${modifier}+Shift+3`);
+    await page.waitForTimeout(200);
+
+    const result = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      return {
+        ordersDisableLink: ordersWin.disableLink,
+        ordersRows: ordersWin._displayRows.length,
+        custFiltered: Object.keys(custWin.linkFilters).length > 0,
+        custDisableLink: custWin.disableLink,
+      };
+    });
+    expect(result.ordersDisableLink).toBe(true);
+    expect(result.ordersRows).toBe(7); // all orders visible
+    expect(result.custFiltered).toBe(true); // customers still filtered
+    expect(result.custDisableLink).toBe(false);
+  });
+
+  test('suspending Linked chip preserves Linking chip on source', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Transitive',
+      links: [
+        { source: { table: 'products', column: '^id$' }, target: { table: 'orders', column: '^product_id$' } },
+        { source: { table: 'orders', column: '^customer_id$' }, target: { table: 'customers', column: '^id$' } }
+      ]
+    });
+
+    await selectRow(page, 'products', 0);
+    await page.waitForTimeout(200);
+
+    // Verify Linking chip on products before
+    const linkingBefore = await page.evaluate(() => {
+      const prodWin = app._test.windows.find(w => w.tableName === 'products');
+      const chip = prodWin.statusbarEl.querySelector('.status-chip-link-source');
+      return { exists: chip !== null, off: chip ? chip.classList.contains('off') : null };
+    });
+    expect(linkingBefore.exists).toBe(true);
+    expect(linkingBefore.off).toBe(false);
+
+    // Suspend orders
+    await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      ordersWin.statusbarEl.querySelector('.status-chip-link').click();
+    });
+    await page.waitForTimeout(200);
+
+    // Linking chip on products should still be active
+    const linkingAfter = await page.evaluate(() => {
+      const prodWin = app._test.windows.find(w => w.tableName === 'products');
+      const chip = prodWin.statusbarEl.querySelector('.status-chip-link-source');
+      return { exists: chip !== null, off: chip ? chip.classList.contains('off') : null };
+    });
+    expect(linkingAfter.exists).toBe(true);
+    expect(linkingAfter.off).toBe(false);
+  });
 });
 
 test.describe('Sort chip', () => {
@@ -2734,6 +2941,113 @@ test.describe('Link chip', () => {
     });
     expect(result.rows).toBe(1);
     expect(result.chipOff).toBe(false);
+  });
+
+  test('suspending Linked chip does not clear _activeLinkSourceId', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Link Source Test',
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+
+    await selectOrderRow(page, 0);
+    await page.waitForTimeout(200);
+
+    const before = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      return { sourceId: app._test._activeLinkSourceId, ordersId: ordersWin.id };
+    });
+    expect(before.sourceId).toBe(before.ordersId);
+
+    // Click Linked chip on customers to suspend
+    await page.evaluate(() => {
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      custWin.statusbarEl.querySelector('.status-chip-link').click();
+    });
+    await page.waitForTimeout(200);
+
+    const after = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      return {
+        sourceId: app._test._activeLinkSourceId,
+        ordersId: ordersWin.id,
+        custDisableLink: app._test.windows.find(w => w.tableName === 'customers').disableLink,
+      };
+    });
+    expect(after.sourceId).toBe(after.ordersId);
+    expect(after.custDisableLink).toBe(true);
+  });
+
+  test('suspending Linked chip preserves linkFilters on target', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Link Preserve Test',
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+
+    await selectOrderRow(page, 0); // customer_id=1
+    await page.waitForTimeout(200);
+
+    // Suspend via chip click
+    await page.evaluate(() => {
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      custWin.statusbarEl.querySelector('.status-chip-link').click();
+    });
+    await page.waitForTimeout(200);
+
+    // linkFilters should still be stored even when disableLink is true
+    const result = await page.evaluate(() => {
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      return {
+        disableLink: custWin.disableLink,
+        hasLinkFilters: Object.keys(custWin.linkFilters).length > 0,
+        rows: custWin._displayRows.length,
+      };
+    });
+    expect(result.disableLink).toBe(true);
+    expect(result.hasLinkFilters).toBe(true); // filters still stored
+    expect(result.rows).toBe(3); // but not applied, all rows visible
+  });
+
+  test('Ctrl+Shift+3 on link target does not clear _activeLinkSourceId', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Link Kbd Test',
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+
+    await selectOrderRow(page, 0);
+    await page.waitForTimeout(200);
+
+    // Focus customers window via evaluate to avoid occlusion
+    await page.evaluate(() => {
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      app._test.focusWindow(custWin.id);
+      const cell = custWin.bodyEl.querySelector('td.data-cell');
+      if (cell) cell.focus();
+    });
+    await page.waitForTimeout(100);
+
+    const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+    await page.keyboard.press(`${modifier}+Shift+3`);
+    await page.waitForTimeout(200);
+
+    const result = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      return {
+        sourceId: app._test._activeLinkSourceId,
+        ordersId: ordersWin.id,
+        custDisableLink: custWin.disableLink,
+        custRows: custWin._displayRows.length,
+      };
+    });
+    expect(result.sourceId).toBe(result.ordersId);
+    expect(result.custDisableLink).toBe(true);
+    expect(result.custRows).toBe(3); // all rows visible (suspended)
   });
 });
 

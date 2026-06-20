@@ -3948,7 +3948,9 @@ const app = (() => {
       el.addEventListener('click', (e) => {
         e.stopPropagation();
         chip.toggle();
-        rebuildTable(win);
+        if (chip.key === 'link') _applyingLinkFilters = true;
+        try { rebuildTable(win); }
+        finally { if (chip.key === 'link') _applyingLinkFilters = false; }
       });
       statusCenter.appendChild(el);
     }
@@ -5268,7 +5270,13 @@ const app = (() => {
             const filterInput = win.bodyEl.querySelector('.filter-input');
             if (filterInput) filterInput.value = '';
           }
-          else if (e.key === '3') win.disableLink = !win.disableLink;
+          else if (e.key === '3') {
+            win.disableLink = !win.disableLink;
+            _applyingLinkFilters = true;
+            try { rebuildTable(win); }
+            finally { _applyingLinkFilters = false; }
+            return;
+          }
           else if (e.key === '4') {
             const tc = win.tableName && _columnTransformCache[win.tableName]
               ? Object.keys(_columnTransformCache[win.tableName]) : [];
@@ -6032,7 +6040,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.13 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.14 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
