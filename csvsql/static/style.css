@@ -753,26 +753,6 @@ body {
 .autofilter-buttons button:hover {
   opacity: 0.85;
 }
-.autofilter-sizing {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px 8px;
-  border-top: 1px solid var(--border);
-}
-.autofilter-sizing button {
-  padding: 4px 12px;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  background: var(--surface2);
-  color: var(--text);
-  font-size: 11px;
-  cursor: pointer;
-  text-align: left;
-}
-.autofilter-sizing button:hover {
-  opacity: 0.85;
-}
 
 .data-table th.row-num-header {
   background: var(--surface);
@@ -1916,6 +1896,15 @@ body {
 .context-menu button:hover {
   background: var(--accent);
   color: #fff;
+}
+
+.context-menu button:disabled {
+  color: var(--text-dim);
+  cursor: default;
+}
+.context-menu button:disabled:hover {
+  background: none;
+  color: var(--text-dim);
 }
 
 /* ---- Drop overlay ---- */

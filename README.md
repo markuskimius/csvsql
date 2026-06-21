@@ -15,10 +15,10 @@ A browser-based CSV database application. Open CSV, Excel, and compressed files 
 - **Inline editing** — Click a cell to select it; press Enter, i, F2, or Ctrl/Cmd+U to edit; or Ctrl/Cmd+click a cell to edit directly. Tab/Enter to navigate, Escape to revert
 - **Sort and filter** — Click column headers to sort (multi-column with Shift+click). Filter with SQL WHERE expressions including REGEXP. Excel-style column autofilter dropdowns with searchable checkboxes for point-and-click filtering. Status chips in the status bar show active features. Click Sorted or Filtered to clear; click Linked or Formatted to suspend/resume
 - **Multi-window workspace** — Draggable, resizable subwindows with edge snapping. Tile, Grid, or Cascade layouts. Tabbing and docking support for IDE-style split layouts
-- **Row and column management** — Add/delete rows, insert at position (right-click), add/rename/reorder columns (drag or keyboard), resize any column by dragging column borders — including the row-number column (double-click to auto-fit). When multiple columns are selected, double-click auto-fits all selected columns and drag-resize sets all selected columns to the same width. Auto Fit This Column and Auto Fit All Columns available in the column filter (☰) menu
+- **Row and column management** — Right-click a row number to insert below or delete. Right-click a column header to insert a column to the right or delete. Right-click the `#` corner cell to insert a row or column when the table is empty. Ctrl/Cmd+click a column header to rename inline (duplicate names are rejected with a red border). Full undo/redo for all structural operations. Resize any column by dragging column borders — including the row-number column (double-click to auto-fit). When multiple columns are selected, double-click auto-fits all selected columns and drag-resize sets all selected columns to the same width
 - **Cell selection** — Click a cell to highlight its row, column, and row number. Move the selection with arrow keys or vim-style h/j/k/l, extend to a rectangle with Shift+arrow (or Shift+H/J/K/L), Shift+click, or click-and-drag. Click a row number to select the entire row (drag or Shift+click for multiple rows). Ctrl+A selects all cells; Ctrl+Shift+A deselects all. Clicking the `#` corner cell toggles between select all and select none. With no cell selected, any arrow key focuses the cell in the middle of the view. Ctrl+←/→ moves the selected columns as a block
 - **Clipboard** — Cut (Ctrl+X), Copy (Ctrl+C), and Paste (Ctrl+V) work on selected cells. Data is copied as tab-separated values. Copying with Select All or row selection includes the header row
-- **Undo / Redo** — Ctrl+Z undoes cell edits, paste, and cut operations. Ctrl+Shift+Z redoes. Multi-cell paste and cut undo as a single step
+- **Undo / Redo** — Ctrl+Z undoes cell edits, paste, cut, row insert/delete, and column insert/delete. Ctrl+Shift+Z redoes. Multi-cell paste and cut undo as a single step
 - **SELECT INTO** — Create new tables from query results (`SELECT ... INTO tablename ...`)
 - **CREATE TABLE** — New tables created via SQL auto-open as editable windows
 - **Drag and drop** — Drop files directly onto the window to open them
@@ -81,16 +81,16 @@ Use **File > Open** (Ctrl+O / Cmd+O), **File > Open URL**, or drag and drop file
 
 - **Edit cells** — Click a cell to select it; press Enter, i, F2, or Ctrl/Cmd+U to enter edit mode; or Ctrl/Cmd+click a cell to edit it directly
 - **Navigate** — Tab/Shift+Tab between cells, Enter to save and move down, Escape to revert the edit (or clear the selection when not editing)
-- **Add rows** — Click `+ Row` in the toolbar, or right-click a row number to insert above
-- **Delete rows** — Right-click a row number and choose Delete Row
-- **Add columns** — Click `+ Col` in the toolbar
-- **Rename columns** — Ctrl/Cmd+click a column header
+- **Insert/delete rows** — Right-click a row number and choose "Insert Row Below" or "Delete Row"
+- **Insert/delete columns** — Right-click a column header and choose "Insert Column Right" or "Delete Column"
+- **Empty table entry point** — Right-click the `#` corner cell to insert a row or column when the table has no data
+- **Rename columns** — Ctrl/Cmd+click a column header. Duplicate names are rejected with a red border on the input
 - **Reorder columns** — Drag a column header to a new position. With a header selected, press Ctrl/Cmd+←/→ to nudge it. With cells selected, Ctrl/Cmd+←/→ moves the columns spanned by the selection
-- **Resize columns** — Drag any column border to resize — the resize handle spans both sides of the divider line, including the `#` row-number column. Double-click to auto-fit the column to its content. When multiple columns are selected (e.g. via Ctrl+A), double-click auto-fits all selected columns, and drag-resize sets all selected columns to the dragged column's width on release. The column filter (☰) menu also has **Auto Fit This Column** and **Auto Fit All Columns** — the latter resizes every column (and the row-number column) to fit its content, capped at 75% of the window width
+- **Resize columns** — Drag any column border to resize — the resize handle spans both sides of the divider line, including the `#` row-number column. Double-click to auto-fit the column to its content. When multiple columns are selected (e.g. via Ctrl+A), double-click auto-fits all selected columns, and drag-resize sets all selected columns to the dragged column's width on release
 - **Rename tables** — Ctrl/Cmd+click the window title
 - **Highlight row & column** — Clicking a cell highlights its row and column. Move the selection with arrow keys or vim h/j/k/l; extend to a rectangle with Shift+arrow (or Shift+H/J/K/L), Shift+click, or click-and-drag. Click a row number to select an entire row (drag or Shift+click for ranges). Ctrl+A selects all; Ctrl+Shift+A deselects all. Clicking the `#` corner cell toggles between select all and select none. Esc clears the selection
 - **Cut / Copy / Paste** — Select cells and use Ctrl+X, Ctrl+C, Ctrl+V (Cmd on Mac). Data is copied as TSV. Select All and row selection copies include the header row
-- **Undo / Redo** — Ctrl+Z / Ctrl+Shift+Z (Cmd on Mac). Undoes cell edits, paste, and cut. Multi-cell operations undo as a single step
+- **Undo / Redo** — Ctrl+Z / Ctrl+Shift+Z (Cmd on Mac). Undoes cell edits, paste, cut, row insert/delete, and column insert/delete. Multi-cell operations undo as a single step
 
 ### Touch Gestures
 
@@ -110,7 +110,7 @@ Use **File > Open** (Ctrl+O / Cmd+O), **File > Open URL**, or drag and drop file
   age > 30 AND name LIKE '%Smith%'
   name REGEXP 'smith|jones'
   ```
-- **Column autofilter** — Click the ☰ icon on any column header to open an Excel-style dropdown with searchable checkboxes for each unique value. Uncheck values to hide matching rows. Multiple column filters AND together and combine with the WHERE filter. Filtered columns show a green left-border indicator. Click the **Filtered** chip in the status bar to clear all filters at once. The dropdown also includes **Auto Fit This Column** and **Auto Fit All Columns** buttons below a divider
+- **Column autofilter** — Click the ☰ icon on any column header to open an Excel-style dropdown with searchable checkboxes for each unique value. Uncheck values to hide matching rows. Multiple column filters AND together and combine with the WHERE filter. Filtered columns show a green left-border indicator. Click the **Filtered** chip in the status bar to clear all filters at once
 - **Status chips** — When sorting, filtering, linking, or formatting is active, labeled chips appear in the status bar center. **Sorted** and **Filtered** chips clear the sort or filters when clicked (the chip disappears). **Linked** (on target tables receiving link filters) and **Formatted** chips toggle suspend/resume — suspended features show the chip with strikethrough and a dashed border on affected column headers. A **Linking** chip (blue, distinct from the teal Linked chip) appears on the source table whose selection drives link filters; click to suspend/resume outbound linking — the chip stays visible when suspended so it can be re-enabled. When a table becomes a link target (receives link filters from another source), any previously suspended Linking state on that table is reset. Keyboard shortcuts: Ctrl/Cmd+Shift+1 (clear sort), 2 (clear filters), 3 (toggle link), 4 (toggle format)
 
 <!-- ![Sorting and filtering](screenshots/filter.png) -->

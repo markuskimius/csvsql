@@ -2915,8 +2915,6 @@ const app = (() => {
     toolbar.innerHTML = `
       <label>Filter:</label>
       <input type="text" class="filter-input" placeholder="WHERE clause, e.g. age > 30 AND name LIKE '%Smith%'" value="${escHtml(win.filterText)}" spellcheck="false">
-      <button class="btn-add-row">+ Row</button>
-      <button class="btn-add-col">+ Col</button>
     `;
     body.appendChild(toolbar);
 
@@ -2974,22 +2972,6 @@ const app = (() => {
       } else {
         focusMiddleCell(win);
       }
-    });
-
-    toolbar.querySelector('.btn-add-row').addEventListener('click', () => {
-      addRow(win.tableName);
-      rebuildTable(win);
-      // Scroll to bottom to show new row
-      const container = win.bodyEl.querySelector('.table-container');
-      if (container) container.scrollTop = container.scrollHeight;
-    });
-
-    toolbar.querySelector('.btn-add-col').addEventListener('click', () => {
-      showPrompt('Add Column', 'Column name:', '', (colName) => {
-        if (!colName) return;
-        addColumn(win.tableName, colName);
-        rebuildTable(win);
-      });
     });
 
     // Table container
@@ -3826,13 +3808,29 @@ const app = (() => {
 
     table.addEventListener('contextmenu', (e) => {
       const td = e.target.closest('td.row-num');
-      if (!td) return;
-      e.preventDefault();
-      const tr = td.parentElement;
-      const displayIdx = parseInt(tr.dataset.displayIdx, 10);
-      if (isNaN(displayIdx)) return;
-      const row = win._displayRows[displayIdx];
-      if (row) showRowContextMenu(e.clientX, e.clientY, win.tableName, row._rownum, win);
+      if (td) {
+        e.preventDefault();
+        const tr = td.parentElement;
+        const displayIdx = parseInt(tr.dataset.displayIdx, 10);
+        if (isNaN(displayIdx)) return;
+        const row = win._displayRows[displayIdx];
+        if (row) showRowContextMenu(e.clientX, e.clientY, win.tableName, row._rownum, win);
+        return;
+      }
+      const cornerTh = e.target.closest('th.row-num-header');
+      if (cornerTh && table.contains(cornerTh)) {
+        e.preventDefault();
+        showCornerContextMenu(e.clientX, e.clientY, win.tableName, win);
+        return;
+      }
+      const th = e.target.closest('th[data-col-idx]');
+      if (th && table.contains(th) && !th._renaming) {
+        e.preventDefault();
+        const colIdx = parseInt(th.dataset.colIdx, 10);
+        if (isNaN(colIdx)) return;
+        const colName = win._columns[colIdx];
+        if (colName) showColumnContextMenu(e.clientX, e.clientY, win.tableName, colName, colIdx, win);
+      }
     });
 
     container.innerHTML = '';
@@ -4290,11 +4288,109 @@ const app = (() => {
     refocusAnchorCell(win);
   }
 
+  function undoStructural(tableName, entry) {
+    const t = tables[tableName];
+    const u = entry.rowUndo || entry.columnUndo;
+    if (entry.type === 'deleteRow') {
+      t.rows.splice(u.rowIdx, 0, Object.assign({}, u.rowData));
+      t.rows.forEach((r, i) => { r._rownum = i + 1; });
+      markModified(tableName);
+      debouncedSync(tableName);
+      windows.filter(w => w.tableName === tableName).forEach(w => rebuildTable(w));
+    } else if (entry.type === 'insertRow') {
+      t.rows.splice(u.rowIdx, 1);
+      t.rows.forEach((r, i) => { r._rownum = i + 1; });
+      markModified(tableName);
+      debouncedSync(tableName);
+      windows.filter(w => w.tableName === tableName).forEach(w => rebuildTable(w));
+    } else if (entry.type === 'deleteColumn') {
+      t.columns.splice(u.colIdx, 0, u.colName);
+      const rowMap = new Map(t.rows.map(r => [r._rownum, r]));
+      for (const { rownum, value } of u.values) {
+        const row = rowMap.get(rownum);
+        if (row) row[u.colName] = value;
+      }
+      windows.filter(w => w.tableName === tableName).forEach(w => {
+        if (w.colWidths) w.colWidths.splice(u.colIdx, 0, 100);
+      });
+      markModified(tableName);
+      registerTable(tableName);
+      windows.filter(w => w.tableName === tableName).forEach(w => rebuildTable(w));
+    } else if (entry.type === 'insertColumn') {
+      const colIdx = t.columns.indexOf(u.colName);
+      if (colIdx === -1) return;
+      t.columns.splice(colIdx, 1);
+      for (const row of t.rows) delete row[u.colName];
+      for (const w of windows.filter(w => w.tableName === tableName)) {
+        delete w.columnFilters[u.colName];
+        w.sortCols = w.sortCols.filter(s => s.col !== u.colName);
+        if (w.selectedCol === u.colName) w.selectedCol = null;
+        if (w.colWidths) w.colWidths.splice(colIdx, 1);
+        if (w.linkFilters) delete w.linkFilters[u.colName];
+        if (w.disabledTransforms) w.disabledTransforms.delete(u.colName);
+      }
+      markModified(tableName);
+      registerTable(tableName);
+      windows.filter(w => w.tableName === tableName).forEach(w => rebuildTable(w));
+    }
+  }
+
+  function redoStructural(tableName, entry) {
+    const t = tables[tableName];
+    const u = entry.rowUndo || entry.columnUndo;
+    if (entry.type === 'deleteRow') {
+      t.rows.splice(u.rowIdx, 1);
+      t.rows.forEach((r, i) => { r._rownum = i + 1; });
+      markModified(tableName);
+      debouncedSync(tableName);
+      windows.filter(w => w.tableName === tableName).forEach(w => rebuildTable(w));
+    } else if (entry.type === 'insertRow') {
+      const newRow = { _rownum: 0 };
+      t.columns.forEach(c => { newRow[c] = ''; });
+      t.rows.splice(u.rowIdx, 0, newRow);
+      t.rows.forEach((r, i) => { r._rownum = i + 1; });
+      markModified(tableName);
+      debouncedSync(tableName);
+      windows.filter(w => w.tableName === tableName).forEach(w => rebuildTable(w));
+    } else if (entry.type === 'deleteColumn') {
+      const colIdx = t.columns.indexOf(u.colName);
+      if (colIdx === -1) return;
+      t.columns.splice(colIdx, 1);
+      for (const row of t.rows) delete row[u.colName];
+      for (const w of windows.filter(w => w.tableName === tableName)) {
+        delete w.columnFilters[u.colName];
+        w.sortCols = w.sortCols.filter(s => s.col !== u.colName);
+        if (w.selectedCol === u.colName) w.selectedCol = null;
+        if (w.colWidths) w.colWidths.splice(colIdx, 1);
+        if (w.linkFilters) delete w.linkFilters[u.colName];
+        if (w.disabledTransforms) w.disabledTransforms.delete(u.colName);
+      }
+      markModified(tableName);
+      registerTable(tableName);
+      windows.filter(w => w.tableName === tableName).forEach(w => rebuildTable(w));
+    } else if (entry.type === 'insertColumn') {
+      t.columns.splice(u.colIdx, 0, u.colName);
+      t.rows.forEach(r => { r[u.colName] = ''; });
+      windows.filter(w => w.tableName === tableName).forEach(w => {
+        if (w.colWidths) w.colWidths.splice(u.colIdx, 0, 100);
+      });
+      markModified(tableName);
+      registerTable(tableName);
+      windows.filter(w => w.tableName === tableName).forEach(w => rebuildTable(w));
+    }
+  }
+
   function undoTable(tableName, win) {
     const t = tables[tableName];
     if (!t) return;
     if (!t._undoStack || t._undoStack.length === 0) return;
     const entry = t._undoStack.pop();
+    if (!t._redoStack) t._redoStack = [];
+    t._redoStack.push(entry);
+    if (entry.rowUndo || entry.columnUndo) {
+      undoStructural(tableName, entry);
+      return;
+    }
     const rowMap = new Map(t.rows.map(r => [r._rownum, r]));
     if (!t._dirtyCells) t._dirtyCells = [];
     for (const { rownum, col, oldValue } of entry.changes) {
@@ -4303,8 +4399,6 @@ const app = (() => {
       row[col] = oldValue;
       t._dirtyCells.push({ rownum, col, value: oldValue });
     }
-    if (!t._redoStack) t._redoStack = [];
-    t._redoStack.push(entry);
     markModified(tableName);
     debouncedSync(tableName);
     windows.filter(w => w.tableName === tableName).forEach(w => {
@@ -4319,6 +4413,12 @@ const app = (() => {
     if (!t) return;
     if (!t._redoStack || t._redoStack.length === 0) return;
     const entry = t._redoStack.pop();
+    if (!t._undoStack) t._undoStack = [];
+    t._undoStack.push(entry);
+    if (entry.rowUndo || entry.columnUndo) {
+      redoStructural(tableName, entry);
+      return;
+    }
     const rowMap = new Map(t.rows.map(r => [r._rownum, r]));
     if (!t._dirtyCells) t._dirtyCells = [];
     for (const { rownum, col, newValue } of entry.changes) {
@@ -4327,8 +4427,6 @@ const app = (() => {
       row[col] = newValue;
       t._dirtyCells.push({ rownum, col, value: newValue });
     }
-    if (!t._undoStack) t._undoStack = [];
-    t._undoStack.push(entry);
     markModified(tableName);
     debouncedSync(tableName);
     windows.filter(w => w.tableName === tableName).forEach(w => {
@@ -4531,33 +4629,86 @@ const app = (() => {
     }
   }
 
-  function addRow(tableName) {
-    const t = tables[tableName];
-    const newRow = { _rownum: t.rows.length + 1 };
-    t.columns.forEach(c => { newRow[c] = ''; });
-    t.rows.push(newRow);
-    markModified(tableName);
-    debouncedSync(tableName);
-  }
-
   function deleteRow(tableName, rownum, win) {
     const t = tables[tableName];
-    t.rows = t.rows.filter(r => r._rownum !== rownum);
-    // Renumber
+    const idx = t.rows.findIndex(r => r._rownum === rownum);
+    if (idx === -1) return;
+    const rowData = Object.assign({}, t.rows[idx]);
+    t.rows.splice(idx, 1);
     t.rows.forEach((r, i) => { r._rownum = i + 1; });
+    if (!t._undoStack) t._undoStack = [];
+    t._undoStack.push({ type: 'deleteRow', rowUndo: { rowIdx: idx, rowData } });
+    t._redoStack = [];
     markModified(tableName);
     debouncedSync(tableName);
     rebuildTable(win);
   }
 
-  async function addColumn(tableName, colName) {
+  function insertRow(tableName, atIndex) {
+    const t = tables[tableName];
+    const newRow = { _rownum: 0 };
+    t.columns.forEach(c => { newRow[c] = ''; });
+    t.rows.splice(atIndex, 0, newRow);
+    t.rows.forEach((r, i) => { r._rownum = i + 1; });
+    if (!t._undoStack) t._undoStack = [];
+    t._undoStack.push({ type: 'insertRow', rowUndo: { rowIdx: atIndex } });
+    t._redoStack = [];
+    markModified(tableName);
+    debouncedSync(tableName);
+  }
+
+  async function insertColumn(tableName, colName, atIndex) {
     const t = tables[tableName];
     if (t.columns.includes(colName)) return;
-    t.columns.push(colName);
+    t.columns.splice(atIndex, 0, colName);
     t.rows.forEach(r => { r[colName] = ''; });
+    if (!t._undoStack) t._undoStack = [];
+    t._undoStack.push({ type: 'insertColumn', columnUndo: { colName, colIdx: atIndex } });
+    t._redoStack = [];
     markModified(tableName);
-    windows.filter(w => w.tableName === tableName).forEach(w => { w.colWidths = null; });
+    windows.filter(w => w.tableName === tableName).forEach(w => {
+      if (w.colWidths) w.colWidths.splice(atIndex, 0, 100);
+    });
     await registerTable(tableName);
+  }
+
+  async function deleteColumn(tableName, colName) {
+    const t = tables[tableName];
+    if (!t || t.columns.length <= 1) return;
+    const colIdx = t.columns.indexOf(colName);
+    if (colIdx === -1) return;
+    if (!t._undoStack) t._undoStack = [];
+    t._undoStack.push({
+      type: 'deleteColumn',
+      columnUndo: {
+        colName, colIdx,
+        values: t.rows.map(r => ({ rownum: r._rownum, value: r[colName] ?? '' })),
+      },
+    });
+    t._redoStack = [];
+    t.columns.splice(colIdx, 1);
+    for (const row of t.rows) delete row[colName];
+    for (const w of windows.filter(w => w.tableName === tableName)) {
+      delete w.columnFilters[colName];
+      w.sortCols = w.sortCols.filter(s => s.col !== colName);
+      if (w.selectedCol === colName) w.selectedCol = null;
+      if (w.colWidths) {
+        w.colWidths.splice(colIdx, 1);
+        if (w.colWidths.length === 0) w.colWidths = null;
+      }
+      if (w.selectedCells && w.selectedCells.size > 0) {
+        const suffix = ':' + colName;
+        for (const key of [...w.selectedCells]) {
+          if (key.endsWith(suffix)) w.selectedCells.delete(key);
+        }
+      }
+      if (w.anchorCell && w.anchorCell.col === colName) w.anchorCell = null;
+      if (w.linkFilters) delete w.linkFilters[colName];
+      if (w.disabledTransforms) w.disabledTransforms.delete(colName);
+    }
+    markModified(tableName);
+    await registerTable(tableName);
+    windows.filter(w => w.tableName === tableName).forEach(w => rebuildTable(w));
   }
 
   function renameColumn(tableName, oldCol, newCol, win) {
@@ -4809,12 +4960,9 @@ const app = (() => {
   }
 
   function startColumnRename(win, th, oldCol) {
-    const currentWidth = th.offsetWidth;
     const input = document.createElement('input');
     input.className = 'inline-rename';
     input.value = oldCol;
-    input.style.width = currentWidth + 'px';
-    input.style.boxSizing = 'border-box';
     th.innerHTML = '';
     th.appendChild(input);
     th._renaming = true;
@@ -4822,22 +4970,31 @@ const app = (() => {
     input.select();
 
     let done = false;
-    function finish() {
+    function trySubmit() {
       if (done) return;
-      done = true;
-      th._renaming = false;
       const raw = input.value.trim();
-      if (input.parentNode) input.remove();
       if (!raw || raw === oldCol) {
+        done = true;
+        th._renaming = false;
+        if (input.parentNode) input.remove();
         rebuildTable(win);
         return;
       }
+      const t = tables[win.tableName];
+      if (t && t.columns.includes(raw)) {
+        input.style.borderColor = '#ff6b6b';
+        return;
+      }
+      done = true;
+      th._renaming = false;
+      if (input.parentNode) input.remove();
       renameColumn(win.tableName, oldCol, raw, win);
     }
-    input.addEventListener('blur', finish);
+    input.addEventListener('blur', () => { trySubmit(); if (!done) requestAnimationFrame(() => input.focus()); });
     input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+      if (e.key === 'Enter') { e.preventDefault(); trySubmit(); if (!done) input.focus(); return; }
       if (e.key === 'Escape') { done = true; th._renaming = false; input.remove(); rebuildTable(win); }
+      input.style.borderColor = '';
       e.stopPropagation();
     });
     input.addEventListener('click', (e) => e.stopPropagation());
@@ -5115,25 +5272,6 @@ const app = (() => {
     buttons.appendChild(applyBtn);
     dropdown.appendChild(buttons);
 
-    const sizing = document.createElement('div');
-    sizing.className = 'autofilter-sizing';
-    const colIdx = t.columns.indexOf(col);
-    const fitOneBtn = document.createElement('button');
-    fitOneBtn.textContent = 'Auto Fit This Column';
-    fitOneBtn.addEventListener('click', () => {
-      if (colIdx !== -1) autoFitColumn(win, colIdx);
-      closeAutoFilter();
-    });
-    sizing.appendChild(fitOneBtn);
-    const fitAllBtn = document.createElement('button');
-    fitAllBtn.textContent = 'Auto Fit All Columns';
-    fitAllBtn.addEventListener('click', () => {
-      autoFitAllColumns(win);
-      closeAutoFilter();
-    });
-    sizing.appendChild(fitAllBtn);
-    dropdown.appendChild(sizing);
-
     renderList();
     document.body.appendChild(dropdown);
 
@@ -5163,7 +5301,7 @@ const app = (() => {
     }, 0);
   }
 
-  // ---- Row Context Menu ----
+  // ---- Context Menus ----
   function showRowContextMenu(x, y, tableName, rownum, win) {
     removeContextMenu();
     const menu = document.createElement('div');
@@ -5172,16 +5310,12 @@ const app = (() => {
     menu.style.top = y + 'px';
 
     const insertBtn = document.createElement('button');
-    insertBtn.textContent = 'Insert Row Above';
+    insertBtn.textContent = 'Insert Row Below';
     insertBtn.addEventListener('click', () => {
       const t = tables[tableName];
       const idx = t.rows.findIndex(r => r._rownum === rownum);
-      const newRow = { _rownum: 0 };
-      t.columns.forEach(c => { newRow[c] = ''; });
-      t.rows.splice(idx, 0, newRow);
-      t.rows.forEach((r, i) => { r._rownum = i + 1; });
-      markModified(tableName);
-      syncToSQL(tableName);
+      if (idx === -1) return;
+      insertRow(tableName, idx + 1);
       rebuildTable(win);
       removeContextMenu();
     });
@@ -5194,6 +5328,87 @@ const app = (() => {
       removeContextMenu();
     });
     menu.appendChild(delBtn);
+
+    document.body.appendChild(menu);
+    setTimeout(() => {
+      document.addEventListener('click', removeContextMenu, { once: true });
+    }, 0);
+  }
+
+  function showColumnContextMenu(x, y, tableName, colName, colIdx, win) {
+    removeContextMenu();
+    const t = tables[tableName];
+    const menu = document.createElement('div');
+    menu.className = 'context-menu';
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+
+    const insertBtn = document.createElement('button');
+    insertBtn.textContent = 'Insert Column Right';
+    insertBtn.addEventListener('click', () => {
+      removeContextMenu();
+      showPrompt('Insert Column', 'Column name:', '', async (name) => {
+        if (!name) return;
+        await insertColumn(tableName, name, colIdx + 1);
+        windows.filter(w => w.tableName === tableName).forEach(w => rebuildTable(w));
+      }, (name) => {
+        if (!name) return 'Column name cannot be empty';
+        if (tables[tableName].columns.includes(name)) return `Column "${name}" already exists`;
+      });
+    });
+    menu.appendChild(insertBtn);
+
+    const delBtn = document.createElement('button');
+    delBtn.textContent = 'Delete Column';
+    if (t.columns.length <= 1) {
+      delBtn.disabled = true;
+      delBtn.title = 'Cannot delete the last column';
+    }
+    delBtn.addEventListener('click', () => {
+      removeContextMenu();
+      deleteColumn(tableName, colName);
+    });
+    menu.appendChild(delBtn);
+
+    document.body.appendChild(menu);
+    setTimeout(() => {
+      document.addEventListener('click', removeContextMenu, { once: true });
+    }, 0);
+  }
+
+  function showCornerContextMenu(x, y, tableName, win) {
+    removeContextMenu();
+    const menu = document.createElement('div');
+    menu.className = 'context-menu';
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+
+    const insertColBtn = document.createElement('button');
+    insertColBtn.textContent = 'Insert Column Right';
+    insertColBtn.addEventListener('click', () => {
+      removeContextMenu();
+      showPrompt('Insert Column', 'Column name:', '', async (name) => {
+        if (!name) return;
+        await insertColumn(tableName, name, 0);
+        windows.filter(w => w.tableName === tableName).forEach(w => rebuildTable(w));
+      }, (name) => {
+        if (!name) return 'Column name cannot be empty';
+        if (tables[tableName].columns.includes(name)) return `Column "${name}" already exists`;
+      });
+    });
+    menu.appendChild(insertColBtn);
+
+    const insertRowBtn = document.createElement('button');
+    insertRowBtn.textContent = 'Insert Row Below';
+    insertRowBtn.addEventListener('click', () => {
+      const t = tables[tableName];
+      insertRow(tableName, 0);
+      rebuildTable(win);
+      const container = win.bodyEl.querySelector('.table-container');
+      if (container) container.scrollTop = 0;
+      removeContextMenu();
+    });
+    menu.appendChild(insertRowBtn);
 
     document.body.appendChild(menu);
     setTimeout(() => {
@@ -5909,7 +6124,7 @@ const app = (() => {
       const t = win && win.tableName && tables[win.tableName];
       const undoEntry = t && t._undoStack && t._undoStack.length > 0 ? t._undoStack[t._undoStack.length - 1] : null;
       const redoEntry = t && t._redoStack && t._redoStack.length > 0 ? t._redoStack[t._redoStack.length - 1] : null;
-      const actionLabel = (e) => e ? e.type.charAt(0).toUpperCase() + e.type.slice(1) : '';
+      const actionLabel = (e) => e ? e.type.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase()).trim() : '';
       const btnUndo = document.getElementById('btn-undo');
       const btnRedo = document.getElementById('btn-redo');
       btnUndo.disabled = !undoEntry;
@@ -5977,7 +6192,7 @@ const app = (() => {
   }
 
   // ---- Modals ----
-  function showPrompt(title, label, defaultValue, callback) {
+  function showPrompt(title, label, defaultValue, callback, validate) {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     overlay.innerHTML = `
@@ -5985,6 +6200,7 @@ const app = (() => {
         <h3>${escHtml(title)}</h3>
         <label style="font-size:12px;display:block;margin-bottom:4px;">${escHtml(label)}</label>
         <input type="text" class="modal-input" value="${escHtml(defaultValue)}">
+        <div class="modal-error" style="color:#ff6b6b;font-size:11px;min-height:16px;margin-top:2px;"></div>
         <div class="modal-buttons">
           <button class="cancel">Cancel</button>
           <button class="primary ok">OK</button>
@@ -5993,18 +6209,28 @@ const app = (() => {
     `;
     document.body.appendChild(overlay);
     const input = overlay.querySelector('.modal-input');
+    const errorEl = overlay.querySelector('.modal-error');
     input.focus();
     input.select();
 
-    const close = (val) => { overlay.remove(); callback(val); };
-    overlay.querySelector('.cancel').addEventListener('click', () => close(null));
-    overlay.querySelector('.ok').addEventListener('click', () => close(input.value));
+    const submit = (val) => {
+      if (validate) {
+        const err = validate(val);
+        if (err) { errorEl.textContent = err; input.focus(); return; }
+      }
+      overlay.remove();
+      callback(val);
+    };
+    const cancel = () => { overlay.remove(); callback(null); };
+    overlay.querySelector('.cancel').addEventListener('click', cancel);
+    overlay.querySelector('.ok').addEventListener('click', () => submit(input.value));
     input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') close(input.value);
-      if (e.key === 'Escape') close(null);
+      if (e.key === 'Enter') submit(input.value);
+      if (e.key === 'Escape') cancel();
     });
+    input.addEventListener('input', () => { errorEl.textContent = ''; });
     overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) close(null);
+      if (e.target === overlay) cancel();
     });
   }
 
@@ -6065,7 +6291,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.18 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.19 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -6108,14 +6334,12 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <li><strong>Edit cells:</strong> Click a cell to select it; press <code>Enter</code>, <code>i</code>, <code>F2</code>, or <code>Ctrl</code>/<code>&#8984;</code>+<code>U</code> to enter edit mode, or <code>Ctrl</code>/<code>&#8984;</code>+click a cell to edit it directly. <code>Tab</code>/<code>Shift+Tab</code> moves between cells, <code>Enter</code> saves and moves down, <code>Escape</code> reverts the edit (and clears the selection when not editing).</li>
 <li><strong>Highlight row &amp; column:</strong> Clicking a cell also highlights its row and column. Move the selection with arrow keys or vim-style <code>h</code>/<code>j</code>/<code>k</code>/<code>l</code>; extend to a rectangle of cells with <code>Shift</code>+arrow (or <code>Shift</code>+<code>H</code>/<code>J</code>/<code>K</code>/<code>L</code>), <code>Shift</code>+click on another cell, or click-and-drag across cells &mdash; every selected cell's row and column is highlighted so you can see what lines up with what. Click a row number to select an entire row; drag across row numbers or <code>Shift</code>+click another row number to select a range. <code>Ctrl</code>/<code>&#8984;</code>+<code>A</code> selects all cells; <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>A</code> deselects all. Clicking the <code>#</code> corner cell toggles between select all and select none. Pressing an arrow key with no cell selected focuses the cell in the middle of the current view. <code>Esc</code> clears the selection.</li>
 <li><strong>Cut / Copy / Paste:</strong> Select cells and use <code>Ctrl</code>/<code>&#8984;</code>+<code>X</code>, <code>Ctrl</code>/<code>&#8984;</code>+<code>C</code>, <code>Ctrl</code>/<code>&#8984;</code>+<code>V</code>. Data is copied as tab-separated values. Select All and row selection copies include the column header row. In edit mode, these shortcuts pass through to native browser behavior for text within the cell.</li>
-<li><strong>Undo / Redo:</strong> <code>Ctrl</code>/<code>&#8984;</code>+<code>Z</code> to undo, <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>Z</code> to redo. Undoes cell edits, paste, and cut operations. Multi-cell paste and cut undo as a single step. Also available from the Edit menu.</li>
-<li><strong>Add rows:</strong> Click <code>+ Row</code> in the toolbar, or right-click a row number to insert above.</li>
-<li><strong>Delete rows:</strong> Right-click a row number and choose Delete Row.</li>
-<li><strong>Add columns:</strong> Click <code>+ Col</code> in the toolbar.</li>
-<li><strong>Rename columns:</strong> <code>Ctrl</code>/<code>&#8984;</code>+click a column header.</li>
+<li><strong>Undo / Redo:</strong> <code>Ctrl</code>/<code>&#8984;</code>+<code>Z</code> to undo, <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>Z</code> to redo. Undoes cell edits, paste, cut, row insert/delete, and column insert/delete. Multi-cell paste and cut undo as a single step. Also available from the Edit menu.</li>
+<li><strong>Rows:</strong> Right-click a row number to insert below or delete. Right-click the <code>#</code> corner cell to insert a row at the beginning.</li>
+<li><strong>Columns:</strong> Right-click a column header to insert a column to the right or delete. Right-click the <code>#</code> corner cell to insert a column at the beginning. <code>Ctrl</code>/<code>&#8984;</code>+click a column header to rename inline &mdash; duplicate names are rejected with a red border on the input.</li>
 <li><strong>Select a column:</strong> Click a column header to select it (highlighted) and sort it. Selection is the target for Ctrl+&larr;/&rarr;.</li>
 <li><strong>Reorder columns:</strong> Drag a column header to a new position. With a column selected by clicking its header, press <code>Ctrl</code>/<code>&#8984;</code>+<code>&larr;</code>/<code>&rarr;</code> to nudge it. With cells selected (in select mode, not editing), <code>Ctrl</code>/<code>&#8984;</code>+<code>&larr;</code>/<code>&rarr;</code> moves the columns spanned by the selection.</li>
-<li><strong>Resize columns:</strong> Drag any column border to resize &mdash; the resize handle spans both sides of the divider line, including the <code>#</code> row-number column. Double-click the border to auto-fit the column to its content. When multiple columns are selected (e.g. via Ctrl+A), double-click auto-fits all selected columns, and drag-resize sets all selected columns to the dragged column&rsquo;s width on release. The column filter (<code>&#9776;</code>) menu also has <strong>Auto Fit This Column</strong> and <strong>Auto Fit All Columns</strong> &mdash; the latter resizes every column (and the row-number column) to fit its content, capped at 75% of the window width. Column widths are fixed after initial load and survive sorting and filtering.</li>
+<li><strong>Resize columns:</strong> Drag any column border to resize &mdash; the resize handle spans both sides of the divider line, including the <code>#</code> row-number column. Double-click the border to auto-fit the column to its content. When multiple columns are selected (e.g. via Ctrl+A), double-click auto-fits all selected columns, and drag-resize sets all selected columns to the dragged column&rsquo;s width on release. Column widths are fixed after initial load and survive sorting and filtering.</li>
 <li><strong>Rename tables:</strong> <code>Ctrl</code>/<code>&#8984;</code>+click the window title.</li>
 </ul>
 
@@ -8573,6 +8797,8 @@ choose(value, 'A', 'Active', 'I', 'Inactive')
         showToast, showPluginAbout, closePluginAboutWindow,
         rebuildTable, rerenderAllWindows,
         undoTable, redoTable,
+        insertRow, insertColumn, deleteRow, deleteColumn,
+        renameColumn, startColumnRename,
         get activeWinId() { return activeWinId; },
         focusWindow, getActiveDataWindow,
         get dockContainers() { return dockContainers; },

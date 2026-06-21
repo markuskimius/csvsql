@@ -308,8 +308,10 @@ test.describe('Column resize', () => {
     const before = await getColWidths(page);
     expect(before.length).toBe(3);
 
-    // Click + Col to open the custom modal prompt
-    await page.locator('.win-toolbar button', { hasText: '+ Col' }).click();
+    // Right-click the # corner cell to insert a column
+    const corner = page.locator('th.row-num-header');
+    await corner.click({ button: 'right' });
+    await page.locator('.context-menu button', { hasText: 'Insert Column' }).click();
     await page.locator('.modal-input').fill('newcol');
     await page.locator('.modal .ok').click();
     await page.waitForTimeout(500);
@@ -487,8 +489,10 @@ test.describe('Row-number column resize', () => {
 
     const beforeAdd = await getRowNumWidth(page);
 
-    // Add a data column
-    await page.locator('.win-toolbar button', { hasText: '+ Col' }).click();
+    // Add a data column via corner cell context menu
+    const corner = page.locator('th.row-num-header');
+    await corner.click({ button: 'right' });
+    await page.locator('.context-menu button', { hasText: 'Insert Column' }).click();
     await page.locator('.modal-input').fill('newcol');
     await page.locator('.modal .ok').click();
     await page.waitForTimeout(500);
