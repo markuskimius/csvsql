@@ -12,13 +12,13 @@ A browser-based CSV database application. Open CSV, Excel, and compressed files 
 - **Multiple file formats** — CSV, TSV, PSV, Excel (.xlsx/.xls), Gzip (.csv.gz), and ZIP archives
 - **SQL queries** — Full SQLite syntax from the built-in console, including joins, subqueries, aggregates, UNION, CASE, and REGEXP. Query results are queryable tables too
 - **SQL syntax highlighting** — Keywords, strings, numbers, comments, and identifiers are color-coded in the SQL console and filter inputs
-- **Inline editing** — Click a cell to select it; press Enter, i, F2, or Ctrl/Cmd+U to edit; or Ctrl/Cmd+click a cell to edit directly. Tab/Enter to navigate, Escape to revert
+- **Inline editing** — Click a cell to select it; press Enter, i, F2, or Ctrl/Cmd+U to edit; or Ctrl/Cmd+click a cell to edit directly. Tab/Shift+Tab/Enter navigate between cells while staying in edit mode. Enter returns to the column where editing started. Escape to revert
 - **Sort and filter** — Click column headers to sort (multi-column with Shift+click). Filter with SQL WHERE expressions including REGEXP. Excel-style column autofilter dropdowns with searchable checkboxes for point-and-click filtering. Status chips in the status bar show active features. Click Sorted or Filtered to clear; click Linked or Formatted to suspend/resume
 - **Multi-window workspace** — Draggable, resizable subwindows with edge snapping. Tile, Grid, or Cascade layouts. Tabbing and docking support for IDE-style split layouts
 - **Row and column management** — Right-click a row number to insert below or delete. Right-click a column header to insert a column to the right or delete. Right-click the `#` corner cell to insert a row or column when the table is empty. Ctrl/Cmd+click a column header to rename inline (duplicate names are rejected with a red border). Full undo/redo for all structural operations. Resize any column by dragging column borders — including the row-number column (double-click to auto-fit). When multiple columns are selected, double-click auto-fits all selected columns and drag-resize sets all selected columns to the same width
 - **Cell selection** — Click a cell to highlight its row, column, and row number. Move the selection with arrow keys or vim-style h/j/k/l, extend to a rectangle with Shift+arrow (or Shift+H/J/K/L), Shift+click, or click-and-drag. Click a row number to select the entire row (drag or Shift+click for multiple rows). Ctrl+A selects all cells; Ctrl+Shift+A deselects all. Clicking the `#` corner cell toggles between select all and select none. With no cell selected, any arrow key focuses the cell in the middle of the view. Ctrl+←/→ moves the selected columns as a block
 - **Clipboard** — Cut (Ctrl+X), Copy (Ctrl+C), and Paste (Ctrl+V) work on selected cells. Data is copied as tab-separated values. Copying with Select All or row selection includes the header row
-- **Undo / Redo** — Ctrl+Z undoes cell edits, paste, cut, row insert/delete, and column insert/delete. Ctrl+Shift+Z redoes. Multi-cell paste and cut undo as a single step
+- **Undo / Redo** — Ctrl+Z undoes cell edits, paste, cut, row insert/delete, column insert/delete, column rename, column reorder, and column resize. Ctrl+Shift+Z redoes. Multi-cell paste and cut undo as a single step. Works from anywhere in the window — no cell focus required
 - **SELECT INTO** — Create new tables from query results (`SELECT ... INTO tablename ...`)
 - **CREATE TABLE** — New tables created via SQL auto-open as editable windows
 - **Drag and drop** — Drop files directly onto the window to open them
@@ -80,7 +80,7 @@ Use **File > Open** (Ctrl+O / Cmd+O), **File > Open URL**, or drag and drop file
 ### Editing
 
 - **Edit cells** — Click a cell to select it; press Enter, i, F2, or Ctrl/Cmd+U to enter edit mode; or Ctrl/Cmd+click a cell to edit it directly
-- **Navigate** — Tab/Shift+Tab between cells, Enter to save and move down, Escape to revert the edit (or clear the selection when not editing)
+- **Navigate** — Tab/Shift+Tab to move between cells (stays in edit mode), Enter to save and move down to the column where editing started (stays in edit mode), Escape to revert the edit (or clear the selection when not editing)
 - **Insert/delete rows** — Right-click a row number and choose "Insert Row Below" or "Delete Row"
 - **Insert/delete columns** — Right-click a column header and choose "Insert Column Right" or "Delete Column"
 - **Empty table entry point** — Right-click the `#` corner cell to insert a row or column when the table has no data
@@ -90,7 +90,7 @@ Use **File > Open** (Ctrl+O / Cmd+O), **File > Open URL**, or drag and drop file
 - **Rename tables** — Ctrl/Cmd+click the window title
 - **Highlight row & column** — Clicking a cell highlights its row and column. Move the selection with arrow keys or vim h/j/k/l; extend to a rectangle with Shift+arrow (or Shift+H/J/K/L), Shift+click, or click-and-drag. Click a row number to select an entire row (drag or Shift+click for ranges). Ctrl+A selects all; Ctrl+Shift+A deselects all. Clicking the `#` corner cell toggles between select all and select none. Esc clears the selection
 - **Cut / Copy / Paste** — Select cells and use Ctrl+X, Ctrl+C, Ctrl+V (Cmd on Mac). Data is copied as TSV. Select All and row selection copies include the header row
-- **Undo / Redo** — Ctrl+Z / Ctrl+Shift+Z (Cmd on Mac). Undoes cell edits, paste, cut, row insert/delete, and column insert/delete. Multi-cell operations undo as a single step
+- **Undo / Redo** — Ctrl+Z / Ctrl+Shift+Z (Cmd on Mac). Undoes cell edits, paste, cut, row insert/delete, column insert/delete, column rename, column reorder, and column resize. Multi-cell operations undo as a single step. Works from anywhere — no cell focus required
 
 ### Touch Gestures
 
@@ -286,8 +286,8 @@ The in-app **Plugins > Expression Reference** has the full language documentatio
 | Enter (AI tab) | Send AI prompt |
 | Shift+Enter (AI tab) | Newline in AI prompt |
 | Up / Down (AI tab) | AI prompt history |
-| Tab / Shift+Tab (cell being edited) | Navigate between cells |
-| Enter | Move to next row |
+| Tab / Shift+Tab (editing) | Move to next / previous cell (stays in edit mode) |
+| Enter (editing) | Move down to the column where editing started (stays in edit mode) |
 | Escape | Cancel cell edit |
 
 ## License

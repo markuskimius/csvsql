@@ -3486,6 +3486,7 @@ const app = (() => {
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey) {
         e.preventDefault();
         td.focus();
+        win._editStartColIdx = parseInt(td.dataset.colIdx, 10);
         enterEditMode(td);
         return;
       }
@@ -3686,6 +3687,7 @@ const app = (() => {
           (noMods && (e.key === 'Enter' || e.key === 'i')) ||
           ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'u' || e.key === 'U')))) {
         e.preventDefault();
+        win._editStartColIdx = parseInt(td.dataset.colIdx, 10);
         enterEditMode(td);
         return;
       }
@@ -3766,16 +3768,22 @@ const app = (() => {
         const cells = [...tr.querySelectorAll('td.data-cell')];
         const idx = cells.indexOf(td);
         const next = e.shiftKey ? cells[idx - 1] : cells[idx + 1];
-        if (next) next.focus();
+        if (next) {
+          next.focus();
+          if (inEdit) enterEditMode(next);
+        }
       } else if (e.key === 'Enter' && !e.shiftKey) {
         if (!inEdit) return;
         e.preventDefault();
         td.blur();
         const nextTr = tr.nextElementSibling;
         if (nextTr && !nextTr.classList.contains('virtual-pad')) {
-          const colIdx = [...tr.children].indexOf(td);
-          const nextTd = nextTr.children[colIdx];
-          if (nextTd && nextTd.classList.contains('data-cell')) nextTd.focus();
+          const targetColIdx = win._editStartColIdx != null ? win._editStartColIdx : parseInt(td.dataset.colIdx, 10);
+          const nextTd = nextTr.children[targetColIdx + 1];
+          if (nextTd && nextTd.classList.contains('data-cell')) {
+            nextTd.focus();
+            enterEditMode(nextTd);
+          }
         }
       } else if (e.key === 'Escape') {
         e.preventDefault();
@@ -4332,6 +4340,32 @@ const app = (() => {
       markModified(tableName);
       registerTable(tableName);
       windows.filter(w => w.tableName === tableName).forEach(w => rebuildTable(w));
+    } else if (entry.type === 'renameColumn') {
+      t.columns[u.colIdx] = u.oldCol;
+      for (const row of t.rows) { row[u.oldCol] = row[u.newCol]; delete row[u.newCol]; }
+      for (const w of windows.filter(w => w.tableName === tableName)) {
+        for (const s of w.sortCols) if (s.col === u.newCol) s.col = u.oldCol;
+        if (w.selectedCol === u.newCol) w.selectedCol = u.oldCol;
+        if (w.columnFilters[u.newCol]) { w.columnFilters[u.oldCol] = w.columnFilters[u.newCol]; delete w.columnFilters[u.newCol]; }
+      }
+      try { db.run(`ALTER TABLE [${tableName}] RENAME COLUMN [${u.newCol}] TO [${u.oldCol}]`); } catch (_) {}
+      rebuildTransformCacheForTable(tableName);
+      markModified(tableName);
+      windows.filter(w => w.tableName === tableName).forEach(w => rebuildTable(w));
+    } else if (entry.type === 'reorderColumn') {
+      t.columns.length = 0;
+      t.columns.push(...u.oldColumns);
+      const w = windows.find(w => w.id === u.winId);
+      if (w && u.oldWidths) w.colWidths = [...u.oldWidths];
+      markModified(tableName);
+      registerTable(tableName);
+      windows.filter(w => w.tableName === tableName).forEach(w => rebuildTable(w));
+    } else if (entry.type === 'resizeColumn') {
+      const w = windows.find(w => w.id === u.winId);
+      if (w) {
+        w.colWidths = [...u.oldWidths];
+        rebuildTable(w);
+      }
     }
   }
 
@@ -4377,6 +4411,32 @@ const app = (() => {
       markModified(tableName);
       registerTable(tableName);
       windows.filter(w => w.tableName === tableName).forEach(w => rebuildTable(w));
+    } else if (entry.type === 'renameColumn') {
+      t.columns[u.colIdx] = u.newCol;
+      for (const row of t.rows) { row[u.newCol] = row[u.oldCol]; delete row[u.oldCol]; }
+      for (const w of windows.filter(w => w.tableName === tableName)) {
+        for (const s of w.sortCols) if (s.col === u.oldCol) s.col = u.newCol;
+        if (w.selectedCol === u.oldCol) w.selectedCol = u.newCol;
+        if (w.columnFilters[u.oldCol]) { w.columnFilters[u.newCol] = w.columnFilters[u.oldCol]; delete w.columnFilters[u.oldCol]; }
+      }
+      try { db.run(`ALTER TABLE [${tableName}] RENAME COLUMN [${u.oldCol}] TO [${u.newCol}]`); } catch (_) {}
+      rebuildTransformCacheForTable(tableName);
+      markModified(tableName);
+      windows.filter(w => w.tableName === tableName).forEach(w => rebuildTable(w));
+    } else if (entry.type === 'reorderColumn') {
+      t.columns.length = 0;
+      t.columns.push(...u.newColumns);
+      const w = windows.find(w => w.id === u.winId);
+      if (w && u.newWidths) w.colWidths = [...u.newWidths];
+      markModified(tableName);
+      registerTable(tableName);
+      windows.filter(w => w.tableName === tableName).forEach(w => rebuildTable(w));
+    } else if (entry.type === 'resizeColumn') {
+      const w = windows.find(w => w.id === u.winId);
+      if (w) {
+        w.colWidths = [...u.newWidths];
+        rebuildTable(w);
+      }
     }
   }
 
@@ -4717,6 +4777,9 @@ const app = (() => {
     if (t.columns.includes(newCol)) return; // duplicate
     const idx = t.columns.indexOf(oldCol);
     if (idx === -1) return;
+    if (!t._undoStack) t._undoStack = [];
+    t._undoStack.push({ type: 'renameColumn', columnUndo: { oldCol, newCol, colIdx: idx } });
+    t._redoStack = [];
     t.columns[idx] = newCol;
     for (const row of t.rows) {
       row[newCol] = row[oldCol];
@@ -4742,12 +4805,24 @@ const app = (() => {
     win._table.style.width = ((win.rowNumWidth || 50) + win.colWidths.reduce((a, b) => a + b, 0)) + 'px';
   }
 
+  function pushResizeUndo(win, oldWidths) {
+    const t = tables[win.tableName];
+    if (!t) return;
+    const newWidths = [...win.colWidths];
+    if (oldWidths.length === newWidths.length && oldWidths.every((w, i) => w === newWidths[i])) return;
+    if (!t._undoStack) t._undoStack = [];
+    t._undoStack.push({ type: 'resizeColumn', columnUndo: { winId: win.id, oldWidths, newWidths } });
+    t._redoStack = [];
+  }
+
   function startColResize(win, colIdx, e) {
     closeAutoFilter();
     const colEl = win._colgroup.children[colIdx + 1];
     const startX = e.clientX;
     const startWidth = win.colWidths[colIdx];
     const MIN_COL_WIDTH = 40;
+    const oldWidths = [...win.colWidths];
+    let dragged = false;
 
     document.body.classList.add('col-resizing');
     const th = win._table.querySelector(`thead th[data-col-idx="${colIdx}"]`);
@@ -4755,6 +4830,7 @@ const app = (() => {
     if (handle) handle.classList.add('active');
 
     const onMove = (me) => {
+      dragged = true;
       const newWidth = Math.max(MIN_COL_WIDTH, startWidth + me.clientX - startX);
       win.colWidths[colIdx] = newWidth;
       colEl.style.width = newWidth + 'px';
@@ -4766,28 +4842,31 @@ const app = (() => {
       document.body.classList.remove('col-resizing');
       if (handle) handle.classList.remove('active');
       if (th) th._didDrag = true;
-      const finalWidth = win.colWidths[colIdx];
-      const selectedCols = new Set();
-      if (win.selectedCells) {
-        for (const key of win.selectedCells) {
-          selectedCols.add(key.slice(key.indexOf(':') + 1));
-        }
-      }
-      selectedCols.add(win._columns[colIdx]);
-      if (selectedCols.size > 1) {
-        const container = win._container;
-        const offsetBefore = th ? th.offsetLeft - container.scrollLeft : null;
-        for (const colName of selectedCols) {
-          const idx = win._columns.indexOf(colName);
-          if (idx !== -1 && idx !== colIdx) {
-            win.colWidths[idx] = finalWidth;
-            win._colgroup.children[idx + 1].style.width = finalWidth + 'px';
+      if (dragged) {
+        const finalWidth = win.colWidths[colIdx];
+        const selectedCols = new Set();
+        if (win.selectedCells) {
+          for (const key of win.selectedCells) {
+            selectedCols.add(key.slice(key.indexOf(':') + 1));
           }
         }
-        updateTableWidth(win);
-        if (th && offsetBefore !== null) {
-          container.scrollLeft = Math.max(0, th.offsetLeft - offsetBefore);
+        selectedCols.add(win._columns[colIdx]);
+        if (selectedCols.size > 1) {
+          const container = win._container;
+          const offsetBefore = th ? th.offsetLeft - container.scrollLeft : null;
+          for (const colName of selectedCols) {
+            const idx = win._columns.indexOf(colName);
+            if (idx !== -1 && idx !== colIdx) {
+              win.colWidths[idx] = finalWidth;
+              win._colgroup.children[idx + 1].style.width = finalWidth + 'px';
+            }
+          }
+          updateTableWidth(win);
+          if (th && offsetBefore !== null) {
+            container.scrollLeft = Math.max(0, th.offsetLeft - offsetBefore);
+          }
         }
+        pushResizeUndo(win, oldWidths);
       }
     };
     document.addEventListener('mousemove', onMove);
@@ -4851,6 +4930,7 @@ const app = (() => {
   }
 
   function autoFitSelectedOrSingle(win, colIdx) {
+    const oldWidths = [...win.colWidths];
     if (win.selectedCells && win.selectedCells.size > 1) {
       const clickedCol = win._columns[colIdx];
       const selectedCols = new Set();
@@ -4862,10 +4942,12 @@ const app = (() => {
           const idx = win._columns.indexOf(colName);
           if (idx !== -1) autoFitColumn(win, idx);
         }
+        pushResizeUndo(win, oldWidths);
         return;
       }
     }
     autoFitColumn(win, colIdx);
+    pushResizeUndo(win, oldWidths);
   }
 
   function autoFitRowNumColumn(win) {
@@ -4949,11 +5031,19 @@ const app = (() => {
   async function reorderColumn(win, fromIdx, toIdx) {
     const t = tables[win.tableName];
     if (!t) return;
+    const oldColumns = [...t.columns];
+    const oldWidths = win.colWidths ? [...win.colWidths] : null;
     const col = t.columns.splice(fromIdx, 1)[0];
     const w = win.colWidths ? win.colWidths.splice(fromIdx, 1)[0] : null;
     if (toIdx > fromIdx) toIdx--;
     t.columns.splice(toIdx, 0, col);
     if (win.colWidths && w != null) win.colWidths.splice(toIdx, 0, w);
+    if (!t._undoStack) t._undoStack = [];
+    t._undoStack.push({ type: 'reorderColumn', columnUndo: {
+      oldColumns, newColumns: [...t.columns],
+      winId: win.id, oldWidths, newWidths: win.colWidths ? [...win.colWidths] : null
+    } });
+    t._redoStack = [];
     markModified(win.tableName);
     await registerTable(win.tableName);
     rebuildTable(win);
@@ -5538,6 +5628,17 @@ const app = (() => {
           e.preventDefault();
           if (e.shiftKey) selectNoneCells(win);
           else selectAllCells(win);
+          return;
+        }
+      }
+      if (e.key.toLowerCase() === 'z') {
+        const tgt = e.target;
+        if (tgt && tgt.matches && tgt.matches('input, textarea, [contenteditable="true"], td.data-cell')) return;
+        const win = getActiveDataWindow();
+        if (win && win.tableName) {
+          e.preventDefault();
+          if (e.shiftKey) redoTable(win.tableName, win);
+          else undoTable(win.tableName, win);
           return;
         }
       }
@@ -6291,7 +6392,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.19 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.20 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -6331,10 +6432,10 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 <h4>Editing</h4>
 <ul>
-<li><strong>Edit cells:</strong> Click a cell to select it; press <code>Enter</code>, <code>i</code>, <code>F2</code>, or <code>Ctrl</code>/<code>&#8984;</code>+<code>U</code> to enter edit mode, or <code>Ctrl</code>/<code>&#8984;</code>+click a cell to edit it directly. <code>Tab</code>/<code>Shift+Tab</code> moves between cells, <code>Enter</code> saves and moves down, <code>Escape</code> reverts the edit (and clears the selection when not editing).</li>
+<li><strong>Edit cells:</strong> Click a cell to select it; press <code>Enter</code>, <code>i</code>, <code>F2</code>, or <code>Ctrl</code>/<code>&#8984;</code>+<code>U</code> to enter edit mode, or <code>Ctrl</code>/<code>&#8984;</code>+click a cell to edit it directly. <code>Tab</code>/<code>Shift+Tab</code> moves between cells and <code>Enter</code> moves down to the column where editing started &mdash; all three stay in edit mode. <code>Escape</code> reverts the edit (and clears the selection when not editing).</li>
 <li><strong>Highlight row &amp; column:</strong> Clicking a cell also highlights its row and column. Move the selection with arrow keys or vim-style <code>h</code>/<code>j</code>/<code>k</code>/<code>l</code>; extend to a rectangle of cells with <code>Shift</code>+arrow (or <code>Shift</code>+<code>H</code>/<code>J</code>/<code>K</code>/<code>L</code>), <code>Shift</code>+click on another cell, or click-and-drag across cells &mdash; every selected cell's row and column is highlighted so you can see what lines up with what. Click a row number to select an entire row; drag across row numbers or <code>Shift</code>+click another row number to select a range. <code>Ctrl</code>/<code>&#8984;</code>+<code>A</code> selects all cells; <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>A</code> deselects all. Clicking the <code>#</code> corner cell toggles between select all and select none. Pressing an arrow key with no cell selected focuses the cell in the middle of the current view. <code>Esc</code> clears the selection.</li>
 <li><strong>Cut / Copy / Paste:</strong> Select cells and use <code>Ctrl</code>/<code>&#8984;</code>+<code>X</code>, <code>Ctrl</code>/<code>&#8984;</code>+<code>C</code>, <code>Ctrl</code>/<code>&#8984;</code>+<code>V</code>. Data is copied as tab-separated values. Select All and row selection copies include the column header row. In edit mode, these shortcuts pass through to native browser behavior for text within the cell.</li>
-<li><strong>Undo / Redo:</strong> <code>Ctrl</code>/<code>&#8984;</code>+<code>Z</code> to undo, <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>Z</code> to redo. Undoes cell edits, paste, cut, row insert/delete, and column insert/delete. Multi-cell paste and cut undo as a single step. Also available from the Edit menu.</li>
+<li><strong>Undo / Redo:</strong> <code>Ctrl</code>/<code>&#8984;</code>+<code>Z</code> to undo, <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>Z</code> to redo. Undoes cell edits, paste, cut, row insert/delete, column insert/delete, column rename, column reorder, and column resize. Multi-cell paste and cut undo as a single step. Also available from the Edit menu.</li>
 <li><strong>Rows:</strong> Right-click a row number to insert below or delete. Right-click the <code>#</code> corner cell to insert a row at the beginning.</li>
 <li><strong>Columns:</strong> Right-click a column header to insert a column to the right or delete. Right-click the <code>#</code> corner cell to insert a column at the beginning. <code>Ctrl</code>/<code>&#8984;</code>+click a column header to rename inline &mdash; duplicate names are rejected with a red border on the input.</li>
 <li><strong>Select a column:</strong> Click a column header to select it (highlighted) and sort it. Selection is the target for Ctrl+&larr;/&rarr;.</li>
@@ -6449,6 +6550,8 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>V</code></td><td>Paste at selected cell</td></tr>
 <tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>Z</code></td><td>Undo</td></tr>
 <tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>Z</code></td><td>Redo</td></tr>
+<tr><td><code>Tab</code>/<code>Shift+Tab</code> (editing)</td><td>Move to next / previous cell (stays in edit mode)</td></tr>
+<tr><td><code>Enter</code> (editing)</td><td>Move down to the column where editing started (stays in edit mode)</td></tr>
 <tr><td><code>Tab</code>/<code>Shift+Tab</code> or <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>L</code>/<code>H</code> (cell selected, not editing)</td><td>Switch to next / previous table window</td></tr>
 <tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>H</code>/<code>J</code>/<code>K</code>/<code>L</code> (cell selected, not editing)</td><td>Nudge the active window 5 px left / down / up / right</td></tr>
 <tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>1</code>/<code>2</code>/<code>3</code>/<code>4</code></td><td>Clear Sort / Clear Filters / Toggle Link / Toggle Format</td></tr>
