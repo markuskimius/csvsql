@@ -1302,4 +1302,251 @@ test.describe('Dock Interactions', () => {
       expect(newSize.height).toBeGreaterThan(origSize.height);
     });
   });
+
+  // =========================================================================
+  // Ghost drop on empty space moves window
+  // =========================================================================
+  test.describe('Ghost drop on empty space moves window', () => {
+
+    test.beforeEach(async ({ page }) => {
+      await openApp(page);
+      await uploadFile(page, 'sample1.csv');
+      await waitForWindow(page, 'sample1');
+    });
+
+    test('shift-drag to empty space moves window to drop location', async ({ page }) => {
+      await page.evaluate(() => {
+        const win = app._test.windows[0];
+        win.el.style.left = '10px';
+        win.el.style.top = '10px';
+        win.el.style.width = '300px';
+        win.el.style.height = '250px';
+      });
+
+      const titlebar = page.locator('.subwindow .win-titlebar').first();
+      const box = await titlebar.boundingBox();
+
+      const origPos = await page.evaluate(() => {
+        const win = app._test.windows[0];
+        return { left: parseInt(win.el.style.left), top: parseInt(win.el.style.top) };
+      });
+
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.keyboard.down('Shift');
+      await page.mouse.down({ button: 'left' });
+      await page.mouse.move(box.x + box.width / 2 + 100, box.y + box.height / 2 + 80);
+      await page.mouse.up({ button: 'left' });
+      await page.keyboard.up('Shift');
+
+      const newPos = await page.evaluate(() => {
+        const win = app._test.windows[0];
+        return { left: parseInt(win.el.style.left), top: parseInt(win.el.style.top) };
+      });
+
+      expect(newPos.left).toBeGreaterThan(origPos.left);
+      expect(newPos.top).toBeGreaterThan(origPos.top);
+    });
+
+    test('shift-drag clamps window to left and top workspace edges', async ({ page }) => {
+      await page.evaluate(() => {
+        const win = app._test.windows[0];
+        win.el.style.left = '50px';
+        win.el.style.top = '50px';
+        win.el.style.width = '300px';
+        win.el.style.height = '250px';
+      });
+
+      const titlebar = page.locator('.subwindow .win-titlebar').first();
+      const box = await titlebar.boundingBox();
+      const area = await page.evaluate(() => {
+        const a = document.getElementById('window-area').getBoundingClientRect();
+        return { left: a.left, top: a.top };
+      });
+
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.keyboard.down('Shift');
+      await page.mouse.down({ button: 'left' });
+      // Drag far to the upper-left, past the workspace boundary
+      await page.mouse.move(area.left - 200, area.top - 200);
+      await page.mouse.up({ button: 'left' });
+      await page.keyboard.up('Shift');
+
+      const newPos = await page.evaluate(() => {
+        const win = app._test.windows[0];
+        return { left: parseInt(win.el.style.left), top: parseInt(win.el.style.top) };
+      });
+
+      expect(newPos.left).toBe(0);
+      expect(newPos.top).toBe(0);
+    });
+
+    test('shift-drag clamps window to right and bottom workspace edges', async ({ page }) => {
+      await page.evaluate(() => {
+        const win = app._test.windows[0];
+        win.el.style.left = '10px';
+        win.el.style.top = '10px';
+        win.el.style.width = '300px';
+        win.el.style.height = '250px';
+      });
+
+      const titlebar = page.locator('.subwindow .win-titlebar').first();
+      const box = await titlebar.boundingBox();
+      const areaSize = await page.evaluate(() => {
+        const a = document.getElementById('window-area').getBoundingClientRect();
+        return { right: a.right, bottom: a.bottom };
+      });
+
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.keyboard.down('Shift');
+      await page.mouse.down({ button: 'left' });
+      // Drag far to the bottom-right, past the workspace boundary
+      await page.mouse.move(areaSize.right + 200, areaSize.bottom + 200);
+      await page.mouse.up({ button: 'left' });
+      await page.keyboard.up('Shift');
+
+      const result = await page.evaluate(() => {
+        const win = app._test.windows[0];
+        const a = document.getElementById('window-area').getBoundingClientRect();
+        const areaW = a.right - a.left;
+        const areaH = a.bottom - a.top;
+        const winW = win.el.offsetWidth;
+        const winH = win.el.offsetHeight;
+        return {
+          left: parseInt(win.el.style.left),
+          top: parseInt(win.el.style.top),
+          maxLeft: areaW - winW,
+          maxTop: areaH - winH,
+        };
+      });
+
+      expect(result.left).toBe(result.maxLeft);
+      expect(result.top).toBe(result.maxTop);
+    });
+
+    test('shift-drag removes ghost element after drop', async ({ page }) => {
+      const titlebar = page.locator('.subwindow .win-titlebar').first();
+      const box = await titlebar.boundingBox();
+
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.keyboard.down('Shift');
+      await page.mouse.down({ button: 'left' });
+      await page.mouse.move(box.x + box.width / 2 + 50, box.y + box.height / 2 + 50);
+
+      // Ghost should exist during drag
+      const ghostDuring = await page.evaluate(() =>
+        document.querySelector('body > .subwindow[style*="position: fixed"]') !== null
+      );
+      expect(ghostDuring).toBe(true);
+
+      await page.mouse.up({ button: 'left' });
+      await page.keyboard.up('Shift');
+
+      // Ghost should be removed after drop
+      const ghostAfter = await page.evaluate(() =>
+        document.querySelector('body > .subwindow[style*="position: fixed"]') !== null
+      );
+      expect(ghostAfter).toBe(false);
+    });
+
+    test('shift-drag clears maximized state', async ({ page }) => {
+      // Maximize the window by double-clicking the titlebar
+      const tb = page.locator('.subwindow .win-titlebar').first();
+      await tb.dblclick();
+
+      const isMaxBefore = await page.evaluate(() => app._test.windows[0].maximized);
+      expect(isMaxBefore).toBe(true);
+
+      const titlebar = page.locator('.subwindow .win-titlebar').first();
+      const box = await titlebar.boundingBox();
+
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.keyboard.down('Shift');
+      await page.mouse.down({ button: 'left' });
+      await page.mouse.move(box.x + box.width / 2 + 60, box.y + box.height / 2 + 60);
+      await page.mouse.up({ button: 'left' });
+      await page.keyboard.up('Shift');
+
+      const isMaxAfter = await page.evaluate(() => app._test.windows[0].maximized);
+      expect(isMaxAfter).toBe(false);
+    });
+
+    test('shift-drag to dock target still docks (not just moves)', async ({ page }) => {
+      await executeSQL(page, "SELECT * INTO [t2] FROM [sample1]");
+      await waitForWindow(page, 't2');
+
+      await page.evaluate(() => {
+        const wins = app._test.windows;
+        wins[0].el.style.left = '10px';
+        wins[0].el.style.top = '10px';
+        wins[0].el.style.width = '300px';
+        wins[0].el.style.height = '250px';
+        wins[1].el.style.left = '400px';
+        wins[1].el.style.top = '10px';
+        wins[1].el.style.width = '300px';
+        wins[1].el.style.height = '250px';
+      });
+
+      const titlebar = page.locator('.subwindow .win-titlebar').first();
+      const box = await titlebar.boundingBox();
+
+      // Get target window's titlebar position (drop on titlebar = tab)
+      const titlebar2 = page.locator('.subwindow .win-titlebar').nth(1);
+      const box2 = await titlebar2.boundingBox();
+
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.keyboard.down('Shift');
+      await page.mouse.down({ button: 'left' });
+      await page.mouse.move(box2.x + box2.width / 2, box2.y + box2.height / 2);
+      await page.mouse.up({ button: 'left' });
+      await page.keyboard.up('Shift');
+
+      const result = await page.evaluate(() => ({
+        dockCount: app._test.dockContainers.length,
+        allDocked: app._test.windows.every(w => w.dockId !== null),
+      }));
+
+      expect(result.dockCount).toBe(1);
+      expect(result.allDocked).toBe(true);
+    });
+
+    test('window stays within workspace on moderate shift-drag', async ({ page }) => {
+      await page.evaluate(() => {
+        const win = app._test.windows[0];
+        win.el.style.left = '200px';
+        win.el.style.top = '100px';
+        win.el.style.width = '300px';
+        win.el.style.height = '250px';
+      });
+
+      const titlebar = page.locator('.subwindow .win-titlebar').first();
+      const box = await titlebar.boundingBox();
+
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.keyboard.down('Shift');
+      await page.mouse.down({ button: 'left' });
+      await page.mouse.move(box.x + box.width / 2 + 50, box.y + box.height / 2 + 30);
+      await page.mouse.up({ button: 'left' });
+      await page.keyboard.up('Shift');
+
+      const result = await page.evaluate(() => {
+        const win = app._test.windows[0];
+        const a = document.getElementById('window-area').getBoundingClientRect();
+        const left = parseInt(win.el.style.left);
+        const top = parseInt(win.el.style.top);
+        const winW = win.el.offsetWidth;
+        const winH = win.el.offsetHeight;
+        return {
+          left, top,
+          areaW: a.right - a.left,
+          areaH: a.bottom - a.top,
+          winW, winH,
+        };
+      });
+
+      expect(result.left).toBeGreaterThanOrEqual(0);
+      expect(result.top).toBeGreaterThanOrEqual(0);
+      expect(result.left + result.winW).toBeLessThanOrEqual(result.areaW);
+      expect(result.top + result.winH).toBeLessThanOrEqual(result.areaH);
+    });
+  });
 });

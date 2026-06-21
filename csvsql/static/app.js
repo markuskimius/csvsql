@@ -1250,7 +1250,7 @@ const app = (() => {
       }
     });
 
-    document.addEventListener('mouseup', () => {
+    document.addEventListener('mouseup', (e) => {
       if (dragging) {
         dragging = false;
         titlebar.style.cursor = 'grab';
@@ -1260,6 +1260,17 @@ const app = (() => {
 
         if (ghostMode && _dragDropTarget && win.dockable !== false) {
           executeDock(win.id, _dragDropTarget);
+        } else if (ghostMode) {
+          const area = document.getElementById('window-area').getBoundingClientRect();
+          const winW = win.el.offsetWidth, winH = win.el.offsetHeight;
+          const areaW = area.right - area.left, areaH = area.bottom - area.top;
+          let left = e.clientX - ghostOffsetX - area.left;
+          let top = e.clientY - ghostOffsetY - area.top;
+          left = Math.max(0, Math.min(left, areaW - winW));
+          top = Math.max(0, Math.min(top, areaH - winH));
+          win.el.style.left = left + 'px';
+          win.el.style.top = top + 'px';
+          if (win.maximized) win.maximized = false;
         }
         _dragDropTarget = null;
         ghostMode = false;
@@ -6392,7 +6403,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.20 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.21 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -6521,7 +6532,7 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <li><strong>Tab windows:</strong> Hold <code>Shift</code> and drag a window onto another window's title bar to merge them into a tab group. Click tabs to switch between windows.</li>
 <li><strong>Split dock:</strong> Hold <code>Shift</code> and drag a window onto the body area of another window. Drop zones are divided diagonally &mdash; drop on the top, right, bottom, or left region to split that direction.</li>
 <li><strong>Reorder tabs:</strong> Drag a tab left or right within the tab bar to rearrange it.</li>
-<li><strong>Move tabs:</strong> Hold <code>Shift</code> and drag a tab to move it to another window or dock pane. A ghost preview shows where the window will land.</li>
+<li><strong>Move tabs:</strong> Hold <code>Shift</code> and drag a tab to move it to another window or dock pane. A ghost preview shows where the window will land. Dropping on empty space moves the window to the drop location.</li>
 <li><strong>Undock:</strong> Hold <code>Shift</code> and drag a tab outside its dock container to detach it as a standalone window. The undocked window retains the pane's size.</li>
 <li><strong>Splitter:</strong> Drag the divider between split panes to resize. Double-click to reset to 50/50.</li>
 <li><strong>Maximize:</strong> Double-click a tab or the empty tab bar area to maximize/restore the dock container.</li>
