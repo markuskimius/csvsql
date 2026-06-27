@@ -313,7 +313,7 @@ test.describe('Column resize', () => {
     await corner.click({ button: 'right' });
     await page.locator('.context-menu button', { hasText: 'Insert Column' }).click();
     await page.locator('.modal-input').fill('newcol');
-    await page.locator('.modal .ok').click();
+    await page.locator('.modal-buttons .ok').click();
     await page.waitForTimeout(500);
 
     // colWidths should have been re-measured with the new column
@@ -494,7 +494,7 @@ test.describe('Row-number column resize', () => {
     await corner.click({ button: 'right' });
     await page.locator('.context-menu button', { hasText: 'Insert Column' }).click();
     await page.locator('.modal-input').fill('newcol');
-    await page.locator('.modal .ok').click();
+    await page.locator('.modal-buttons .ok').click();
     await page.waitForTimeout(500);
 
     const afterAdd = await getRowNumWidth(page);

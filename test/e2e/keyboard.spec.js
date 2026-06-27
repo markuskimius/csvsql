@@ -11,13 +11,13 @@ test.describe('Keyboard Shortcuts', () => {
     const tableNameInput = page.locator('.modal-input');
     await expect(tableNameInput).toBeVisible();
     await tableNameInput.fill('keyboard_test');
-    await page.locator('.modal .ok').click();
+    await page.locator('.modal-buttons .ok').click();
 
     // Second prompt for column names
     const colInput = page.locator('.modal-input');
     await expect(colInput).toBeVisible();
     await colInput.fill('id, name');
-    await page.locator('.modal .ok').click();
+    await page.locator('.modal-buttons .ok').click();
 
     await waitForWindow(page, 'keyboard_test');
     const count = await page.evaluate(() => app._test.windows.length);

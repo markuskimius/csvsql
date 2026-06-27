@@ -152,3 +152,61 @@ test.describe('Help Windows', () => {
     expect(overflowX).toBe('auto');
   });
 });
+
+test.describe('Help window dialog flags', () => {
+  test.beforeEach(async ({ page }) => {
+    await openApp(page);
+  });
+
+  function winFlag(page, title) {
+    return page.evaluate((t) => {
+      const win = app._test.windows.find(w => w.title === t);
+      if (!win) return null;
+      return {
+        isDialog: !!win.isDialog,
+        dialogClass: win.el.classList.contains('dialog'),
+        resizeHandles: win.el.querySelectorAll('.resize-handle').length,
+        minBtns: win.el.querySelectorAll('.btn-min').length,
+        maxBtns: win.el.querySelectorAll('.btn-max').length,
+        statusbars: win.el.querySelectorAll('.win-statusbar').length,
+      };
+    }, title);
+  }
+
+  test('About CSVSQL is a dialog: resizable, no min/max, no status bar', async ({ page }) => {
+    await page.evaluate(() => app.showAbout());
+    await page.waitForSelector('.help-body');
+    const f = await winFlag(page, 'About CSVSQL');
+    expect(f).not.toBeNull();
+    expect(f.isDialog).toBe(true);
+    expect(f.dialogClass).toBe(true);
+    expect(f.resizeHandles).toBe(8);
+    expect(f.minBtns).toBe(0);
+    expect(f.maxBtns).toBe(0);
+    expect(f.statusbars).toBe(0);
+  });
+
+  test("User's Manual is NOT a dialog: has min/max and status bar", async ({ page }) => {
+    await page.evaluate(() => app.showManual());
+    await page.waitForSelector('.help-body');
+    const f = await winFlag(page, "User's Manual");
+    expect(f).not.toBeNull();
+    expect(f.isDialog).toBe(false);
+    expect(f.dialogClass).toBe(false);
+    expect(f.resizeHandles).toBe(8);
+    expect(f.minBtns).toBe(1);
+    expect(f.maxBtns).toBe(1);
+    expect(f.statusbars).toBe(1);
+  });
+
+  test('Plugin Expression Reference is NOT a dialog', async ({ page }) => {
+    await page.evaluate(() => app.showExpressionReference());
+    await page.waitForSelector('.help-body');
+    const f = await winFlag(page, 'Plugin Expression Reference');
+    expect(f).not.toBeNull();
+    expect(f.isDialog).toBe(false);
+    expect(f.minBtns).toBe(1);
+    expect(f.maxBtns).toBe(1);
+    expect(f.statusbars).toBe(1);
+  });
+});

@@ -211,10 +211,10 @@ test.describe('Row and Column Operations', () => {
       await page.locator('.context-menu button', { hasText: 'Insert Column Right' }).click();
 
       // Interact with the prompt dialog
-      await page.waitForSelector('.modal-overlay');
-      const input = page.locator('.modal-overlay input');
+      await page.waitForSelector('.subwindow.dialog');
+      const input = page.locator('.subwindow.dialog input');
       await input.fill('new_column');
-      await page.locator('.modal-overlay button', { hasText: 'OK' }).click();
+      await page.locator('.subwindow.dialog button', { hasText: 'OK' }).click();
       await page.waitForTimeout(500);
 
       const after = await getTableData(page, 'sample1');
@@ -643,17 +643,17 @@ test.describe('Row and Column Operations', () => {
       await page.locator('.context-menu button', { hasText: 'Insert Column Right' }).click();
 
       // Wait for dialog
-      await page.waitForSelector('.modal-overlay');
-      const input = page.locator('.modal-overlay input');
-      const errorDiv = page.locator('.modal-overlay .modal-error');
+      await page.waitForSelector('.subwindow.dialog');
+      const input = page.locator('.subwindow.dialog input');
+      const errorDiv = page.locator('.subwindow.dialog .modal-error');
 
       // Type a duplicate column name ('email' already exists)
       await input.fill('email');
-      await page.locator('.modal-overlay button', { hasText: 'OK' }).click();
+      await page.locator('.subwindow.dialog button', { hasText: 'OK' }).click();
       await page.waitForTimeout(200);
 
       // Dialog should still be open with an error message
-      await expect(page.locator('.modal-overlay')).toBeVisible();
+      await expect(page.locator('.subwindow.dialog')).toBeVisible();
       const errorText = await errorDiv.textContent();
       expect(errorText.length).toBeGreaterThan(0);
     });
@@ -666,22 +666,22 @@ test.describe('Row and Column Operations', () => {
       await th.click({ button: 'right' });
       await page.locator('.context-menu button', { hasText: 'Insert Column Right' }).click();
 
-      await page.waitForSelector('.modal-overlay');
-      const input = page.locator('.modal-overlay input');
+      await page.waitForSelector('.subwindow.dialog');
+      const input = page.locator('.subwindow.dialog input');
 
       // First try a duplicate name
       await input.fill('email');
-      await page.locator('.modal-overlay button', { hasText: 'OK' }).click();
+      await page.locator('.subwindow.dialog button', { hasText: 'OK' }).click();
       await page.waitForTimeout(200);
-      await expect(page.locator('.modal-overlay')).toBeVisible();
+      await expect(page.locator('.subwindow.dialog')).toBeVisible();
 
       // Now correct to a unique name
       await input.fill('unique_col');
-      await page.locator('.modal-overlay button', { hasText: 'OK' }).click();
+      await page.locator('.subwindow.dialog button', { hasText: 'OK' }).click();
       await page.waitForTimeout(500);
 
       // Dialog should be gone
-      await expect(page.locator('.modal-overlay')).not.toBeAttached();
+      await expect(page.locator('.subwindow.dialog')).not.toBeAttached();
 
       const after = await getTableData(page, 'sample1');
       expect(after.columns).toContain('unique_col');
@@ -695,12 +695,12 @@ test.describe('Row and Column Operations', () => {
       await th.click({ button: 'right' });
       await page.locator('.context-menu button', { hasText: 'Insert Column Right' }).click();
 
-      await page.waitForSelector('.modal-overlay');
-      const input = page.locator('.modal-overlay input');
+      await page.waitForSelector('.subwindow.dialog');
+      const input = page.locator('.subwindow.dialog input');
 
       // Clear and submit empty name
       await input.fill('');
-      await page.locator('.modal-overlay button', { hasText: 'OK' }).click();
+      await page.locator('.subwindow.dialog button', { hasText: 'OK' }).click();
       await page.waitForTimeout(200);
 
       // Either the dialog stays open with error, or it is dismissed (cancel behavior)
@@ -716,11 +716,11 @@ test.describe('Row and Column Operations', () => {
       await th.click({ button: 'right' });
       await page.locator('.context-menu button', { hasText: 'Insert Column Right' }).click();
 
-      await page.waitForSelector('.modal-overlay');
-      await page.locator('.modal-overlay button', { hasText: 'Cancel' }).click();
+      await page.waitForSelector('.subwindow.dialog');
+      await page.locator('.subwindow.dialog button', { hasText: 'Cancel' }).click();
       await page.waitForTimeout(200);
 
-      await expect(page.locator('.modal-overlay')).not.toBeAttached();
+      await expect(page.locator('.subwindow.dialog')).not.toBeAttached();
       const after = await getTableData(page, 'sample1');
       expect(after.columns.length).toBe(before.columns.length);
     });

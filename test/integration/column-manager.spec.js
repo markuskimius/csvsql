@@ -190,10 +190,10 @@ test.describe('Column Manager', () => {
       await expect(maxBtn).toHaveCount(0);
     });
 
-    test('no resize handles', async ({ page }) => {
+    test('has resize handles (dialogs are resizable)', async ({ page }) => {
       await openColManager(page);
       const handles = page.locator('.subwindow.dialog .resize-handle');
-      await expect(handles).toHaveCount(0);
+      await expect(handles).toHaveCount(8);
     });
 
     test('no status bar', async ({ page }) => {
@@ -627,6 +627,32 @@ test.describe('Column Manager', () => {
       // Dimming should be cleared
       dimmedCount = await page.locator('.col-manager-dimmed').count();
       expect(dimmedCount).toBe(0);
+    });
+
+    test('dimmed windows are darkened (filter), not translucent (opacity stays 1)', async ({ page }) => {
+      // Open a second window so there's something to dim
+      await executeSQL(page, "SELECT 'a' AS x");
+      await page.waitForTimeout(300);
+
+      await page.evaluate(() => {
+        const win = app._test.windows.find(w => w.tableName === 'sample1');
+        app._test.focusWindow(win.id);
+      });
+      await page.waitForTimeout(200);
+
+      await openColManager(page);
+
+      const style = await page.evaluate(() => {
+        const el = document.querySelector('.col-manager-dimmed');
+        if (!el) return null;
+        const s = getComputedStyle(el);
+        return { opacity: s.opacity, filter: s.filter };
+      });
+      expect(style).not.toBeNull();
+      // The fix: dim via a filter, NOT opacity — so the window stays opaque.
+      expect(style.opacity).toBe('1');
+      expect(style.filter).toContain('brightness');
+      expect(style.filter).toContain('grayscale');
     });
   });
 

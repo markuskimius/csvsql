@@ -908,10 +908,16 @@ const app = (() => {
     const cascadeOffset = ((windows.length) % 8) * 30;
     const w = opts.width || Math.min(700, rect.width - 40);
     const h = opts.height || Math.min(400, rect.height - 40);
-    const x = opts.x ?? Math.min(cascadeOffset + 20, rect.width - w - 10);
-    const y = opts.y ?? Math.min(cascadeOffset + 20, rect.height - h - 10);
-
     const isDialog = !!opts.dialog;
+    const isModal = !!opts.modal;
+    // Modal dialogs center in the workspace; everything else cascades
+    const x = opts.x ?? (isModal
+      ? Math.max(10, Math.round((rect.width - w) / 2))
+      : Math.min(cascadeOffset + 20, rect.width - w - 10));
+    const y = opts.y ?? (isModal
+      ? Math.max(10, Math.round((rect.height - h) / 3))
+      : Math.min(cascadeOffset + 20, rect.height - h - 10));
+
     const el = document.createElement('div');
     el.className = 'subwindow' + (isDialog ? ' dialog' : '');
     el.id = `win-${id}`;
@@ -931,14 +937,14 @@ const app = (() => {
       </div>
       <div class="win-body"></div>
       ${isDialog ? '' : '<div class="win-statusbar"><span class="status-left"></span><span class="status-center"></span><span class="status-right"></span></div>'}
-      ${isDialog ? '' : `<div class="resize-handle rh-top"></div>
+      <div class="resize-handle rh-top"></div>
       <div class="resize-handle rh-bottom"></div>
       <div class="resize-handle rh-left"></div>
       <div class="resize-handle rh-right"></div>
       <div class="resize-handle rh-tl"></div>
       <div class="resize-handle rh-tr"></div>
       <div class="resize-handle rh-bl"></div>
-      <div class="resize-handle rh-br"></div>`}
+      <div class="resize-handle rh-br"></div>
     `;
 
     area.appendChild(el);
@@ -968,6 +974,10 @@ const app = (() => {
       dockLeaf: null,
       dockable: opts.dockable !== false,
       isDialog: isDialog,
+      isModal: isModal,
+      onClose: opts.onClose || null,
+      backdropEl: null,
+      _escHandler: null,
     };
     windows.push(winObj);
 
@@ -979,6 +989,23 @@ const app = (() => {
 
     if (contentFn) contentFn(winObj, el.querySelector('.win-body'));
     focusWindow(id);
+
+    if (isModal) {
+      // Dim the workspace behind the dialog and block interaction with other windows.
+      const backdrop = document.createElement('div');
+      backdrop.className = 'dialog-backdrop';
+      area.appendChild(backdrop);
+      winObj.backdropEl = backdrop;
+      backdrop.addEventListener('mousedown', () => closeWindow(id));
+      backdrop.style.zIndex = ++nextZIndex;
+      el.style.zIndex = ++nextZIndex;
+      const escHandler = (e) => {
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeWindow(id); }
+      };
+      document.addEventListener('keydown', escHandler, true);
+      winObj._escHandler = escHandler;
+    }
+
     updateWindowsList();
     return winObj;
   }
@@ -1037,12 +1064,15 @@ const app = (() => {
     }
 
     win.el.remove();
+    if (win.backdropEl) { win.backdropEl.remove(); win.backdropEl = null; }
+    if (win._escHandler) { document.removeEventListener('keydown', win._escHandler, true); win._escHandler = null; }
     windows.splice(idx, 1);
     if (activeWinId === id) {
       activeWinId = windows.length ? windows[windows.length - 1].id : null;
       if (activeWinId) focusWindow(activeWinId);
     }
     updateWindowsList();
+    if (win.onClose) win.onClose();
     if (_activeConsoleTab === 'ai') populateTableSelect();
   }
 
@@ -1120,7 +1150,7 @@ const app = (() => {
     const areaW = area.clientWidth, areaH = area.clientHeight;
     const xs = new Set([0, areaW]), ys = new Set([0, areaH]);
     windows.forEach(w => {
-      if (w === excludeWin || w.dockId || w.el.classList.contains('minimized')) return;
+      if (w === excludeWin || w.dockId || w.isDialog || w.el.classList.contains('minimized')) return;
       const l = parseInt(w.el.style.left) || 0;
       const t = parseInt(w.el.style.top) || 0;
       xs.add(l); xs.add(l + w.el.offsetWidth);
@@ -1146,6 +1176,12 @@ const app = (() => {
   }
 
   function snapPosition(excludeWin, left, top, winW, winH, areaW, areaH) {
+    // Dialog boxes don't snap.
+    if (excludeWin && excludeWin.isDialog) {
+      left = Math.max(0, Math.min(left, areaW - winW));
+      top = Math.max(0, Math.min(top, areaH - winH));
+      return { left, top, guidesX: [], guidesY: [] };
+    }
     const edges = getSnapEdges(excludeWin);
     const guidesX = [], guidesY = [];
     const snapL = findSnap(left, edges.x, SNAP_THRESHOLD);
@@ -1386,7 +1422,7 @@ const app = (() => {
         const dx = cx - startX;
         const dy = cy - startY;
         const areaW = area.right - area.left, areaH = area.bottom - area.top;
-        const edges = getSnapEdges(win);
+        const edges = win.isDialog ? { x: [], y: [] } : getSnapEdges(win);
         const guidesX = [], guidesY = [];
         if (resizeR) {
           let w = Math.min(Math.max(280, origW + dx), areaW - origLeft);
@@ -6348,45 +6384,44 @@ const app = (() => {
 
   // ---- Modals ----
   function showPrompt(title, label, defaultValue, callback, validate) {
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay';
-    overlay.innerHTML = `
-      <div class="modal">
-        <h3>${escHtml(title)}</h3>
-        <label style="font-size:12px;display:block;margin-bottom:4px;">${escHtml(label)}</label>
-        <input type="text" class="modal-input" value="${escHtml(defaultValue)}">
-        <div class="modal-error" style="color:#ff6b6b;font-size:11px;min-height:16px;margin-top:2px;"></div>
-        <div class="modal-buttons">
-          <button class="cancel">Cancel</button>
-          <button class="primary ok">OK</button>
-        </div>
-      </div>
-    `;
-    document.body.appendChild(overlay);
-    const input = overlay.querySelector('.modal-input');
-    const errorEl = overlay.querySelector('.modal-error');
-    input.focus();
-    input.select();
-
-    const submit = (val) => {
-      if (validate) {
-        const err = validate(val);
-        if (err) { errorEl.textContent = err; input.focus(); return; }
-      }
-      overlay.remove();
+    let resolved = false;
+    let winRef = null;
+    const finish = (val) => {
+      if (resolved) return;
+      resolved = true;
+      if (winRef) closeWindow(winRef.id);
       callback(val);
     };
-    const cancel = () => { overlay.remove(); callback(null); };
-    overlay.querySelector('.cancel').addEventListener('click', cancel);
-    overlay.querySelector('.ok').addEventListener('click', () => submit(input.value));
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') submit(input.value);
-      if (e.key === 'Escape') cancel();
-    });
-    input.addEventListener('input', () => { errorEl.textContent = ''; });
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) cancel();
-    });
+    winRef = createSubwindow(title, (winObj, body) => {
+      body.innerHTML = `
+        <div class="dialog-form">
+          <label class="dialog-label">${escHtml(label)}</label>
+          <input type="text" class="modal-input" value="${escHtml(defaultValue)}">
+          <div class="modal-error" style="color:#ff6b6b;font-size:11px;min-height:16px;margin-top:2px;"></div>
+          <div class="modal-buttons">
+            <button class="cancel">Cancel</button>
+            <button class="primary ok">OK</button>
+          </div>
+        </div>
+      `;
+      const input = body.querySelector('.modal-input');
+      const errorEl = body.querySelector('.modal-error');
+
+      const submit = (val) => {
+        if (validate) {
+          const err = validate(val);
+          if (err) { errorEl.textContent = err; input.focus(); return; }
+        }
+        finish(val);
+      };
+      body.querySelector('.cancel').addEventListener('click', () => finish(null));
+      body.querySelector('.ok').addEventListener('click', () => submit(input.value));
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); submit(input.value); }
+      });
+      input.addEventListener('input', () => { errorEl.textContent = ''; });
+      setTimeout(() => { input.focus(); input.select(); }, 0);
+    }, { dialog: true, modal: true, dockable: false, width: 380, height: 190, onClose: () => finish(null) });
   }
 
   // ---- Utilities ----
@@ -6418,7 +6453,7 @@ const app = (() => {
   }
 
   // ---- Help ----
-  function showHelpWindow(title, bodyHTML) {
+  function showHelpWindow(title, bodyHTML, asDialog) {
     const existing = windows.find(w => w.title === title);
     if (existing) {
       if (existing.el.classList.contains('minimized')) restoreWindow(existing.id);
@@ -6431,7 +6466,7 @@ const app = (() => {
     const h = Math.min(500, rect.height - 40);
     createSubwindow(title, (win, body) => {
       body.innerHTML = `<div class="help-body">${bodyHTML}</div>`;
-    }, { width: w, height: h, dockable: false });
+    }, { width: w, height: h, dockable: false, dialog: !!asDialog });
   }
 
   function showAbout() {
@@ -6446,10 +6481,10 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.22 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.24 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
-    `);
+    `, true);
   }
 
   function showManual() {
@@ -6568,6 +6603,7 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <li><strong>Close:</strong> Click the close button. <code>Ctrl</code>/<code>&#8984;</code>+click closes all windows.</li>
 <li><strong>Layout:</strong> Use the Windows menu to tile, grid, or cascade all windows.</li>
 <li><strong>Proportional scaling:</strong> Windows reposition and resize proportionally when the browser window or console panel is resized.</li>
+<li><strong>Dialog boxes:</strong> Prompts (New Table, Save As, Insert Column, Open URL) and AI Settings open as modal dialog boxes &mdash; the workspace dims behind them and they block the other windows until you confirm, press <code>Esc</code>, or click outside to dismiss. All dialog boxes &mdash; including these, the Column Manager, and the About windows &mdash; are draggable and resizable, but do not snap to window edges.</li>
 </ul>
 
 <h4>Tabbing and Docking</h4>
@@ -7739,14 +7775,12 @@ ${_aiImageContext()}`;
 
   // AI Settings modal
   function showAISettings() {
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay';
-
     const modelList = aiSettings.model ? aiSettings.model : '';
     const inputStyle = 'width:100%;box-sizing:border-box;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit;font-size:13px;margin-bottom:10px;outline:none;';
-    overlay.innerHTML = `
-      <div class="modal" style="min-width:380px">
-        <h3>AI Settings</h3>
+    const win = createSubwindow('AI Settings', null, { dialog: true, modal: true, dockable: false, width: 440, height: 480 });
+    const body = win.bodyEl;
+    body.innerHTML = `
+      <div class="dialog-form">
         <label style="font-size:12px;display:block;margin-bottom:4px;">Provider</label>
         <select id="ai-set-provider" style="${inputStyle}">
           <option value="auto" ${aiSettings.provider === 'auto' ? 'selected' : ''}>Auto-detect</option>
@@ -7786,20 +7820,19 @@ ${_aiImageContext()}`;
         </div>
       </div>
     `;
-    document.body.appendChild(overlay);
 
-    const providerSel = overlay.querySelector('#ai-set-provider');
-    const urlInput = overlay.querySelector('#ai-set-url');
-    const modelSel = overlay.querySelector('#ai-set-model');
-    const refreshBtn = overlay.querySelector('#ai-set-refresh');
-    const ollamaFields = overlay.querySelector('#ai-set-ollama-fields');
-    const claudeFields = overlay.querySelector('#ai-set-claude-fields');
-    const openaiFields = overlay.querySelector('#ai-set-openai-fields');
+    const providerSel = body.querySelector('#ai-set-provider');
+    const urlInput = body.querySelector('#ai-set-url');
+    const modelSel = body.querySelector('#ai-set-model');
+    const refreshBtn = body.querySelector('#ai-set-refresh');
+    const ollamaFields = body.querySelector('#ai-set-ollama-fields');
+    const claudeFields = body.querySelector('#ai-set-claude-fields');
+    const openaiFields = body.querySelector('#ai-set-openai-fields');
 
     // Show/hide toggle for API key fields
-    overlay.querySelectorAll('.ai-key-toggle').forEach(btn => {
+    body.querySelectorAll('.ai-key-toggle').forEach(btn => {
       btn.addEventListener('click', () => {
-        const inp = overlay.querySelector('#' + btn.dataset.target);
+        const inp = body.querySelector('#' + btn.dataset.target);
         if (inp.type === 'password') { inp.type = 'text'; btn.textContent = 'Hide'; }
         else { inp.type = 'password'; btn.textContent = 'Show'; }
       });
@@ -7896,18 +7929,17 @@ ${_aiImageContext()}`;
       if (save) {
         aiSettings.provider = providerSel.value;
         aiSettings.ollamaUrl = urlInput.value.replace(/\/+$/, '');
-        aiSettings.claudeApiKey = (overlay.querySelector('#ai-set-claude-key').value || '').trim();
-        aiSettings.openaiApiKey = (overlay.querySelector('#ai-set-openai-key').value || '').trim();
+        aiSettings.claudeApiKey = (body.querySelector('#ai-set-claude-key').value || '').trim();
+        aiSettings.openaiApiKey = (body.querySelector('#ai-set-openai-key').value || '').trim();
         aiSettings.model = modelSel.value;
         saveAISettings();
         _webllmEngine = null; // Reset engine on settings change
         detectAIProvider();
       }
-      overlay.remove();
+      closeWindow(win.id);
     };
-    overlay.querySelector('.cancel').addEventListener('click', () => close(false));
-    overlay.querySelector('.ok').addEventListener('click', () => close(true));
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
+    body.querySelector('.cancel').addEventListener('click', () => close(false));
+    body.querySelector('.ok').addEventListener('click', () => close(true));
   }
 
   // Render image thumbnails in the AI input area
@@ -8803,7 +8835,7 @@ ${_aiImageContext()}`;
       body.querySelector('.plugin-about-unload').addEventListener('click', () => {
         unloadPlugin(pluginIndex);
       });
-    }, { width: w, height: h, dockable: false });
+    }, { width: w, height: h, dockable: false, dialog: true });
     _activePluginAboutWin = win;
   }
 
@@ -9357,6 +9389,7 @@ choose(value, 'A', 'Active', 'I', 'Inactive')
         updateTableWidth, selectAllCells, selectNoneCells,
         showColManager, closeColManager, finalizeColManager,
         get _activeColManagerWin() { return _activeColManagerWin; },
+        showAISettings, showAbout, showManual, showPrompt,
       }
     } : {}),
   };

@@ -627,3 +627,100 @@ test.describe('Window Snap — Unit tests', () => {
     expect(result.top).toBe(0);
   });
 });
+
+test.describe('Window Snap — Dialogs do not snap', () => {
+  test('snapPosition does not snap a dialog window', async ({ page }) => {
+    await openApp(page);
+    // Ctrl+N opens the New Table prompt — a modal dialog (isDialog: true).
+    await page.keyboard.press('Control+n');
+    await expect(page.locator('.subwindow.dialog')).toHaveCount(1);
+
+    const result = await page.evaluate(() => {
+      const dlg = app._test.windows.find(w => w.isDialog);
+      const area = document.getElementById('window-area');
+      const areaW = area.clientWidth, areaH = area.clientHeight;
+      // left/top=5 would normally snap to the area's 0 edges (within threshold).
+      const snap = app._test.snapPosition(dlg, 5, 5, 300, 200, areaW, areaH);
+      return { left: snap.left, top: snap.top, guidesX: snap.guidesX.length, guidesY: snap.guidesY.length };
+    });
+    // Position is left unsnapped (only clamped), and no guides are produced.
+    expect(result.left).toBe(5);
+    expect(result.top).toBe(5);
+    expect(result.guidesX).toBe(0);
+    expect(result.guidesY).toBe(0);
+  });
+
+  test('getSnapEdges excludes dialog windows (others do not snap to dialogs)', async ({ page }) => {
+    await openApp(page);
+    await uploadFile(page, '../test/sample1.csv');
+    await waitForWindow(page, 'sample1');
+    await page.keyboard.press('Control+n');
+    await expect(page.locator('.subwindow.dialog')).toHaveCount(1);
+
+    const edges = await page.evaluate(() => {
+      const dataWin = app._test.windows.find(w => !w.isDialog);
+      const dlg = app._test.windows.find(w => w.isDialog);
+      dlg.el.style.left = '500px';
+      dlg.el.style.top = '50px';
+      dlg.el.style.width = '400px';
+      dlg.el.style.height = '250px';
+      const result = app._test.getSnapEdges(dataWin);
+      const area = document.getElementById('window-area');
+      return { x: result.x.sort((a, b) => a - b), areaW: area.clientWidth };
+    });
+    // Dialog edges (500, 900) must not appear — only the area edges remain.
+    expect(edges.x).not.toContain(500);
+    expect(edges.x).not.toContain(900);
+    expect(edges.x).toEqual([0, edges.areaW]);
+  });
+
+  test('resizing a dialog does not snap to another window edge', async ({ page }) => {
+    await openApp(page);
+    await uploadFile(page, '../test/sample1.csv');
+    await waitForWindow(page, 'sample1');
+
+    // Data window: right edge at 600 — a snap target for normal windows.
+    await page.evaluate(() => {
+      const dataWin = app._test.windows[0];
+      dataWin.el.style.left = '0px';
+      dataWin.el.style.top = '0px';
+      dataWin.el.style.width = '600px';
+      dataWin.el.style.height = '400px';
+    });
+
+    // Open a modal dialog and size it so its right edge sits just short of 600.
+    await page.keyboard.press('Control+n');
+    await expect(page.locator('.subwindow.dialog')).toHaveCount(1);
+    await page.evaluate(() => {
+      const dlg = app._test.windows.find(w => w.isDialog);
+      dlg.el.style.left = '100px';
+      dlg.el.style.top = '50px';
+      dlg.el.style.width = '485px'; // right edge at 585
+      dlg.el.style.height = '200px';
+    });
+
+    const handle = page.locator('.subwindow.dialog .resize-handle.rh-right');
+    const box = await handle.boundingBox();
+    const startX = box.x + box.width / 2;
+    const startY = box.y + box.height / 2;
+    await page.mouse.move(startX, startY);
+    await page.mouse.down();
+    // Drag right by 10px: right edge ~595, within SNAP_THRESHOLD (10) of 600.
+    await page.mouse.move(startX + 10, startY, { steps: 10 });
+
+    // No snap guides should appear while resizing a dialog.
+    const guideCount = await page.evaluate(() => document.querySelectorAll('.snap-guide').length);
+    expect(guideCount).toBe(0);
+
+    await page.mouse.up();
+
+    const rightEdge = await page.evaluate(() => {
+      const dlg = app._test.windows.find(w => w.isDialog);
+      return parseInt(dlg.el.style.left) + parseInt(dlg.el.style.width);
+    });
+    // A normal window would snap its right edge to 600. The dialog must not.
+    expect(rightEdge).not.toBe(600);
+    expect(rightEdge).toBeGreaterThanOrEqual(590);
+    expect(rightEdge).toBeLessThan(600);
+  });
+});

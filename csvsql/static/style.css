@@ -1868,6 +1868,54 @@ body {
   opacity: 0.9;
 }
 
+/* Modal dialog backdrop (dims the workspace behind a modal dialog subwindow) */
+.dialog-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+/* Form layout inside dialog-component subwindows (prompts, AI settings) */
+.dialog-form {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+.dialog-form .dialog-label {
+  display: block;
+  font-size: 12px;
+  margin-bottom: 4px;
+  color: var(--text);
+}
+
+.dialog-form label {
+  font-size: 12px;
+}
+
+.dialog-form input,
+.dialog-form textarea,
+.dialog-form select {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.dialog-form input:focus,
+.dialog-form textarea:focus,
+.dialog-form select:focus {
+  border-color: var(--accent);
+}
+
 /* ---- Context menu for rows ---- */
 .context-menu {
   position: fixed;
@@ -2218,7 +2266,7 @@ body.col-resizing * {
 
 .subwindow.col-manager-dimmed,
 .dock-container.col-manager-dimmed {
-  opacity: 0.4;
+  filter: brightness(0.5) grayscale(0.4);
   pointer-events: none;
-  transition: opacity 0.2s ease;
+  transition: filter 0.2s ease;
 }

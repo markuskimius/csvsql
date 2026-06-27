@@ -1238,6 +1238,44 @@ test.describe('Plugin system', () => {
     expect(text).toContain('customers.id');
   });
 
+  test('plugin About window is a dialog: resizable, no min/max, no status bar', async ({ page }) => {
+    await page.evaluate(async () => {
+      const json = JSON.stringify({
+        name: 'Appearance Plugin',
+        tables: [{ table: '.*', columns: [{ match: '^name$', display: 'upper(value)' }] }],
+      });
+      const file = new File([json], 'appearance.json', { type: 'application/json' });
+      await app._test.loadPluginFile(file);
+      app._test.showPluginAbout(app._test.plugins[0], 0);
+    });
+    await page.waitForTimeout(100);
+
+    const flags = await page.evaluate(() => {
+      const win = app._test.windows.find(w => w.title === 'Plugin: Appearance Plugin');
+      if (!win) return null;
+      return {
+        isDialog: !!win.isDialog,
+        dialogClass: win.el.classList.contains('dialog'),
+        dockable: win.dockable,
+        resizeHandles: win.el.querySelectorAll('.resize-handle').length,
+        minBtns: win.el.querySelectorAll('.btn-min').length,
+        maxBtns: win.el.querySelectorAll('.btn-max').length,
+        statusbars: win.el.querySelectorAll('.win-statusbar').length,
+        // Plugin About is NOT modal — no backdrop.
+        backdrops: document.querySelectorAll('.dialog-backdrop').length,
+      };
+    });
+    expect(flags).not.toBeNull();
+    expect(flags.isDialog).toBe(true);
+    expect(flags.dialogClass).toBe(true);
+    expect(flags.dockable).toBe(false);
+    expect(flags.resizeHandles).toBe(8);
+    expect(flags.minBtns).toBe(0);
+    expect(flags.maxBtns).toBe(0);
+    expect(flags.statusbars).toBe(0);
+    expect(flags.backdrops).toBe(0);
+  });
+
   test('validatePlugin accepts combo plugin with tables and links', async ({ page }) => {
     const errors = await page.evaluate(() => {
       return app._test.validatePlugin({
