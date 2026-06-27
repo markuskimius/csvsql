@@ -6301,8 +6301,6 @@ const app = (() => {
     function updateMenuState() {
       const hasActive = !!activeWinId;
       const hasAny = windows.length > 0;
-      document.getElementById('btn-save').disabled = !hasActive;
-      document.getElementById('btn-save-as').disabled = !hasActive;
       document.getElementById('btn-close-window').disabled = !hasActive;
       document.getElementById('btn-tile-h').disabled = !hasAny;
       document.getElementById('btn-tile-v').disabled = !hasAny;
@@ -6312,6 +6310,8 @@ const app = (() => {
       document.getElementById('btn-restore-all').disabled = !hasAny;
       const win = getActiveDataWindow();
       const t = win && win.tableName && tables[win.tableName];
+      document.getElementById('btn-save').disabled = !t;
+      document.getElementById('btn-save-as').disabled = !t;
       const undoEntry = t && t._undoStack && t._undoStack.length > 0 ? t._undoStack[t._undoStack.length - 1] : null;
       const redoEntry = t && t._redoStack && t._redoStack.length > 0 ? t._redoStack[t._redoStack.length - 1] : null;
       const actionLabel = (e) => e ? e.type.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase()).trim() : '';
@@ -6481,7 +6481,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.24 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.25 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `, true);

@@ -10,7 +10,7 @@ CSVSQL is a browser-based CSV database application. It treats CSV files as datab
 
 Single-page app with three core files:
 
-- **index.html** — Shell: menubar, workspace area, SQL console panel, hidden file input, CDN script tags
+- **index.html** — Shell: menubar, workspace area, SQL console panel, hidden file input, CDN script tags. File menu order: New Table, Open..., Open (no header)..., Open URL..., Open URL (no header)..., Save Table, Save Table As..., Close Window. Save Table and Save Table As are disabled when no table window is active (non-table windows like Manual, About, Expression Reference don't enable them); Close Window is enabled for any window type. `updateMenuState()` runs at menu-open time and uses `!!t` (table data) for Save/Save As, `!!activeWinId` for Close Window, `hasAny` for layout buttons
 - **style.css** — Dark theme styling, window management visuals, table layout
 - **app.js** — All application logic in a single IIFE (`app` module), exposing methods on the global `app` object
 
