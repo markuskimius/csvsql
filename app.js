@@ -14,6 +14,7 @@ const app = (() => {
   // Touch gesture state (shared across tables / windows)
   let _activeAutoFilter = null;            // { win, col, el } — currently open autofilter dropdown
   let _activePluginAboutWin = null;        // window object for the currently open plugin about window
+  let _activeColManagerWin = null;         // window object for the currently open column manager
   let _touchHeaderDrag = null;             // header 1.5-tap drag (→ reorder column)
   let _touchCellDrag = null;               // cell second-tap interaction (→ double-tap edit or 1.5-tap multi-select)
   let _touchWinDrag = null;                // titlebar 1.5-tap drag (→ move window)
@@ -910,8 +911,9 @@ const app = (() => {
     const x = opts.x ?? Math.min(cascadeOffset + 20, rect.width - w - 10);
     const y = opts.y ?? Math.min(cascadeOffset + 20, rect.height - h - 10);
 
+    const isDialog = !!opts.dialog;
     const el = document.createElement('div');
-    el.className = 'subwindow';
+    el.className = 'subwindow' + (isDialog ? ' dialog' : '');
     el.id = `win-${id}`;
     el.style.left = x + 'px';
     el.style.top = y + 'px';
@@ -923,21 +925,20 @@ const app = (() => {
       <div class="win-titlebar">
         <span class="win-title">${escHtml(title)}</span>
         <div class="win-controls">
-          <button class="btn-min" title="Minimize">&#8211;</button>
-          <button class="btn-max" title="Maximize">&#9633;</button>
+          ${isDialog ? '' : '<button class="btn-min" title="Minimize">&#8211;</button><button class="btn-max" title="Maximize">&#9633;</button>'}
           <button class="btn-close" title="Close">&#10005;</button>
         </div>
       </div>
       <div class="win-body"></div>
-      <div class="win-statusbar"><span class="status-left"></span><span class="status-center"></span><span class="status-right"></span></div>
-      <div class="resize-handle rh-top"></div>
+      ${isDialog ? '' : '<div class="win-statusbar"><span class="status-left"></span><span class="status-center"></span><span class="status-right"></span></div>'}
+      ${isDialog ? '' : `<div class="resize-handle rh-top"></div>
       <div class="resize-handle rh-bottom"></div>
       <div class="resize-handle rh-left"></div>
       <div class="resize-handle rh-right"></div>
       <div class="resize-handle rh-tl"></div>
       <div class="resize-handle rh-tr"></div>
       <div class="resize-handle rh-bl"></div>
-      <div class="resize-handle rh-br"></div>
+      <div class="resize-handle rh-br"></div>`}
     `;
 
     area.appendChild(el);
@@ -966,6 +967,7 @@ const app = (() => {
       dockId: null,
       dockLeaf: null,
       dockable: opts.dockable !== false,
+      isDialog: isDialog,
     };
     windows.push(winObj);
 
@@ -1007,6 +1009,13 @@ const app = (() => {
     const idx = windows.findIndex(w => w.id === id);
     if (idx === -1) return;
     const win = windows[idx];
+
+    finalizeColManager(id);
+
+    if (_activeColManagerWin && _activeColManagerWin._colManagerTableName === win.tableName && !win._colManagerTableName) {
+      closeColManager();
+    }
+
     if (win.tableName && tables[win.tableName]) {
       const t = tables[win.tableName];
       if (!win.isQuery && t.modified) {
@@ -1422,20 +1431,23 @@ const app = (() => {
     win.el.querySelector('.btn-close').addEventListener('click', (e) => {
       if (e.ctrlKey || e.metaKey) { closeAllWindows(); } else { closeWindow(win.id); }
     });
-    win.el.querySelector('.btn-min').addEventListener('click', () => minimizeWindow(win.id));
-    win.el.querySelector('.btn-max').addEventListener('click', () => toggleMaximize(win.id));
-    // Ctrl/Cmd-click title text to rename, double-click titlebar to maximize
+    const btnMin = win.el.querySelector('.btn-min');
+    const btnMax = win.el.querySelector('.btn-max');
+    if (btnMin) btnMin.addEventListener('click', () => minimizeWindow(win.id));
+    if (btnMax) btnMax.addEventListener('click', () => toggleMaximize(win.id));
     win.el.querySelector('.win-title').addEventListener('click', (e) => {
       if ((e.ctrlKey || e.metaKey) && win.tableName) {
         e.stopPropagation();
         startInlineRename(win);
       }
     });
-    win.el.querySelector('.win-titlebar').addEventListener('dblclick', (e) => {
-      if (e.target.tagName !== 'BUTTON') {
-        toggleMaximize(win.id);
-      }
-    });
+    if (!win.isDialog) {
+      win.el.querySelector('.win-titlebar').addEventListener('dblclick', (e) => {
+        if (e.target.tagName !== 'BUTTON') {
+          toggleMaximize(win.id);
+        }
+      });
+    }
   }
 
   function startInlineRename(win) {
@@ -5471,6 +5483,17 @@ const app = (() => {
     });
     menu.appendChild(delBtn);
 
+    const sep = document.createElement('hr');
+    menu.appendChild(sep);
+
+    const manageBtn = document.createElement('button');
+    manageBtn.textContent = 'Manage Columns…';
+    manageBtn.addEventListener('click', () => {
+      removeContextMenu();
+      showColManager(win.id);
+    });
+    menu.appendChild(manageBtn);
+
     document.body.appendChild(menu);
     setTimeout(() => {
       document.addEventListener('click', removeContextMenu, { once: true });
@@ -5596,6 +5619,13 @@ const app = (() => {
         if (focusMiddleCell(win)) e.preventDefault();
         return;
       }
+      if (e.key === 'Escape' && _activeColManagerWin) {
+        const tgt = e.target;
+        if (tgt && tgt.matches && tgt.matches('input, textarea, [contenteditable="true"], td.data-cell') && !tgt.matches('.col-manager-search')) return;
+        e.preventDefault();
+        closeColManager();
+        return;
+      }
       if (!(e.ctrlKey || e.metaKey)) return;
       if (e.shiftKey && (e.key === '1' || e.key === '2' || e.key === '3' || e.key === '4')) {
         const win = getActiveDataWindow();
@@ -5650,6 +5680,14 @@ const app = (() => {
           e.preventDefault();
           if (e.shiftKey) redoTable(win.tableName, win);
           else undoTable(win.tableName, win);
+          return;
+        }
+      }
+      if (e.shiftKey && e.key.toLowerCase() === 'm') {
+        const win = getActiveDataWindow();
+        if (win && win.tableName) {
+          e.preventDefault();
+          showColManager(win.id);
           return;
         }
       }
@@ -6219,6 +6257,10 @@ const app = (() => {
       const win = getActiveDataWindow();
       if (win && win.tableName) selectNoneCells(win);
     });
+    document.getElementById('btn-col-manager').addEventListener('click', () => {
+      const win = getActiveDataWindow();
+      if (win && win.tableName) showColManager(win.id);
+    });
 
     function updateMenuState() {
       const hasActive = !!activeWinId;
@@ -6249,6 +6291,7 @@ const app = (() => {
       document.getElementById('btn-paste').disabled = !(win && win.anchorCell);
       document.getElementById('btn-select-all').disabled = !(win && win.tableName && tables[win.tableName]);
       document.getElementById('btn-select-none').disabled = !hasSel;
+      document.getElementById('btn-col-manager').disabled = !(win && win.tableName && tables[win.tableName]);
     }
 
     function openItem(item) {
@@ -6403,7 +6446,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.21 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.22 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `);
@@ -6451,6 +6494,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <li><strong>Columns:</strong> Right-click a column header to insert a column to the right or delete. Right-click the <code>#</code> corner cell to insert a column at the beginning. <code>Ctrl</code>/<code>&#8984;</code>+click a column header to rename inline &mdash; duplicate names are rejected with a red border on the input.</li>
 <li><strong>Select a column:</strong> Click a column header to select it (highlighted) and sort it. Selection is the target for Ctrl+&larr;/&rarr;.</li>
 <li><strong>Reorder columns:</strong> Drag a column header to a new position. With a column selected by clicking its header, press <code>Ctrl</code>/<code>&#8984;</code>+<code>&larr;</code>/<code>&rarr;</code> to nudge it. With cells selected (in select mode, not editing), <code>Ctrl</code>/<code>&#8984;</code>+<code>&larr;</code>/<code>&rarr;</code> moves the columns spanned by the selection.</li>
+<li><strong>Column Manager:</strong> Open via <strong>Edit &rarr; Manage Columns&hellip;</strong>, <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>M</code>, or right-click a column header. Shows a searchable vertical list of all columns. Click to select, Shift+click for range, Ctrl/&#8984;+click to toggle. Drag to reorder within the list or drop onto the table&rsquo;s column headers. Use <code>Alt</code>+<code>&uarr;</code>/<code>&darr;</code> to move selected columns. Double-click a column name to scroll the table to it. All reorders are batched into a single undo entry when the manager closes.</li>
 <li><strong>Resize columns:</strong> Drag any column border to resize &mdash; the resize handle spans both sides of the divider line, including the <code>#</code> row-number column. Double-click the border to auto-fit the column to its content. When multiple columns are selected (e.g. via Ctrl+A), double-click auto-fits all selected columns, and drag-resize sets all selected columns to the dragged column&rsquo;s width on release. Column widths are fixed after initial load and survive sorting and filtering.</li>
 <li><strong>Rename tables:</strong> <code>Ctrl</code>/<code>&#8984;</code>+click the window title.</li>
 </ul>
@@ -8763,6 +8807,394 @@ ${_aiImageContext()}`;
     _activePluginAboutWin = win;
   }
 
+  // ---- Column Manager ----
+
+  function clearColManagerDimming() {
+    document.querySelectorAll('.col-manager-dimmed').forEach(el => el.classList.remove('col-manager-dimmed'));
+  }
+
+  function applyColManagerDimming(targetWinId, managerWinId) {
+    const targetWin = windows.find(w => w.id === targetWinId);
+    const targetDockId = targetWin && targetWin.dockId;
+    for (const w of windows) {
+      if (w.id === targetWinId || w.id === managerWinId) continue;
+      if (targetDockId && w.dockId === targetDockId) continue;
+      if (!w.dockId) w.el.classList.add('col-manager-dimmed');
+    }
+    for (const d of dockContainers) {
+      if (targetDockId && d.id === targetDockId) continue;
+      d.el.classList.add('col-manager-dimmed');
+    }
+  }
+
+  function closeColManager() {
+    if (!_activeColManagerWin) return;
+    clearColManagerDimming();
+    closeWindow(_activeColManagerWin.id);
+    _activeColManagerWin = null;
+  }
+
+  function showColManager(targetWinId) {
+    const targetWin = windows.find(w => w.id === targetWinId);
+    if (!targetWin || !targetWin.tableName || !tables[targetWin.tableName]) return;
+    const tableName = targetWin.tableName;
+
+    if (_activeColManagerWin) {
+      if (_activeColManagerWin._colManagerTableName === tableName) {
+        focusWindow(_activeColManagerWin.id);
+        return;
+      }
+      closeColManager();
+    }
+
+    const t = tables[tableName];
+    const area = document.getElementById('window-area');
+    const rect = area.getBoundingClientRect();
+    const w = Math.min(320, rect.width - 60);
+    const h = Math.min(500, rect.height - 40);
+
+    const snapshotColumns = [...t.columns];
+    const snapshotWidths = targetWin.colWidths ? [...targetWin.colWidths] : null;
+
+    const win = createSubwindow('Columns — ' + tableName, (winObj, body) => {
+      body.classList.add('col-manager-body');
+      body.innerHTML = '<div class="col-manager-search-wrap"><input class="col-manager-search" placeholder="Search columns…" spellcheck="false"></div>' +
+        '<div class="col-manager-list"></div>';
+
+      const searchInput = body.querySelector('.col-manager-search');
+      const listEl = body.querySelector('.col-manager-list');
+
+      let selected = new Set();
+      let lastClickIdx = null;
+      let dragState = null;
+
+      function getFilteredIndices() {
+        const q = searchInput.value.trim().toLowerCase();
+        const cols = tables[tableName] ? tables[tableName].columns : [];
+        if (!q) return cols.map((_, i) => i);
+        return cols.reduce((acc, c, i) => { if (c.toLowerCase().includes(q)) acc.push(i); return acc; }, []);
+      }
+
+      function renderList() {
+        const cols = tables[tableName] ? tables[tableName].columns : [];
+        const filtered = getFilteredIndices();
+        listEl.innerHTML = '';
+        for (const idx of filtered) {
+          const row = document.createElement('div');
+          row.className = 'col-manager-item' + (selected.has(idx) ? ' selected' : '');
+          row.dataset.colIdx = idx;
+          row.innerHTML = '<span class="col-manager-grip">≡</span>' +
+            '<span class="col-manager-idx">' + (idx + 1) + '</span>' +
+            '<span class="col-manager-name">' + escHtml(cols[idx]) + '</span>';
+          listEl.appendChild(row);
+        }
+      }
+
+      searchInput.addEventListener('input', renderList);
+
+      function scrollTableToColumn(colIdx) {
+        const tw = windows.find(w => w.id === targetWinId);
+        if (!tw) return;
+        tw.selectedCol = tables[tableName].columns[colIdx];
+        rebuildTable(tw);
+        const container = tw.bodyEl.querySelector('.table-container');
+        if (!container) return;
+        const th = container.querySelector('th[data-col-idx="' + colIdx + '"]');
+        if (th) {
+          th.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+        }
+        focusWindow(targetWinId);
+      }
+
+      let deferredSingleSelect = null;
+
+      listEl.addEventListener('mousedown', (e) => {
+        const item = e.target.closest('.col-manager-item');
+        if (!item) return;
+        const idx = parseInt(item.dataset.colIdx, 10);
+        if (isNaN(idx)) return;
+
+        if (e.detail === 2) {
+          scrollTableToColumn(idx);
+          return;
+        }
+
+        if (e.shiftKey && lastClickIdx != null) {
+          const from = Math.min(lastClickIdx, idx);
+          const to = Math.max(lastClickIdx, idx);
+          if (!e.ctrlKey && !e.metaKey) selected.clear();
+          for (let i = from; i <= to; i++) selected.add(i);
+        } else if (e.ctrlKey || e.metaKey) {
+          if (selected.has(idx)) selected.delete(idx);
+          else selected.add(idx);
+          lastClickIdx = idx;
+        } else if (selected.has(idx) && selected.size > 1) {
+          deferredSingleSelect = idx;
+        } else {
+          selected.clear();
+          selected.add(idx);
+          lastClickIdx = idx;
+        }
+        renderList();
+
+        if (e.target.closest('.col-manager-grip') || selected.size > 0) {
+          startDrag(e, idx);
+        }
+      });
+
+      listEl.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          if (selected.size === 1) scrollTableToColumn([...selected][0]);
+          return;
+        }
+        if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+          e.preventDefault();
+          moveSelected(e.key === 'ArrowUp' ? -1 : 1);
+          return;
+        }
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+          e.preventDefault();
+          const filtered = getFilteredIndices();
+          if (filtered.length === 0) return;
+          let focus = lastClickIdx != null ? lastClickIdx : filtered[0];
+          const pos = filtered.indexOf(focus);
+          const newPos = e.key === 'ArrowUp' ? Math.max(0, pos - 1) : Math.min(filtered.length - 1, pos + 1);
+          const newIdx = filtered[newPos];
+          if (!e.shiftKey) selected.clear();
+          selected.add(newIdx);
+          lastClickIdx = newIdx;
+          renderList();
+          const el = listEl.querySelector('[data-col-idx="' + newIdx + '"]');
+          if (el) el.scrollIntoView({ block: 'nearest' });
+          return;
+        }
+      });
+
+      function moveSelected(dir) {
+        const t = tables[tableName];
+        if (!t || selected.size === 0) return;
+        const indices = [...selected].sort((a, b) => a - b);
+        if (dir === -1 && indices[0] === 0) return;
+        if (dir === 1 && indices[indices.length - 1] >= t.columns.length - 1) return;
+
+        const cols = [...t.columns];
+        const tw = windows.find(w => w.id === targetWinId);
+        const widths = tw && tw.colWidths ? [...tw.colWidths] : null;
+
+        const newSelected = new Set();
+        if (dir === -1) {
+          for (const i of indices) {
+            const s = cols.splice(i, 1)[0];
+            const sw = widths ? widths.splice(i, 1)[0] : null;
+            cols.splice(i - 1, 0, s);
+            if (widths && sw != null) widths.splice(i - 1, 0, sw);
+            newSelected.add(i - 1);
+          }
+        } else {
+          for (let k = indices.length - 1; k >= 0; k--) {
+            const i = indices[k];
+            const s = cols.splice(i, 1)[0];
+            const sw = widths ? widths.splice(i, 1)[0] : null;
+            cols.splice(i + 1, 0, s);
+            if (widths && sw != null) widths.splice(i + 1, 0, sw);
+            newSelected.add(i + 1);
+          }
+        }
+
+        t.columns.length = 0;
+        t.columns.push(...cols);
+        if (tw && widths) tw.colWidths = [...widths];
+        markModified(tableName);
+        registerTable(tableName);
+        windows.filter(w => w.tableName === tableName).forEach(w => rebuildTable(w));
+
+        selected = newSelected;
+        lastClickIdx = [...newSelected][dir === -1 ? 0 : newSelected.size - 1];
+        renderList();
+        const el = listEl.querySelector('[data-col-idx="' + lastClickIdx + '"]');
+        if (el) el.scrollIntoView({ block: 'nearest' });
+      }
+
+      function startDrag(e, clickedIdx) {
+        if (e.button !== 0) return;
+        const startX = e.clientX;
+        const startY = e.clientY;
+        let dragging = false;
+        let ghost = null;
+        let indicator = null;
+        let dropTarget = null;
+
+        if (!selected.has(clickedIdx)) {
+          selected.clear();
+          selected.add(clickedIdx);
+          renderList();
+        }
+
+        function onMove(ev) {
+          const dx = ev.clientX - startX;
+          const dy = ev.clientY - startY;
+          if (!dragging && Math.abs(dx) + Math.abs(dy) < 5) return;
+
+          if (!dragging) {
+            dragging = true;
+            ghost = document.createElement('div');
+            ghost.className = 'col-manager-ghost';
+            const cols = tables[tableName] ? tables[tableName].columns : [];
+            const sorted = [...selected].sort((a, b) => a - b);
+            ghost.textContent = sorted.map(i => cols[i]).join(', ');
+            ghost.style.position = 'fixed';
+            ghost.style.zIndex = '99999';
+            ghost.style.pointerEvents = 'none';
+            document.body.appendChild(ghost);
+
+            indicator = document.createElement('div');
+            indicator.className = 'col-manager-drop-indicator';
+            indicator.style.display = 'none';
+            document.body.appendChild(indicator);
+          }
+
+          ghost.style.left = (ev.clientX + 12) + 'px';
+          ghost.style.top = (ev.clientY + 12) + 'px';
+
+          const overItem = document.elementFromPoint(ev.clientX, ev.clientY);
+          dropTarget = null;
+
+          const cmItem = overItem && overItem.closest('.col-manager-item');
+          if (cmItem && listEl.contains(cmItem)) {
+            const targetIdx = parseInt(cmItem.dataset.colIdx, 10);
+            if (!isNaN(targetIdx) && !selected.has(targetIdx)) {
+              const rect = cmItem.getBoundingClientRect();
+              const above = ev.clientY < rect.top + rect.height / 2;
+              dropTarget = { type: 'list', idx: targetIdx, above };
+              indicator.style.display = 'block';
+              indicator.style.left = rect.left + 'px';
+              indicator.style.width = rect.width + 'px';
+              indicator.style.top = (above ? rect.top : rect.bottom) - 1 + 'px';
+            }
+          }
+
+          const thEl = overItem && overItem.closest('th[data-col-idx]');
+          if (thEl) {
+            const tw = windows.find(w => w.id === targetWinId);
+            const container = tw && tw.bodyEl.querySelector('.table-container');
+            if (container && container.contains(thEl)) {
+              const targetIdx = parseInt(thEl.dataset.colIdx, 10);
+              if (!isNaN(targetIdx)) {
+                const rect = thEl.getBoundingClientRect();
+                const leftHalf = ev.clientX < rect.left + rect.width / 2;
+                dropTarget = { type: 'table', idx: leftHalf ? targetIdx : targetIdx + 1 };
+                indicator.style.display = 'block';
+                indicator.style.left = (leftHalf ? rect.left : rect.right) - 1 + 'px';
+                indicator.style.width = '2px';
+                indicator.style.top = rect.top + 'px';
+                indicator.style.height = rect.height + 'px';
+              }
+            }
+          }
+
+          if (!dropTarget) {
+            indicator.style.display = 'none';
+          }
+        }
+
+        function onUp(ev) {
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+          if (ghost) ghost.remove();
+          if (indicator) indicator.remove();
+
+          if (!dragging || !dropTarget) {
+            if (deferredSingleSelect != null) {
+              selected.clear();
+              selected.add(deferredSingleSelect);
+              lastClickIdx = deferredSingleSelect;
+              deferredSingleSelect = null;
+              renderList();
+            }
+            return;
+          }
+          deferredSingleSelect = null;
+
+          const t = tables[tableName];
+          if (!t) return;
+          const sortedSel = [...selected].sort((a, b) => a - b);
+          const movingCols = sortedSel.map(i => t.columns[i]);
+          const tw = windows.find(w => w.id === targetWinId);
+          const movingWidths = tw && tw.colWidths ? sortedSel.map(i => tw.colWidths[i]) : null;
+
+          let insertAt;
+          if (dropTarget.type === 'list') {
+            insertAt = dropTarget.above ? dropTarget.idx : dropTarget.idx + 1;
+          } else {
+            insertAt = dropTarget.idx;
+          }
+
+          const newCols = t.columns.filter((_, i) => !selected.has(i));
+          const newWidths = tw && tw.colWidths ? tw.colWidths.filter((_, i) => !selected.has(i)) : null;
+
+          const removedBefore = sortedSel.filter(i => i < insertAt).length;
+          const adjInsert = insertAt - removedBefore;
+
+          newCols.splice(adjInsert, 0, ...movingCols);
+          if (newWidths && movingWidths) newWidths.splice(adjInsert, 0, ...movingWidths);
+
+          t.columns.length = 0;
+          t.columns.push(...newCols);
+          if (tw && newWidths) tw.colWidths = [...newWidths];
+
+          markModified(tableName);
+          registerTable(tableName);
+          windows.filter(w => w.tableName === tableName).forEach(w => rebuildTable(w));
+
+          selected.clear();
+          for (let i = 0; i < movingCols.length; i++) selected.add(adjInsert + i);
+          lastClickIdx = adjInsert;
+          renderList();
+        }
+
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      }
+
+      winObj._colManagerTableName = tableName;
+      winObj._colManagerTargetWinId = targetWinId;
+      winObj._colManagerSnapshot = { columns: snapshotColumns, widths: snapshotWidths };
+      winObj._colManagerRenderList = renderList;
+
+      listEl.setAttribute('tabindex', '0');
+      renderList();
+      searchInput.focus();
+    }, { width: w, height: h, dockable: false, dialog: true });
+
+    _activeColManagerWin = win;
+    applyColManagerDimming(targetWinId, win.id);
+  }
+
+  function finalizeColManager(winId) {
+    if (!_activeColManagerWin || _activeColManagerWin.id !== winId) return;
+    clearColManagerDimming();
+    const win = _activeColManagerWin;
+    const tableName = win._colManagerTableName;
+    const snap = win._colManagerSnapshot;
+    const t = tables[tableName];
+    const tw = windows.find(w => w.id === win._colManagerTargetWinId);
+    _activeColManagerWin = null;
+
+    if (!t || !snap) return;
+
+    const changed = snap.columns.length !== t.columns.length ||
+      snap.columns.some((c, i) => c !== t.columns[i]);
+    if (!changed) return;
+
+    if (!t._undoStack) t._undoStack = [];
+    t._undoStack.push({ type: 'reorderColumn', columnUndo: {
+      oldColumns: snap.columns, newColumns: [...t.columns],
+      winId: tw ? tw.id : null,
+      oldWidths: snap.widths, newWidths: tw && tw.colWidths ? [...tw.colWidths] : null
+    } });
+    t._redoStack = [];
+  }
+
   function showExpressionReference() {
     showHelpWindow('Plugin Expression Reference', `
 <h4>Overview</h4>
@@ -8923,6 +9355,8 @@ choose(value, 'A', 'Active', 'I', 'Inactive')
         toggleMaximizeDock, getDropZone, detectDropTarget,
         autoFitAllColumns,
         updateTableWidth, selectAllCells, selectNoneCells,
+        showColManager, closeColManager, finalizeColManager,
+        get _activeColManagerWin() { return _activeColManagerWin; },
       }
     } : {}),
   };

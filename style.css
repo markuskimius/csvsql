@@ -2087,3 +2087,138 @@ body.col-resizing * {
   from { opacity: 1; transform: translateX(0); }
   to { opacity: 0; transform: translateX(40px); }
 }
+
+/* ---- Column Manager ---- */
+.subwindow.dialog {
+  min-width: 200px;
+  min-height: 100px;
+}
+
+.subwindow.dialog .win-titlebar {
+  height: 28px;
+}
+
+.col-manager-body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.col-manager-search-wrap {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.col-manager-search {
+  width: 100%;
+  padding: 5px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
+.col-manager-search:focus {
+  border-color: var(--accent);
+}
+
+.col-manager-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+  outline: none;
+}
+
+.col-manager-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.col-manager-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.col-manager-list::-webkit-scrollbar-thumb {
+  background: var(--scrollbar);
+  border-radius: 4px;
+}
+
+.col-manager-item {
+  display: flex;
+  align-items: center;
+  padding: 3px 8px;
+  cursor: default;
+  user-select: none;
+  font-size: 12px;
+  gap: 6px;
+}
+
+.col-manager-item:hover {
+  background: var(--surface2);
+}
+
+.col-manager-item.selected {
+  background: var(--accent);
+  color: #fff;
+}
+
+.col-manager-grip {
+  color: var(--text-dim);
+  cursor: grab;
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
+.col-manager-item.selected .col-manager-grip {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.col-manager-idx {
+  color: var(--text-dim);
+  font-size: 10px;
+  min-width: 24px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.col-manager-item.selected .col-manager-idx {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.col-manager-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.col-manager-ghost {
+  background: var(--accent);
+  color: #fff;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: inherit;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.col-manager-drop-indicator {
+  position: fixed;
+  height: 2px;
+  background: var(--accent);
+  z-index: 99999;
+  pointer-events: none;
+}
+
+.subwindow.col-manager-dimmed,
+.dock-container.col-manager-dimmed {
+  opacity: 0.4;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
