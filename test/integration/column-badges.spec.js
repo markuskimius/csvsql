@@ -280,6 +280,104 @@ test.describe('Column Header Badges', () => {
     expect(borderLeft).toBe('1px');
   });
 
+  test('sort number is visually inside ascending triangle', async ({ page }) => {
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.sortCols = [{ col: 'name', dir: 'asc' }, { col: 'email', dir: 'asc' }];
+      app._test.rebuildTable(win);
+    });
+    await page.waitForTimeout(100);
+
+    const pos = await page.evaluate(() => {
+      const badge = document.querySelector('.col-badge-sort.sort-asc');
+      const num = badge.querySelector('.sort-num');
+      const bRect = badge.getBoundingClientRect();
+      const nRect = num.getBoundingClientRect();
+      return {
+        numTop: nRect.top,
+        numBottom: nRect.bottom,
+        badgeTop: bRect.top,
+        badgeBottom: bRect.bottom,
+      };
+    });
+    expect(pos.numTop).toBeGreaterThanOrEqual(pos.badgeTop - 1);
+    expect(pos.numBottom).toBeLessThanOrEqual(pos.badgeBottom + 1);
+  });
+
+  test('sort number is visually inside descending triangle', async ({ page }) => {
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.sortCols = [{ col: 'name', dir: 'desc' }, { col: 'email', dir: 'desc' }];
+      app._test.rebuildTable(win);
+    });
+    await page.waitForTimeout(100);
+
+    const pos = await page.evaluate(() => {
+      const badge = document.querySelector('.col-badge-sort.sort-desc');
+      const num = badge.querySelector('.sort-num');
+      const bRect = badge.getBoundingClientRect();
+      const nRect = num.getBoundingClientRect();
+      return {
+        numTop: nRect.top,
+        numBottom: nRect.bottom,
+        badgeTop: bRect.top,
+        badgeBottom: bRect.bottom,
+      };
+    });
+    expect(pos.numTop).toBeGreaterThanOrEqual(pos.badgeTop - 1);
+    expect(pos.numBottom).toBeLessThanOrEqual(pos.badgeBottom + 1);
+  });
+
+  test('sort numbers are positioned consistently between asc and desc triangles', async ({ page }) => {
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.sortCols = [{ col: 'name', dir: 'asc' }, { col: 'email', dir: 'desc' }];
+      app._test.rebuildTable(win);
+    });
+    await page.waitForTimeout(100);
+
+    const pos = await page.evaluate(() => {
+      const ascBadge = document.querySelector('.col-badge-sort.sort-asc');
+      const descBadge = document.querySelector('.col-badge-sort.sort-desc');
+      const ascNum = ascBadge.querySelector('.sort-num');
+      const descNum = descBadge.querySelector('.sort-num');
+      const ascBRect = ascBadge.getBoundingClientRect();
+      const descBRect = descBadge.getBoundingClientRect();
+      const ascNRect = ascNum.getBoundingClientRect();
+      const descNRect = descNum.getBoundingClientRect();
+      return {
+        ascNumInside: ascNRect.top >= ascBRect.top - 1 && ascNRect.bottom <= ascBRect.bottom + 1,
+        descNumInside: descNRect.top >= descBRect.top - 1 && descNRect.bottom <= descBRect.bottom + 1,
+        ascBadgeHeight: ascBRect.height,
+        descBadgeHeight: descBRect.height,
+      };
+    });
+    expect(pos.ascNumInside).toBe(true);
+    expect(pos.descNumInside).toBe(true);
+    expect(pos.ascBadgeHeight).toBe(pos.descBadgeHeight);
+  });
+
+  test('descending sort number does not render below the triangle', async ({ page }) => {
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.sortCols = [{ col: 'name', dir: 'desc' }, { col: 'email', dir: 'asc' }];
+      app._test.rebuildTable(win);
+    });
+    await page.waitForTimeout(100);
+
+    const pos = await page.evaluate(() => {
+      const badge = document.querySelector('.col-badge-sort.sort-desc');
+      const num = badge.querySelector('.sort-num');
+      const bRect = badge.getBoundingClientRect();
+      const nRect = num.getBoundingClientRect();
+      return {
+        numBottom: nRect.bottom,
+        badgeBottom: bRect.bottom,
+      };
+    });
+    expect(pos.numBottom).toBeLessThanOrEqual(pos.badgeBottom + 1);
+  });
+
   test('sort number color is white for contrast', async ({ page }) => {
     await page.evaluate(() => {
       const win = app._test.windows[0];

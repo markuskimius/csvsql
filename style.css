@@ -564,7 +564,7 @@ body {
 }
 
 .col-badge-sort.sort-asc .sort-num { top: 1px; }
-.col-badge-sort.sort-desc .sort-num { top: -1px; }
+.col-badge-sort.sort-desc .sort-num { top: -8px; }
 
 .data-table th.col-dragging {
   opacity: 0.35;
