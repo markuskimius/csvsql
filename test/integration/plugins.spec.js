@@ -2646,7 +2646,7 @@ test.describe('Sort chip', () => {
     expect(th).toBeNull();
   });
 
-  test('clicking sort chip removes sort arrows from header', async ({ page }) => {
+  test('clicking sort chip removes sort badges from header', async ({ page }) => {
     await page.evaluate(() => {
       const win = app._test.windows[0];
       win.sortCols = [{ col: 'name', dir: 'asc' }];
@@ -2654,17 +2654,17 @@ test.describe('Sort chip', () => {
     });
     await page.waitForTimeout(100);
 
-    // Sort arrow should be present before clicking
-    let arrow = await page.$('th.sorted .sort-arrow');
-    expect(arrow).not.toBeNull();
+    // Sort badge should be present before clicking
+    let badge = await page.$('th.sorted .col-badge-sort');
+    expect(badge).not.toBeNull();
 
     // Click chip to clear sort
     await page.click('.status-chip-sort');
     await page.waitForTimeout(100);
 
-    // Sort arrows should be gone
-    arrow = await page.$('th.sorted .sort-arrow');
-    expect(arrow).toBeNull();
+    // Sort badge should be gone
+    badge = await page.$('th.sorted .col-badge-sort');
+    expect(badge).toBeNull();
 
     // sortCols should be empty
     const sortCols = await page.evaluate(() => app._test.windows[0].sortCols);

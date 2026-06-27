@@ -494,7 +494,6 @@ body {
 
 .data-table th.sorted {
   background: #2e2e4a;
-  border-bottom: 2px solid var(--accent);
 }
 
 .data-table th.sorted:hover {
@@ -514,12 +513,58 @@ body {
   outline: none;
 }
 
-.data-table th .sort-arrow {
-  margin-left: 4px;
-  font-size: 10px;
-  line-height: 1;
-  color: var(--accent-hover);
+.col-badges {
+  position: absolute;
+  top: 1px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  pointer-events: none;
 }
+
+.col-badge {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.col-badge-filter  { background: #55cc88; }
+.col-badge-link    { background: #55cccc; }
+.col-badge-format  { background: #dd88cc; }
+
+.col-badge-sort {
+  width: 0;
+  height: 0;
+  border-radius: 0;
+  background: none;
+  position: relative;
+}
+
+.col-badge-sort.sort-asc {
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-bottom: 8px solid #7c6ff7;
+}
+
+.col-badge-sort.sort-desc {
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 8px solid #7c6ff7;
+}
+
+.col-badge-sort .sort-num {
+  position: absolute;
+  font-size: 7px;
+  font-weight: 700;
+  color: #fff;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.col-badge-sort.sort-asc .sort-num { top: 1px; }
+.col-badge-sort.sort-desc .sort-num { top: -1px; }
 
 .data-table th.col-dragging {
   opacity: 0.35;
@@ -587,36 +632,6 @@ body {
   color: var(--accent);
 }
 
-.data-table th.sorted {
-  border-left: 2px solid var(--accent);
-}
-
-.data-table th.col-filtered {
-  border-left: 2px solid var(--success);
-}
-
-.data-table th.col-linked {
-  border-left: 2px solid #55aadd;
-}
-
-.data-table th.col-transformed {
-  border-left: 2px solid #dd88cc;
-}
-
-.data-table th.sorted.col-filtered {
-  border-left: 2px solid var(--success);
-  box-shadow: inset 2px 0 0 var(--accent);
-}
-
-.data-table th.sorted.col-linked {
-  border-left: 2px solid #55aadd;
-  box-shadow: inset 2px 0 0 var(--accent);
-}
-
-.data-table th.feature-disabled {
-  border-left-style: dashed;
-  opacity: 0.6;
-}
 
 .col-resize-handle {
   position: absolute;

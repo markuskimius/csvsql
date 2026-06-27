@@ -317,7 +317,7 @@ test.describe('Column AutoFilter', () => {
     expect(await page.locator('.data-table tbody tr:not(.virtual-pad)').count()).toBe(10);
   });
 
-  test('filter icon uses ☰ distinct from sort arrow ▲/▼', async ({ page }) => {
+  test('filter icon uses ☰ and sort badge appears on sort', async ({ page }) => {
     const th = page.locator('.data-table th:not(.row-num-header)').first();
 
     // Filter icon should be ☰
@@ -328,26 +328,25 @@ test.describe('Column AutoFilter', () => {
     await th.locator('.col-name').click();
     await page.waitForTimeout(300);
 
-    // Sort arrow should be ▲ or ▼, not ☰
-    const arrowText = await th.locator('.sort-arrow').textContent();
-    expect(arrowText.trim()).toMatch(/^[▲▼]/);
-    expect(arrowText.trim()).not.toContain('☰');
+    // Sort badge should appear
+    await expect(th.locator('.col-badge-sort')).toHaveCount(1);
   });
 
-  test('sort arrow and filter icon are vertically aligned', async ({ page }) => {
+  test('sort badge is positioned within the header cell', async ({ page }) => {
     const th = page.locator('.data-table th:not(.row-num-header)').first();
 
-    // Sort the column so both icons are visible
+    // Sort the column so badge is visible
     await th.locator('.col-name').click();
     await page.waitForTimeout(300);
 
-    const arrowBox = await th.locator('.sort-arrow').boundingBox();
-    const btnBox = await th.locator('.col-filter-btn').boundingBox();
+    const badgeBox = await th.locator('.col-badge-sort').boundingBox();
+    const thBox = await th.boundingBox();
 
-    // Vertical centers should be within 2px of each other
-    const arrowCenter = arrowBox.y + arrowBox.height / 2;
-    const btnCenter = btnBox.y + btnBox.height / 2;
-    expect(Math.abs(arrowCenter - btnCenter)).toBeLessThan(2);
+    // Badge should be inside the header cell bounds
+    expect(badgeBox.x).toBeGreaterThanOrEqual(thBox.x);
+    expect(badgeBox.x + badgeBox.width).toBeLessThanOrEqual(thBox.x + thBox.width + 1);
+    expect(badgeBox.y).toBeGreaterThanOrEqual(thBox.y);
+    expect(badgeBox.y + badgeBox.height).toBeLessThanOrEqual(thBox.y + thBox.height + 1);
   });
 
   test('Filtered chip not shown when no filters active', async ({ page }) => {

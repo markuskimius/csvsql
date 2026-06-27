@@ -3169,12 +3169,6 @@ const app = (() => {
       if (sortIdx !== -1) {
         th.classList.add('sorted');
         if (win.disableSort) th.classList.add('feature-disabled');
-        const arrow = document.createElement('span');
-        arrow.className = 'sort-arrow';
-        const dir = win.sortCols[sortIdx].dir;
-        arrow.textContent = dir === 'asc' ? '\u25B2' : '\u25BC';
-        if (win.sortCols.length > 1) arrow.textContent += (sortIdx + 1);
-        thInner.appendChild(arrow);
       }
       if (win.columnFilters[col]) {
         th.classList.add('col-filtered');
@@ -3189,7 +3183,6 @@ const app = (() => {
         if (win.disabledTransforms.size > 0 && win.disabledTransforms.has(col)) th.classList.add('feature-disabled');
       }
       if (win.selectedCol === col) th.classList.add('col-selected');
-      // AutoFilter button
       const filterBtn = document.createElement('span');
       filterBtn.className = 'col-filter-btn';
       if (win.columnFilters[col]) filterBtn.classList.add('active');
@@ -3203,6 +3196,39 @@ const app = (() => {
       });
       thInner.appendChild(filterBtn);
       th.appendChild(thInner);
+      const badgeDefs = [
+        { cls: 'link', active: !!win.linkFilters[col], hidden: !win.linkFilters[col] || win.disableLink },
+        { cls: 'format', active: hasDisplayTransform(win.tableName, col),
+          hidden: !hasDisplayTransform(win.tableName, col) || (win.disabledTransforms.size > 0 && win.disabledTransforms.has(col)) },
+        { cls: 'filter', active: !!win.columnFilters[col], hidden: !win.columnFilters[col] },
+        { cls: 'sort', active: sortIdx !== -1, hidden: sortIdx === -1,
+          dir: sortIdx !== -1 ? win.sortCols[sortIdx].dir : 'asc',
+          num: sortIdx !== -1 && win.sortCols.length > 1 ? sortIdx + 1 : null },
+      ];
+      if (badgeDefs.some(b => b.active)) {
+        const bc = document.createElement('span');
+        bc.className = 'col-badges';
+        for (const b of badgeDefs) {
+          if (b.cls === 'sort') {
+            const tri = document.createElement('span');
+            tri.className = 'col-badge col-badge-sort sort-' + b.dir;
+            if (b.hidden) tri.style.visibility = 'hidden';
+            if (b.num != null) {
+              const n = document.createElement('span');
+              n.className = 'sort-num';
+              n.textContent = b.num;
+              tri.appendChild(n);
+            }
+            bc.appendChild(tri);
+          } else {
+            const dot = document.createElement('span');
+            dot.className = 'col-badge col-badge-' + b.cls;
+            if (b.hidden) dot.style.visibility = 'hidden';
+            bc.appendChild(dot);
+          }
+        }
+        th.appendChild(bc);
+      }
 
       const leftHandle = document.createElement('div');
       leftHandle.className = 'col-resize-handle col-resize-left';
@@ -3479,7 +3505,7 @@ const app = (() => {
       win.anchorCell = { rownum: row._rownum, col };
       win.selectedCells = new Set([`${row._rownum}:${col}`]);
       win._copyWithHeader = false;
-      applyCellHighlights(win);
+      applyCellHighlights(win, true);
     });
 
     // Mouse multi-select: Shift+click extends; plain mousedown+drag sweeps a rectangle.
@@ -3501,7 +3527,7 @@ const app = (() => {
         const sel = window.getSelection && window.getSelection();
         if (sel && sel.removeAllRanges) sel.removeAllRanges();
         rebuildSelectionRect(win, di, ci);
-        applyCellHighlights(win);
+        applyCellHighlights(win, true);
       }
       dragState.lastDi = di;
       dragState.lastCi = ci;
@@ -3532,14 +3558,14 @@ const app = (() => {
           const col = win._columns[ci];
           win.anchorCell = { rownum: row._rownum, col };
           win.selectedCells = new Set([`${row._rownum}:${col}`]);
-          applyCellHighlights(win);
+          applyCellHighlights(win, true);
         }
       }
       if (e.shiftKey && win.anchorCell) {
         e.preventDefault();
         rebuildSelectionRect(win, di, ci);
         focusCellAt(win, di, ci);
-        applyCellHighlights(win);
+        applyCellHighlights(win, true);
         return;
       }
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey) {
@@ -3697,7 +3723,7 @@ const app = (() => {
           _touchCellDrag.lastDi = c.di;
           _touchCellDrag.lastCi = c.ci;
           rebuildSelectionRect(win, c.di, c.ci);
-          applyCellHighlights(win);
+          applyCellHighlights(win, true);
         }
       }
     }, { passive: false });
@@ -3868,7 +3894,7 @@ const app = (() => {
           td.blur();
           win.selectedCells = new Set();
           win.anchorCell = null;
-          applyCellHighlights(win);
+          applyCellHighlights(win, true);
         }
       }
     });
@@ -3957,15 +3983,23 @@ const app = (() => {
     const statusCenter = win.statusbarEl.querySelector('.status-center');
     statusCenter.innerHTML = '';
     const chips = [
+      { key: 'link', label: 'Linked', active: hasLinkFilters || win.disableLink, disabled: win.disableLink,
+        title: (on) => on ? 'Link filters enabled \u2014 click to suspend' : 'Link filters suspended \u2014 click to resume',
+        toggle: () => { win.disableLink = !win.disableLink; } },
       { key: 'link-source', label: 'Linking', active: win.id === _activeLinkSourceId || win.disableLinkSource, disabled: win.disableLinkSource,
         title: (on) => on ? 'Linking to other tables \u2014 click to suspend' : 'Linking suspended \u2014 click to resume',
         toggle: () => {
           win.disableLinkSource = !win.disableLinkSource;
           if (win.disableLinkSource) clearLinkFilters(win);
+          else applyLinkFilters(win);
         } },
-      { key: 'sort', label: 'Sorted', active: hasSortCols, disabled: false,
-        title: () => 'Click to clear sort',
-        toggle: () => { win.sortCols = []; win.disableSort = false; } },
+      { key: 'format', label: 'Formatted', active: hasTransforms, disabled: hasTransforms && transformedCols.every(c => win.disabledTransforms.has(c)),
+        title: (on) => on ? 'Formatting enabled \u2014 click to suspend' : 'Formatting suspended \u2014 click to resume',
+        toggle: () => {
+          const allOff = transformedCols.every(c => win.disabledTransforms.has(c));
+          if (allOff) transformedCols.forEach(c => win.disabledTransforms.delete(c));
+          else transformedCols.forEach(c => win.disabledTransforms.add(c));
+        } },
       { key: 'filter', label: 'Filtered', active: anyFilters, disabled: false,
         title: () => 'Click to clear filters',
         toggle: () => {
@@ -3975,16 +4009,9 @@ const app = (() => {
           const filterInput = win.bodyEl.querySelector('.filter-input');
           if (filterInput) filterInput.value = '';
         } },
-      { key: 'link', label: 'Linked', active: hasLinkFilters || win.disableLink, disabled: win.disableLink,
-        title: (on) => on ? 'Link filters enabled \u2014 click to suspend' : 'Link filters suspended \u2014 click to resume',
-        toggle: () => { win.disableLink = !win.disableLink; } },
-      { key: 'format', label: 'Formatted', active: hasTransforms, disabled: hasTransforms && transformedCols.every(c => win.disabledTransforms.has(c)),
-        title: (on) => on ? 'Formatting enabled \u2014 click to suspend' : 'Formatting suspended \u2014 click to resume',
-        toggle: () => {
-          const allOff = transformedCols.every(c => win.disabledTransforms.has(c));
-          if (allOff) transformedCols.forEach(c => win.disabledTransforms.delete(c));
-          else transformedCols.forEach(c => win.disabledTransforms.add(c));
-        } },
+      { key: 'sort', label: 'Sorted', active: hasSortCols, disabled: false,
+        title: () => 'Click to clear sort',
+        toggle: () => { win.sortCols = []; win.disableSort = false; } },
     ];
     for (const chip of chips) {
       if (!chip.active) continue;
@@ -4266,7 +4293,7 @@ const app = (() => {
     win.selectedCells = new Set();
     win.anchorCell = null;
     win._copyWithHeader = false;
-    applyCellHighlights(win);
+    applyCellHighlights(win, true);
   }
 
   function selectAllCells(win) {
@@ -4280,7 +4307,7 @@ const app = (() => {
     }
     win.anchorCell = { rownum: win._displayRows[0]._rownum, col: win._columns[0] };
     win._copyWithHeader = true;
-    applyCellHighlights(win);
+    applyCellHighlights(win, true);
     refocusAnchorCell(win);
   }
 
@@ -4298,7 +4325,7 @@ const app = (() => {
     }
     win.anchorCell = { rownum: win._displayRows[fromDi]._rownum, col: win._columns[0] };
     win._copyWithHeader = true;
-    applyCellHighlights(win);
+    applyCellHighlights(win, true);
   }
 
   async function pasteAtAnchor(win) {
@@ -4593,7 +4620,7 @@ const app = (() => {
     if (newDisplay === displayIdx && newCol === colIdx) return; // at edge
     rebuildSelectionRect(win, newDisplay, newCol);
     focusCellAt(win, newDisplay, newCol);
-    applyCellHighlights(win);
+    applyCellHighlights(win, true);
   }
 
   function moveSingleCellSelection(win, tr, td, key) {
@@ -4615,7 +4642,7 @@ const app = (() => {
     win.anchorCell = { rownum: row._rownum, col };
     win.selectedCells = new Set([`${row._rownum}:${col}`]);
     focusCellAt(win, newDisplay, newCol);
-    applyCellHighlights(win);
+    applyCellHighlights(win, true);
   }
 
   function focusCellAt(win, displayIdx, colIdx) {
@@ -4682,7 +4709,7 @@ const app = (() => {
     if (win.maximized) win.maximized = false;
   }
 
-  function applyCellHighlights(win) {
+  function applyCellHighlights(win, selectionDriven) {
     const tbody = win._tbody;
     const table = win._table;
     if (!tbody || !table) return;
@@ -4719,9 +4746,9 @@ const app = (() => {
         td.classList.toggle('cell-selected', selected.has(`${row._rownum}:${name}`));
       }
     }
-    if (_linkCache.length > 0) {
+    if (_linkCache.length > 0 && selectionDriven) {
       if (selected.size > 0 && !win.disableLinkSource) applyLinkFilters(win);
-      else clearLinkFilters(win);
+      else if (win.id === _activeLinkSourceId) clearLinkFilters(win);
     }
   }
 
@@ -6481,7 +6508,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.25 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.26 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `, true);
@@ -6545,11 +6572,12 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <h4>Sorting &amp; Filtering</h4>
 <ul>
 <li><strong>Sort:</strong> Click a column header to sort ascending &rarr; descending &rarr; unsorted.</li>
-<li><strong>Multi-column sort:</strong> Shift+click additional column headers. Numbers next to arrows indicate sort priority.</li>
+<li><strong>Multi-column sort:</strong> Shift+click additional column headers. Numbers inside triangle badges indicate sort priority.</li>
 <li><strong>Filter:</strong> Type a SQL <code>WHERE</code> clause in the filter bar (without the <code>WHERE</code> keyword). For example: <code>age > 30 AND name LIKE '%Smith%'</code></li>
 <li>The filter supports all SQLite expressions including <code>REGEXP</code> (see below).</li>
-<li><strong>Column autofilter:</strong> Click the <code>&#x2630;</code> icon on any column header to open a dropdown with checkboxes for each unique value. Use the search box to narrow the list. Uncheck values and click Apply to hide matching rows. Multiple column filters AND together and combine with the WHERE filter bar. Filtered columns show a green left border. Click Clear to remove a column&rsquo;s filter. Click the Filtered chip in the status bar to clear all column autofilters and the WHERE filter at once.</li>
-<li><strong>Status chips:</strong> When sorting, filtering, linking, or formatting is active on a window, labeled chips appear in the status bar center. <strong>Sorted</strong> and <strong>Filtered</strong> chips clear the sort or filters when clicked (the chip disappears). <strong>Linked</strong> (on target tables receiving link filters) and <strong>Formatted</strong> chips toggle suspend/resume &mdash; suspended features show the chip with strikethrough and a dashed left border on affected column headers. A <strong>Linking</strong> chip appears on the source table driving link filters; click to suspend/resume outbound linking. Keyboard shortcuts: <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>1</code> (clear sort), <code>2</code> (clear filters), <code>3</code> (toggle link), <code>4</code> (toggle format).</li>
+<li><strong>Column autofilter:</strong> Click the <code>&#x2630;</code> icon on any column header to open a dropdown with checkboxes for each unique value. Use the search box to narrow the list. Uncheck values and click Apply to hide matching rows. Multiple column filters AND together and combine with the WHERE filter bar. Filtered columns show a green dot badge at the top-right of the header. Click Clear to remove a column&rsquo;s filter. Click the Filtered chip in the status bar to clear all column autofilters and the WHERE filter at once.</li>
+<li><strong>Status chips:</strong> When sorting, filtering, linking, or formatting is active on a window, labeled chips appear in the status bar center in order: Linked/Linking, Formatted, Filtered, Sorted. <strong>Sorted</strong> and <strong>Filtered</strong> chips clear the sort or filters when clicked (the chip disappears). <strong>Linked</strong> (on target tables receiving link filters) and <strong>Formatted</strong> chips toggle suspend/resume &mdash; suspended features show the chip with strikethrough. A <strong>Linking</strong> chip appears on the source table driving link filters; click to suspend/resume outbound linking. Keyboard shortcuts: <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>1</code> (clear sort), <code>2</code> (clear filters), <code>3</code> (toggle link), <code>4</code> (toggle format).</li>
+<li><strong>Column badges:</strong> Small colored badges at the top-right of column headers indicate active features. Badge order (left to right): linked (teal dot), formatted (pink dot), filtered (green dot), sorted (purple triangle). Badge colors match the status bar chips. All four badge slots are reserved so badges stay in fixed positions regardless of which are active. Suspended features hide their badge without shifting neighbors.</li>
 </ul>
 
 <h4>SQL Console</h4>
@@ -6706,9 +6734,9 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 }</pre>
 <p>The <code>version</code>, <code>author</code>, <code>created</code>, and <code>description</code> fields are optional metadata shown in the About dialog. The <code>tables</code> array and <code>links</code> array are both optional &mdash; a plugin can have just display rules, just links, or both.</p>
 
-<p><strong>Cross-table linking:</strong> The <code>links</code> array defines relationships between tables. When you select rows in a source table, the target table is automatically filtered to matching values. Links propagate transitively &mdash; selecting a product filters orders for that product, which in turn filters customers who placed those orders. All patterns are regex. The source table is excluded from its own link targets. Link filters are shown with a blue left border on the column header and a <strong>Linked</strong> chip (teal) on target tables. A <strong>Linking</strong> chip (blue) appears on the source table driving the filters; click to suspend/resume outbound linking &mdash; the chip stays visible when suspended so it can be re-enabled. When a table receives link filters from a new source, any previously suspended Linking state on that table is reset. Clearing the selection clears the link filter. Link filters are separate from manual column autofilters.</p>
+<p><strong>Cross-table linking:</strong> The <code>links</code> array defines relationships between tables. When you select rows in a source table, the target table is automatically filtered to matching values. Links propagate transitively &mdash; selecting a product filters orders for that product, which in turn filters customers who placed those orders. All patterns are regex. The source table is excluded from its own link targets. Link-filtered columns show a teal dot badge at the top-right of the header and a <strong>Linked</strong> chip (teal) on target tables. A <strong>Linking</strong> chip (blue) appears on the source table driving the filters; click to suspend/resume outbound linking &mdash; the chip stays visible when suspended so it can be re-enabled. When a table receives link filters from a new source, any previously suspended Linking state on that table is reset. Clearing the selection clears the link filter. Link filters are separate from manual column autofilters.</p>
 
-<p><strong>Toggle:</strong> Columns with an active plugin transform show a pink left border. The <strong>Formatted</strong> chip in the status bar toggles all transforms on/off (<code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>4</code>). A <strong>Sorted</strong> chip appears when sort is active (click to clear), and a <strong>Filtered</strong> chip when filters are active (click to clear).</p>
+<p><strong>Toggle:</strong> Columns with an active plugin transform show a pink dot badge at the top-right of the header. The <strong>Formatted</strong> chip in the status bar toggles all transforms on/off (<code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>4</code>). A <strong>Sorted</strong> chip appears when sort is active (click to clear), and a <strong>Filtered</strong> chip when filters are active (click to clear).</p>
 
 <p><strong>Editing:</strong> When you enter edit mode on a cell with a display transform, the raw value is shown so you edit the actual data. The formatted display returns when you finish editing.</p>
 
