@@ -378,7 +378,7 @@ test.describe('Column Header Badges', () => {
     expect(pos.numBottom).toBeLessThanOrEqual(pos.badgeBottom + 1);
   });
 
-  test('sort number color is dark for contrast against gold badge', async ({ page }) => {
+  test('sort number color is dark for contrast against orange badge', async ({ page }) => {
     await page.evaluate(() => {
       const win = app._test.windows[0];
       win.sortCols = [{ col: 'name', dir: 'asc' }, { col: 'email', dir: 'desc' }];
@@ -391,7 +391,7 @@ test.describe('Column Header Badges', () => {
     expect(color).toBe('rgb(26, 26, 46)');
   });
 
-  test('sort badge triangle color is gold', async ({ page }) => {
+  test('sort badge triangle color is orange', async ({ page }) => {
     await page.evaluate(() => {
       const win = app._test.windows[0];
       win.sortCols = [{ col: 'name', dir: 'asc' }];
@@ -401,10 +401,10 @@ test.describe('Column Header Badges', () => {
 
     const ascColor = await page.$eval('.col-badge-sort.sort-asc',
       el => getComputedStyle(el).borderBottomColor);
-    expect(ascColor).toBe('rgb(250, 204, 21)');
+    expect(ascColor).toBe('rgb(245, 158, 11)');
   });
 
-  test('descending sort badge triangle color is gold', async ({ page }) => {
+  test('descending sort badge triangle color is orange', async ({ page }) => {
     await page.evaluate(() => {
       const win = app._test.windows[0];
       win.sortCols = [{ col: 'name', dir: 'desc' }];
@@ -414,10 +414,10 @@ test.describe('Column Header Badges', () => {
 
     const descColor = await page.$eval('.col-badge-sort.sort-desc',
       el => getComputedStyle(el).borderTopColor);
-    expect(descColor).toBe('rgb(250, 204, 21)');
+    expect(descColor).toBe('rgb(245, 158, 11)');
   });
 
-  test('sort status chip has gold text color', async ({ page }) => {
+  test('sort status chip has orange text color', async ({ page }) => {
     await page.evaluate(() => {
       const win = app._test.windows[0];
       win.sortCols = [{ col: 'name', dir: 'asc' }];
@@ -427,7 +427,7 @@ test.describe('Column Header Badges', () => {
 
     const chipColor = await page.$eval('.status-chip-sort',
       el => getComputedStyle(el).color);
-    expect(chipColor).toBe('rgb(250, 204, 21)');
+    expect(chipColor).toBe('rgb(245, 158, 11)');
   });
 
   test('badges have pointer-events none so they do not block clicks', async ({ page }) => {

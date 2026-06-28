@@ -6508,7 +6508,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.28 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.29 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `, true);
@@ -6577,7 +6577,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <li>The filter supports all SQLite expressions including <code>REGEXP</code> (see below).</li>
 <li><strong>Column autofilter:</strong> Click the <code>&#x2630;</code> icon on any column header to open a dropdown with checkboxes for each unique value. Use the search box to narrow the list. Uncheck values and click Apply to hide matching rows. Multiple column filters AND together and combine with the WHERE filter bar. Filtered columns show a green dot badge at the top-right of the header. Click Clear to remove a column&rsquo;s filter. Click the Filtered chip in the status bar to clear all column autofilters and the WHERE filter at once.</li>
 <li><strong>Status chips:</strong> When sorting, filtering, linking, or formatting is active on a window, labeled chips appear in the status bar center in order: Linked/Linking, Formatted, Filtered, Sorted. <strong>Sorted</strong> and <strong>Filtered</strong> chips clear the sort or filters when clicked (the chip disappears). <strong>Linked</strong> (on target tables receiving link filters) and <strong>Formatted</strong> chips toggle suspend/resume &mdash; suspended features show the chip with strikethrough. A <strong>Linking</strong> chip appears on the source table driving link filters; click to suspend/resume outbound linking. Keyboard shortcuts: <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>1</code> (clear sort), <code>2</code> (clear filters), <code>3</code> (toggle link), <code>4</code> (toggle format).</li>
-<li><strong>Column badges:</strong> Small colored badges at the top-right of column headers indicate active features. Badge order (left to right): linked (teal dot), formatted (pink dot), filtered (green dot), sorted (gold triangle). Badge colors match the status bar chips. All four badge slots are reserved so badges stay in fixed positions regardless of which are active. Suspended features hide their badge without shifting neighbors.</li>
+<li><strong>Column badges:</strong> Small colored badges at the top-right of column headers indicate active features. Badge order (left to right): linked (teal dot), formatted (pink dot), filtered (green dot), sorted (orange triangle). Badge colors match the status bar chips. All four badge slots are reserved so badges stay in fixed positions regardless of which are active. Suspended features hide their badge without shifting neighbors.</li>
 </ul>
 
 <h4>SQL Console</h4>

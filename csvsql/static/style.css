@@ -545,13 +545,13 @@ body {
 .col-badge-sort.sort-asc {
   border-left: 5px solid transparent;
   border-right: 5px solid transparent;
-  border-bottom: 8px solid #facc15;
+  border-bottom: 8px solid #f59e0b;
 }
 
 .col-badge-sort.sort-desc {
   border-left: 5px solid transparent;
   border-right: 5px solid transparent;
-  border-top: 8px solid #facc15;
+  border-top: 8px solid #f59e0b;
 }
 
 .col-badge-sort .sort-num {
@@ -889,8 +889,8 @@ body {
 }
 
 .status-chip-sort {
-  color: #facc15;
-  background: rgba(250, 204, 21, 0.15);
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.15);
 }
 
 .status-chip-filter {
