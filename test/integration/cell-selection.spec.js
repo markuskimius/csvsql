@@ -104,26 +104,28 @@ test.describe('Cell row/column highlight', () => {
   });
 
   test('selection survives column reorder (keyed by name, not index)', async ({ page }) => {
-    const firstCell = page.locator('.subwindow table tbody td.data-cell').first();
-    await firstCell.click();
-    // Extend to both columns of row 1
-    await page.keyboard.press('Shift+ArrowRight');
-    await page.waitForTimeout(100);
-
-    // Reorder: select "name" column header, then Ctrl+Right to swap with email
+    // Click header to select entire "name" column, then Ctrl+Right to swap with email
     const nameHeader = page.locator('.subwindow table thead th').nth(1);
     await nameHeader.click();
+    await page.waitForTimeout(100);
+
+    const selBefore = await getSelection(page, 'sample1');
+    // All 10 rows of name column selected
+    expect(selBefore.cells.length).toBe(10);
+    expect(selBefore.cells.every(c => c.endsWith(':name'))).toBe(true);
+
     await page.evaluate(() => document.body.focus());
     await page.keyboard.press('Control+ArrowRight');
     await page.waitForTimeout(200);
 
     const sel = await getSelection(page, 'sample1');
-    // Selection keys reference column names — still the two cells of rownum 1
-    expect(sel.cells).toEqual(['1:email', '1:name']);
+    // Selection keys reference column names — all name cells survive reorder
+    expect(sel.cells.length).toBe(10);
+    expect(sel.cells.every(c => c.endsWith(':name'))).toBe(true);
 
-    // Both TH should still have col-highlight (by name, via applyCellHighlights)
+    // name TH should still have col-highlight (by name, via applyCellHighlights)
     const highlightedTh = page.locator('.subwindow table thead th.col-highlight');
-    await expect(highlightedTh).toHaveCount(2);
+    await expect(highlightedTh).toHaveCount(1);
   });
 
   test('Shift+click extends selection from existing anchor', async ({ page }) => {
@@ -165,33 +167,34 @@ test.describe('Cell row/column highlight', () => {
     expect(sel2.cells.length).toBe(8); // now 4 rows × 2 cols
   });
 
-  test('Ctrl+Right moves the selection\'s columns right', async ({ page }) => {
-    // Need 3 columns to see a move. Create via SQL.
-    await executeSQL(page, "SELECT 'x' AS a, 'y' AS b, 'z' AS c");
-    const qName = await page.evaluate(() => {
-      const w = app._test.windows.find(w => w.isQuery);
-      return w ? w.tableName : null;
-    });
-    expect(qName).toBeTruthy();
+  test('Ctrl+Arrow reorder requires column header selection', async ({ page }) => {
+    const cols0 = await page.evaluate(() => [...app._test.tables['sample1'].columns]);
 
-    // Click first cell in the query window (column a), extend to b via Shift+Right.
-    const firstCell = page.locator(`.subwindow.active table tbody td.data-cell`).first();
+    // Select a cell — Ctrl+Right should NOT reorder
+    const firstCell = page.locator('.subwindow table tbody td.data-cell').first();
     await firstCell.click();
-    await page.keyboard.press('Shift+ArrowRight');
-    await page.waitForTimeout(100);
+    await page.keyboard.press('Control+ArrowRight');
+    await page.waitForTimeout(150);
+    const cols1 = await page.evaluate(() => [...app._test.tables['sample1'].columns]);
+    expect(cols1).toEqual(cols0);
 
-    // Ctrl+Right: block {a,b} shifts right; column c moves to index 0.
+    // Select a row — Ctrl+Right should NOT reorder
+    await page.locator('.subwindow table tbody td.row-num').first().click();
+    await page.waitForTimeout(100);
+    await page.evaluate(() => document.body.focus());
+    await page.keyboard.press('Control+ArrowRight');
+    await page.waitForTimeout(150);
+    const cols2 = await page.evaluate(() => [...app._test.tables['sample1'].columns]);
+    expect(cols2).toEqual(cols0);
+
+    // Select column via header — Ctrl+Right SHOULD reorder
+    const firstHeader = page.locator('.subwindow table thead th').nth(1);
+    await firstHeader.click();
+    await page.evaluate(() => document.body.focus());
     await page.keyboard.press('Control+ArrowRight');
     await page.waitForTimeout(200);
-
-    const cols = await page.evaluate((name) => [...app._test.tables[name].columns], qName);
-    expect(cols).toEqual(['c', 'a', 'b']);
-
-    // Ctrl+Left undoes it.
-    await page.keyboard.press('Control+ArrowLeft');
-    await page.waitForTimeout(200);
-    const cols2 = await page.evaluate((name) => [...app._test.tables[name].columns], qName);
-    expect(cols2).toEqual(['a', 'b', 'c']);
+    const cols3 = await page.evaluate(() => [...app._test.tables['sample1'].columns]);
+    expect(cols3).toEqual(['email', 'name', 'member_since']);
   });
 
   test('Ctrl+Arrow at edge is a no-op', async ({ page }) => {

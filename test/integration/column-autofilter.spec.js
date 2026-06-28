@@ -197,8 +197,8 @@ test.describe('Column AutoFilter', () => {
     await page.waitForTimeout(300);
     expect(await page.locator('.data-table tbody tr:not(.virtual-pad)').count()).toBe(9);
 
-    // Sort by clicking the header text
-    await th.locator('.col-name').click();
+    // Sort by clicking the sort badge
+    await th.locator('.col-badge-sort').click();
     await page.waitForTimeout(300);
 
     // Filter should still be active
@@ -332,25 +332,26 @@ test.describe('Column AutoFilter', () => {
     await expect(th.locator('.col-badge-sort')).toHaveCount(1);
   });
 
-  test('sort badge is positioned within the header cell', async ({ page }) => {
+  test('sort badge is inline in header cell next to filter button', async ({ page }) => {
     const th = page.locator('.data-table th:not(.row-num-header)').first();
 
-    // Sort the column so badge is visible
+    // Sort the column so badge is filled
     await th.locator('.col-name').click();
     await page.waitForTimeout(300);
 
-    const badgeBox = await th.locator('.col-badge-sort').boundingBox();
-    const thBox = await th.boundingBox();
+    const sortBadge = th.locator('.th-inner .col-badge-sort');
+    const filterBtn = th.locator('.th-inner .col-filter-btn');
+    expect(await sortBadge.count()).toBe(1);
+    expect(await filterBtn.count()).toBe(1);
 
-    // Badge should be inside the header cell bounds
-    expect(badgeBox.x).toBeGreaterThanOrEqual(thBox.x);
-    expect(badgeBox.x + badgeBox.width).toBeLessThanOrEqual(thBox.x + thBox.width + 1);
-    expect(badgeBox.y).toBeGreaterThanOrEqual(thBox.y);
-    expect(badgeBox.y + badgeBox.height).toBeLessThanOrEqual(thBox.y + thBox.height + 1);
+    // Sort badge should be to the left of filter button
+    const sortBox = await sortBadge.boundingBox();
+    const filterBox = await filterBtn.boundingBox();
+    expect(sortBox.x + sortBox.width).toBeLessThanOrEqual(filterBox.x + 2);
   });
 
   test('Filtered chip not shown when no filters active', async ({ page }) => {
-    await expect(page.locator('.status-chip-filter')).toHaveCount(0);
+    await expect(page.locator('.status-chip-filter.chip-inactive')).toHaveCount(1);
     const statusText = await page.locator('.status-left').textContent();
     expect(statusText).toBe('10 of 10 rows');
   });
@@ -363,7 +364,7 @@ test.describe('Column AutoFilter', () => {
     await page.locator('.autofilter-dropdown .autofilter-apply').click();
     await page.waitForTimeout(300);
 
-    await expect(page.locator('.status-chip-filter')).toHaveCount(1);
+    await expect(page.locator('.status-chip-filter:not(.chip-inactive)')).toHaveCount(1);
     expect(await page.locator('.status-chip-filter').textContent()).toBe('Filtered');
   });
 
@@ -372,7 +373,7 @@ test.describe('Column AutoFilter', () => {
     await filterInput.fill("name LIKE '%Alice%'");
     await page.waitForTimeout(500);
 
-    await expect(page.locator('.status-chip-filter')).toHaveCount(1);
+    await expect(page.locator('.status-chip-filter:not(.chip-inactive)')).toHaveCount(1);
   });
 
   test('Filtered chip clears column autofilters when clicked', async ({ page }) => {
@@ -397,11 +398,11 @@ test.describe('Column AutoFilter', () => {
     await page.locator('.status-chip-filter').click();
     await page.waitForTimeout(300);
 
-    // All rows back, no filtered indicators, chip gone
+    // All rows back, no filtered indicators, chip inactive
     expect(await page.locator('.data-table tbody tr:not(.virtual-pad)').count()).toBe(10);
     await expect(page.locator('.data-table th.col-filtered')).toHaveCount(0);
     await expect(page.locator('.col-filter-btn.active')).toHaveCount(0);
-    await expect(page.locator('.status-chip-filter')).toHaveCount(0);
+    await expect(page.locator('.status-chip-filter.chip-inactive')).toHaveCount(1);
   });
 
   test('Filtered chip clears WHERE filter text when clicked', async ({ page }) => {
@@ -415,7 +416,7 @@ test.describe('Column AutoFilter', () => {
 
     expect(await filterInput.inputValue()).toBe('');
     expect(await page.locator('.data-table tbody tr:not(.virtual-pad)').count()).toBe(10);
-    await expect(page.locator('.status-chip-filter')).toHaveCount(0);
+    await expect(page.locator('.status-chip-filter.chip-inactive')).toHaveCount(1);
   });
 
   test('Filtered chip clears both column autofilters and WHERE at once', async ({ page }) => {
@@ -444,7 +445,7 @@ test.describe('Column AutoFilter', () => {
     expect(await page.locator('.data-table tbody tr:not(.virtual-pad)').count()).toBe(10);
     await expect(page.locator('.data-table th.col-filtered')).toHaveCount(0);
     expect(await filterInput.inputValue()).toBe('');
-    await expect(page.locator('.status-chip-filter')).toHaveCount(0);
+    await expect(page.locator('.status-chip-filter.chip-inactive')).toHaveCount(1);
   });
 
   test('no Clear Filters link in status bar', async ({ page }) => {

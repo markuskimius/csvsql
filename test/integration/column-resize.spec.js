@@ -152,10 +152,9 @@ test.describe('Column resize', () => {
 
     const afterResize = await getColWidths(page);
 
-    // Click header to sort (click center of th, away from resize handle)
+    // Click sort badge to sort
     const th = page.locator('.subwindow table thead th').nth(1);
-    const thBox = await th.boundingBox();
-    await page.mouse.click(thBox.x + thBox.width / 3, thBox.y + thBox.height / 2);
+    await th.locator('.col-badge-sort').click();
     await page.waitForTimeout(300);
 
     const afterSort = await getColWidths(page);

@@ -5,7 +5,7 @@ const { openApp, uploadFile, waitForWindow, getTableData, executeSQL } = require
 async function getWin(page, tableName) {
   return page.evaluate((name) => {
     const w = app._test.windows.find(w => w.tableName === name);
-    return w ? { id: w.id, selectedCol: w.selectedCol } : null;
+    return w ? { id: w.id, selectedCol: w.selectedCol, sortCols: w.sortCols } : null;
   }, tableName);
 }
 
@@ -21,16 +21,28 @@ test.describe('Column reorder', () => {
     await waitForWindow(page, 'sample1');
   });
 
-  test('clean click on header selects the column and toggles sort', async ({ page }) => {
+  test('clean click on header selects the column without sorting', async ({ page }) => {
     const cols = await getColumns(page, 'sample1');
     const firstHeader = page.locator('.subwindow table thead th').nth(1); // [0] is row-num
     await firstHeader.click();
 
-    await expect(firstHeader).toHaveClass(/col-selected/);
-    await expect(firstHeader).toHaveClass(/sorted/);
+    await expect(firstHeader).toHaveClass(/col-highlight/);
 
     const win = await getWin(page, 'sample1');
     expect(win.selectedCol).toBe(cols[0]);
+    expect(win.sortCols.length).toBe(0);
+  });
+
+  test('clicking sort badge toggles sort', async ({ page }) => {
+    const firstHeader = page.locator('.subwindow table thead th').nth(1);
+    const sortBadge = firstHeader.locator('.col-badge-sort');
+    await sortBadge.click();
+    await page.waitForTimeout(200);
+
+    await expect(firstHeader).toHaveClass(/sorted/);
+    const win = await getWin(page, 'sample1');
+    expect(win.sortCols.length).toBe(1);
+    expect(win.sortCols[0].dir).toBe('asc');
   });
 
   test('plain drag reorders columns', async ({ page }) => {
@@ -225,7 +237,8 @@ test.describe('Column reorder', () => {
     // in the last digits — beyond Number.MAX_SAFE_INTEGER when combined.
     // Sort should still differentiate them via string comparison fallback.
     const memberSinceHeader = page.locator('.subwindow table thead th').nth(3); // member_since
-    await memberSinceHeader.click();
+    const sortBadge = memberSinceHeader.locator('.col-badge-sort');
+    await sortBadge.click();
     await page.waitForTimeout(200);
 
     // After ascending sort, verify the rows are in order
@@ -239,7 +252,7 @@ test.describe('Column reorder', () => {
     }
 
     // Click again for descending
-    await memberSinceHeader.click();
+    await sortBadge.click();
     await page.waitForTimeout(200);
 
     const desc = await page.evaluate(() => {

@@ -396,7 +396,7 @@ test.describe('Plugin system', () => {
   });
 
   test('format chip appears in status bar when plugins match', async ({ page }) => {
-    let chip = await page.$('.status-chip-format');
+    let chip = await page.$('.status-chip-format:not(.chip-inactive)');
     expect(chip).toBeNull();
 
     await loadPluginConfig(page, {
@@ -406,7 +406,7 @@ test.describe('Plugin system', () => {
     await page.evaluate(() => app._test.rerenderAllWindows());
     await page.waitForTimeout(100);
 
-    chip = await page.$('.status-chip-format');
+    chip = await page.$('.status-chip-format:not(.chip-inactive)');
     expect(chip).not.toBeNull();
     expect(await chip.evaluate(el => !el.classList.contains('off'))).toBe(true);
   });
@@ -419,7 +419,7 @@ test.describe('Plugin system', () => {
     await page.evaluate(() => app._test.rerenderAllWindows());
     await page.waitForTimeout(100);
 
-    const chip = await page.$('.status-chip-format');
+    const chip = await page.$('.status-chip-format:not(.chip-inactive)');
     expect(chip).toBeNull();
   });
 
@@ -737,13 +737,13 @@ test.describe('Plugin system', () => {
     await page.waitForTimeout(100);
 
     expect(await page.$('th.col-transformed')).not.toBeNull();
-    expect(await page.$('.status-chip-format')).not.toBeNull();
+    expect(await page.$('.status-chip-format:not(.chip-inactive)')).not.toBeNull();
 
     await page.evaluate(() => app._test.unloadPlugin(0));
     await page.waitForTimeout(100);
 
     expect(await page.$('th.col-transformed')).toBeNull();
-    expect(await page.$('.status-chip-format')).toBeNull();
+    expect(await page.$('.status-chip-format:not(.chip-inactive)')).toBeNull();
   });
 
   test('autofilter still filters correctly with display-formatted dropdown', async ({ page }) => {
@@ -2501,7 +2501,7 @@ test.describe('Transitive link propagation', () => {
     // Verify Linking chip on products before
     const linkingBefore = await page.evaluate(() => {
       const prodWin = app._test.windows.find(w => w.tableName === 'products');
-      const chip = prodWin.statusbarEl.querySelector('.status-chip-link-source');
+      const chip = prodWin.statusbarEl.querySelector('.status-chip-link-source:not(.chip-inactive)');
       return { exists: chip !== null, off: chip ? chip.classList.contains('off') : null };
     });
     expect(linkingBefore.exists).toBe(true);
@@ -2517,7 +2517,7 @@ test.describe('Transitive link propagation', () => {
     // Linking chip on products should still be active
     const linkingAfter = await page.evaluate(() => {
       const prodWin = app._test.windows.find(w => w.tableName === 'products');
-      const chip = prodWin.statusbarEl.querySelector('.status-chip-link-source');
+      const chip = prodWin.statusbarEl.querySelector('.status-chip-link-source:not(.chip-inactive)');
       return { exists: chip !== null, off: chip ? chip.classList.contains('off') : null };
     });
     expect(linkingAfter.exists).toBe(true);
@@ -2542,7 +2542,7 @@ test.describe('Sort chip', () => {
   }
 
   test('sort chip appears when column is sorted', async ({ page }) => {
-    let chip = await page.$('.status-chip-sort');
+    let chip = await page.$('.status-chip-sort:not(.chip-inactive)');
     expect(chip).toBeNull();
 
     await page.evaluate(() => {
@@ -2552,7 +2552,7 @@ test.describe('Sort chip', () => {
     });
     await page.waitForTimeout(100);
 
-    chip = await page.$('.status-chip-sort');
+    chip = await page.$('.status-chip-sort:not(.chip-inactive)');
     expect(chip).not.toBeNull();
     expect(await chip.textContent()).toBe('Sorted');
   });
@@ -2564,7 +2564,7 @@ test.describe('Sort chip', () => {
       app._test.rebuildTable(win);
     });
     await page.waitForTimeout(100);
-    expect(await page.$('.status-chip-sort')).not.toBeNull();
+    expect(await page.$('.status-chip-sort:not(.chip-inactive)')).not.toBeNull();
 
     await page.evaluate(() => {
       const win = app._test.windows[0];
@@ -2572,7 +2572,7 @@ test.describe('Sort chip', () => {
       app._test.rebuildTable(win);
     });
     await page.waitForTimeout(100);
-    expect(await page.$('.status-chip-sort')).toBeNull();
+    expect(await page.$('.status-chip-sort:not(.chip-inactive)')).toBeNull();
   });
 
   test('clicking sort chip clears sorting and chip disappears', async ({ page }) => {
@@ -2584,14 +2584,14 @@ test.describe('Sort chip', () => {
     await page.waitForTimeout(100);
 
     // Sort chip should be present
-    expect(await page.$('.status-chip-sort')).not.toBeNull();
+    expect(await page.$('.status-chip-sort:not(.chip-inactive)')).not.toBeNull();
 
     // Click chip to clear sort
     await page.click('.status-chip-sort');
     await page.waitForTimeout(100);
 
     // Chip should disappear (sort was cleared, not suspended)
-    const chip = await page.$('.status-chip-sort');
+    const chip = await page.$('.status-chip-sort:not(.chip-inactive)');
     expect(chip).toBeNull();
 
     // Sort config should be cleared entirely
@@ -2624,7 +2624,7 @@ test.describe('Sort chip', () => {
     expect(unsortedFirst).toBe('Alice Johnson'); // original order restored
 
     // Chip should be gone
-    expect(await page.$('.status-chip-sort')).toBeNull();
+    expect(await page.$('.status-chip-sort:not(.chip-inactive)')).toBeNull();
   });
 
   test('clicking sort chip removes .sorted class from column header', async ({ page }) => {
@@ -2686,7 +2686,7 @@ test.describe('Filter chip', () => {
   }
 
   test('filter chip appears when column autofilter is active', async ({ page }) => {
-    let chip = await page.$('.status-chip-filter');
+    let chip = await page.$('.status-chip-filter:not(.chip-inactive)');
     expect(chip).toBeNull();
 
     await page.evaluate(() => {
@@ -2696,7 +2696,7 @@ test.describe('Filter chip', () => {
     });
     await page.waitForTimeout(100);
 
-    chip = await page.$('.status-chip-filter');
+    chip = await page.$('.status-chip-filter:not(.chip-inactive)');
     expect(chip).not.toBeNull();
     expect(await chip.textContent()).toBe('Filtered');
     expect(await chip.evaluate(el => !el.classList.contains('off'))).toBe(true);
@@ -2710,7 +2710,7 @@ test.describe('Filter chip', () => {
     });
     await page.waitForTimeout(100);
 
-    const chip = await page.$('.status-chip-filter');
+    const chip = await page.$('.status-chip-filter:not(.chip-inactive)');
     expect(chip).not.toBeNull();
     expect(await chip.textContent()).toBe('Filtered');
   });
@@ -2737,7 +2737,7 @@ test.describe('Filter chip', () => {
     expect(clearedRows).toBe(totalRows);
 
     // Chip should disappear
-    const chip = await page.$('.status-chip-filter');
+    const chip = await page.$('.status-chip-filter:not(.chip-inactive)');
     expect(chip).toBeNull();
 
     // Filters should be empty
@@ -2796,7 +2796,7 @@ test.describe('Filter chip', () => {
     expect(filterText).toBe('');
 
     // Chip should be gone
-    expect(await page.$('.status-chip-filter')).toBeNull();
+    expect(await page.$('.status-chip-filter:not(.chip-inactive)')).toBeNull();
   });
 });
 
@@ -2844,13 +2844,13 @@ test.describe('Link chip', () => {
 
     // Before selection: no link chip on customers
     const custWindow = page.locator('.subwindow').filter({ hasText: 'customers' });
-    let linkChip = await custWindow.locator('.status-chip-link').count();
+    let linkChip = await custWindow.locator('.status-chip-link:not(.chip-inactive)').count();
     expect(linkChip).toBe(0);
 
     await selectOrderRow(page, 0);
     await page.waitForTimeout(200);
 
-    linkChip = await custWindow.locator('.status-chip-link').count();
+    linkChip = await custWindow.locator('.status-chip-link:not(.chip-inactive)').count();
     expect(linkChip).toBe(1);
     const chipText = await custWindow.locator('.status-chip-link').textContent();
     expect(chipText).toBe('Linked');
@@ -3127,7 +3127,7 @@ test.describe('Linking chip', () => {
     // Before selection: no Linking chip on either window
     const beforeOrders = await page.evaluate(() => {
       const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
-      return ordersWin.statusbarEl.querySelector('.status-chip-link-source') !== null;
+      return ordersWin.statusbarEl.querySelector('.status-chip-link-source:not(.chip-inactive)') !== null;
     });
     expect(beforeOrders).toBe(false);
 
@@ -3137,7 +3137,7 @@ test.describe('Linking chip', () => {
     // Linking chip should appear on orders (the source)
     const result = await page.evaluate(() => {
       const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
-      const chip = ordersWin.statusbarEl.querySelector('.status-chip-link-source');
+      const chip = ordersWin.statusbarEl.querySelector('.status-chip-link-source:not(.chip-inactive)');
       return {
         exists: chip !== null,
         text: chip ? chip.textContent : null,
@@ -3163,14 +3163,14 @@ test.describe('Linking chip', () => {
     // Linking chip should NOT appear on customers (the target)
     const custHasLinkingChip = await page.evaluate(() => {
       const custWin = app._test.windows.find(w => w.tableName === 'customers');
-      return custWin.statusbarEl.querySelector('.status-chip-link-source') !== null;
+      return custWin.statusbarEl.querySelector('.status-chip-link-source:not(.chip-inactive)') !== null;
     });
     expect(custHasLinkingChip).toBe(false);
 
     // But Linked chip should appear on customers (the target)
     const custHasLinkedChip = await page.evaluate(() => {
       const custWin = app._test.windows.find(w => w.tableName === 'customers');
-      return custWin.statusbarEl.querySelector('.status-chip-link') !== null;
+      return custWin.statusbarEl.querySelector('.status-chip-link:not(.chip-inactive)') !== null;
     });
     expect(custHasLinkedChip).toBe(true);
   });
@@ -3189,7 +3189,7 @@ test.describe('Linking chip', () => {
     // Verify chip is present
     let hasChip = await page.evaluate(() => {
       const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
-      return ordersWin.statusbarEl.querySelector('.status-chip-link-source') !== null;
+      return ordersWin.statusbarEl.querySelector('.status-chip-link-source:not(.chip-inactive)') !== null;
     });
     expect(hasChip).toBe(true);
 
@@ -3205,7 +3205,7 @@ test.describe('Linking chip', () => {
     // Linking chip should be gone
     hasChip = await page.evaluate(() => {
       const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
-      return ordersWin.statusbarEl.querySelector('.status-chip-link-source') !== null;
+      return ordersWin.statusbarEl.querySelector('.status-chip-link-source:not(.chip-inactive)') !== null;
     });
     expect(hasChip).toBe(false);
   });
@@ -3293,7 +3293,7 @@ test.describe('Linking chip', () => {
     const result = await page.evaluate(() => {
       const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
       const custWin = app._test.windows.find(w => w.tableName === 'customers');
-      const chip = ordersWin.statusbarEl.querySelector('.status-chip-link-source');
+      const chip = ordersWin.statusbarEl.querySelector('.status-chip-link-source:not(.chip-inactive)');
       return {
         custRows: custWin._displayRows ? custWin._displayRows.length : -1,
         chipExists: chip !== null,
@@ -3324,8 +3324,8 @@ test.describe('Linking chip', () => {
       const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
       const custWin = app._test.windows.find(w => w.tableName === 'customers');
       return {
-        ordersHasLinking: ordersWin.statusbarEl.querySelector('.status-chip-link-source') !== null,
-        custHasLinking: custWin.statusbarEl.querySelector('.status-chip-link-source') !== null,
+        ordersHasLinking: ordersWin.statusbarEl.querySelector('.status-chip-link-source:not(.chip-inactive)') !== null,
+        custHasLinking: custWin.statusbarEl.querySelector('.status-chip-link-source:not(.chip-inactive)') !== null,
       };
     });
     expect(state.ordersHasLinking).toBe(true);
@@ -3340,8 +3340,8 @@ test.describe('Linking chip', () => {
       const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
       const custWin = app._test.windows.find(w => w.tableName === 'customers');
       return {
-        ordersHasLinking: ordersWin.statusbarEl.querySelector('.status-chip-link-source') !== null,
-        custHasLinking: custWin.statusbarEl.querySelector('.status-chip-link-source') !== null,
+        ordersHasLinking: ordersWin.statusbarEl.querySelector('.status-chip-link-source:not(.chip-inactive)') !== null,
+        custHasLinking: custWin.statusbarEl.querySelector('.status-chip-link-source:not(.chip-inactive)') !== null,
       };
     });
     expect(state.ordersHasLinking).toBe(false);
@@ -3458,8 +3458,8 @@ test.describe('Linking chip', () => {
     const colors = await page.evaluate(() => {
       const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
       const custWin = app._test.windows.find(w => w.tableName === 'customers');
-      const linkingChip = ordersWin.statusbarEl.querySelector('.status-chip-link-source');
-      const linkedChip = custWin.statusbarEl.querySelector('.status-chip-link');
+      const linkingChip = ordersWin.statusbarEl.querySelector('.status-chip-link-source:not(.chip-inactive)');
+      const linkedChip = custWin.statusbarEl.querySelector('.status-chip-link:not(.chip-inactive)');
       return {
         linkingColor: linkingChip ? getComputedStyle(linkingChip).color : null,
         linkedColor: linkedChip ? getComputedStyle(linkedChip).color : null,
@@ -3491,7 +3491,7 @@ test.describe('Linking chip', () => {
     // Chip should still exist with 'off' class
     const state = await page.evaluate(() => {
       const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
-      const chip = ordersWin.statusbarEl.querySelector('.status-chip-link-source');
+      const chip = ordersWin.statusbarEl.querySelector('.status-chip-link-source:not(.chip-inactive)');
       return {
         exists: chip !== null,
         hasOff: chip ? chip.classList.contains('off') : null,
@@ -3532,7 +3532,7 @@ test.describe('Linking chip', () => {
     // Chip should still be present with 'off' class
     const state = await page.evaluate(() => {
       const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
-      const chip = ordersWin.statusbarEl.querySelector('.status-chip-link-source');
+      const chip = ordersWin.statusbarEl.querySelector('.status-chip-link-source:not(.chip-inactive)');
       return {
         exists: chip !== null,
         hasOff: chip ? chip.classList.contains('off') : null,
@@ -3578,7 +3578,7 @@ test.describe('Linking chip', () => {
     const state = await page.evaluate(() => {
       const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
       const custWin = app._test.windows.find(w => w.tableName === 'customers');
-      const chip = ordersWin.statusbarEl.querySelector('.status-chip-link-source');
+      const chip = ordersWin.statusbarEl.querySelector('.status-chip-link-source:not(.chip-inactive)');
       return {
         custRows: custWin._displayRows ? custWin._displayRows.length : -1,
         chipExists: chip !== null,
@@ -3700,8 +3700,8 @@ test.describe('Linking chip', () => {
     const state = await page.evaluate(() => {
       const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
       const custWin = app._test.windows.find(w => w.tableName === 'customers');
-      const linkingChip = ordersWin.statusbarEl.querySelector('.status-chip-link-source');
-      const linkedChip = custWin.statusbarEl.querySelector('.status-chip-link');
+      const linkingChip = ordersWin.statusbarEl.querySelector('.status-chip-link-source:not(.chip-inactive)');
+      const linkedChip = custWin.statusbarEl.querySelector('.status-chip-link:not(.chip-inactive)');
       return {
         hasLinkingChip: linkingChip !== null,
         hasLinkedChip: linkedChip !== null,
@@ -3722,8 +3722,8 @@ test.describe('Linking chip', () => {
       const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
       const custWin = app._test.windows.find(w => w.tableName === 'customers');
       return {
-        hasLinkingChip: ordersWin.statusbarEl.querySelector('.status-chip-link-source') !== null,
-        hasLinkedChip: custWin.statusbarEl.querySelector('.status-chip-link') !== null,
+        hasLinkingChip: ordersWin.statusbarEl.querySelector('.status-chip-link-source:not(.chip-inactive)') !== null,
+        hasLinkedChip: custWin.statusbarEl.querySelector('.status-chip-link:not(.chip-inactive)') !== null,
         custLinkFilters: Object.keys(custWin.linkFilters).length,
       };
     });
@@ -3757,7 +3757,7 @@ test.describe('Status chip keyboard shortcuts', () => {
     await page.waitForTimeout(100);
 
     // Verify sort chip is present
-    expect(await page.$('.status-chip-sort')).not.toBeNull();
+    expect(await page.$('.status-chip-sort:not(.chip-inactive)')).not.toBeNull();
 
     // Focus a cell so the window is active
     const cell = page.locator('.subwindow table tbody td.data-cell').first();
@@ -3777,7 +3777,7 @@ test.describe('Status chip keyboard shortcuts', () => {
     expect(state.sortCols).toEqual([]);
 
     // Chip should be gone
-    const chip = await page.$('.status-chip-sort');
+    const chip = await page.$('.status-chip-sort:not(.chip-inactive)');
     expect(chip).toBeNull();
   });
 
@@ -3806,7 +3806,7 @@ test.describe('Status chip keyboard shortcuts', () => {
     expect(allRows).toBeGreaterThan(1);
 
     // Chip should be gone
-    const chip = await page.$('.status-chip-filter');
+    const chip = await page.$('.status-chip-filter:not(.chip-inactive)');
     expect(chip).toBeNull();
 
     // Filters should be cleared
@@ -3876,8 +3876,8 @@ test.describe('Status chip integration', () => {
     });
     await page.waitForTimeout(100);
 
-    const sortChip = await page.$('.status-chip-sort');
-    const filterChip = await page.$('.status-chip-filter');
+    const sortChip = await page.$('.status-chip-sort:not(.chip-inactive)');
+    const filterChip = await page.$('.status-chip-filter:not(.chip-inactive)');
     expect(sortChip).not.toBeNull();
     expect(filterChip).not.toBeNull();
 
@@ -3903,9 +3903,9 @@ test.describe('Status chip integration', () => {
     await page.waitForTimeout(100);
 
     // Filter chip should be gone, sort chip still present and active
-    const filterChip = await page.$('.status-chip-filter');
+    const filterChip = await page.$('.status-chip-filter:not(.chip-inactive)');
     expect(filterChip).toBeNull();
-    const sortChip = await page.$('.status-chip-sort');
+    const sortChip = await page.$('.status-chip-sort:not(.chip-inactive)');
     expect(sortChip).not.toBeNull();
     expect(await sortChip.evaluate(el => !el.classList.contains('off'))).toBe(true);
 
@@ -3924,8 +3924,8 @@ test.describe('Status chip integration', () => {
     expect(unsortedFirst).toBe('Alice Johnson');
 
     // Both chips should be gone
-    expect(await page.$('.status-chip-sort')).toBeNull();
-    expect(await page.$('.status-chip-filter')).toBeNull();
+    expect(await page.$('.status-chip-sort:not(.chip-inactive)')).toBeNull();
+    expect(await page.$('.status-chip-filter:not(.chip-inactive)')).toBeNull();
   });
 
   test('sort chip stays gone after rebuild when sort was cleared', async ({ page }) => {
@@ -3937,7 +3937,7 @@ test.describe('Status chip integration', () => {
     await page.waitForTimeout(100);
 
     // Chip should be present
-    let chip = await page.$('.status-chip-sort');
+    let chip = await page.$('.status-chip-sort:not(.chip-inactive)');
     expect(chip).not.toBeNull();
 
     // Clear sort by clicking chip
@@ -3945,7 +3945,7 @@ test.describe('Status chip integration', () => {
     await page.waitForTimeout(100);
 
     // Chip should be gone
-    chip = await page.$('.status-chip-sort');
+    chip = await page.$('.status-chip-sort:not(.chip-inactive)');
     expect(chip).toBeNull();
 
     // Simulate a cell edit that triggers rebuildTable
@@ -3958,7 +3958,7 @@ test.describe('Status chip integration', () => {
     await page.waitForTimeout(100);
 
     // Sort chip should still be gone after rebuild
-    chip = await page.$('.status-chip-sort');
+    chip = await page.$('.status-chip-sort:not(.chip-inactive)');
     expect(chip).toBeNull();
 
     // sortCols should still be empty
@@ -4033,7 +4033,7 @@ test.describe('Chip toggle link re-entrancy guard', () => {
 
     const linkingChip = await page.evaluate(() => {
       const w = app._test.windows.find(w => w.tableName === 'customers');
-      return w.statusbarEl.querySelector('.status-chip-link-source') !== null;
+      return w.statusbarEl.querySelector('.status-chip-link-source:not(.chip-inactive)') !== null;
     });
     expect(linkingChip).toBe(false);
   });
@@ -4405,7 +4405,7 @@ test.describe('Chip toggle link re-entrancy guard', () => {
         sourceId: app._test._activeLinkSourceId,
         ordersId: ordersWin.id,
         custRows: custWin._displayRows.length,
-        hasLinkingChip: ordersWin.statusbarEl.querySelector('.status-chip-link-source') !== null,
+        hasLinkingChip: ordersWin.statusbarEl.querySelector('.status-chip-link-source:not(.chip-inactive)') !== null,
       };
     });
     expect(before.sourceId).toBe(before.ordersId);
@@ -4426,7 +4426,7 @@ test.describe('Chip toggle link re-entrancy guard', () => {
         sourceId: app._test._activeLinkSourceId,
         ordersId: ordersWin.id,
         custRows: custWin._displayRows.length,
-        hasLinkingChip: ordersWin.statusbarEl.querySelector('.status-chip-link-source') !== null,
+        hasLinkingChip: ordersWin.statusbarEl.querySelector('.status-chip-link-source:not(.chip-inactive)') !== null,
       };
     });
     expect(after.sourceId).toBe(after.ordersId);

@@ -9,9 +9,11 @@ test.describe('Column Header Badges', () => {
     await waitForWindow(page, 'sample1');
   });
 
-  test('no badges shown on unsorted, unfiltered columns', async ({ page }) => {
-    const badges = await page.$$('.col-badges');
-    expect(badges.length).toBe(0);
+  test('sort outline badge shown on unsorted columns', async ({ page }) => {
+    const outlines = await page.$$('.col-badge-sort.sort-outline');
+    expect(outlines.length).toBeGreaterThan(0);
+    const filledSort = await page.$$('.col-badge-sort.sort-asc, .col-badge-sort.sort-desc');
+    expect(filledSort.length).toBe(0);
   });
 
   test('sort badge appears on ascending sort', async ({ page }) => {
@@ -64,7 +66,7 @@ test.describe('Column Header Badges', () => {
     expect(nums.length).toBe(0);
   });
 
-  test('filter badge appears when column autofilter is applied', async ({ page }) => {
+  test('filter button highlights green when column autofilter is applied', async ({ page }) => {
     await page.evaluate(() => {
       const win = app._test.windows[0];
       win.columnFilters['name'] = new Set(['Alice Johnson']);
@@ -72,13 +74,11 @@ test.describe('Column Header Badges', () => {
     });
     await page.waitForTimeout(100);
 
-    const badge = await page.$('th.col-filtered .col-badge-filter');
-    expect(badge).not.toBeNull();
-    const vis = await badge.evaluate(el => getComputedStyle(el).visibility);
-    expect(vis).toBe('visible');
+    const filterBtn = await page.$('th.col-filtered .col-filter-btn.active');
+    expect(filterBtn).not.toBeNull();
   });
 
-  test('filter badge disappears when filter is cleared', async ({ page }) => {
+  test('filter button loses active class when filter is cleared', async ({ page }) => {
     await page.evaluate(() => {
       const win = app._test.windows[0];
       win.columnFilters['name'] = new Set(['Alice Johnson']);
@@ -93,11 +93,12 @@ test.describe('Column Header Badges', () => {
     });
     await page.waitForTimeout(100);
 
-    const badges = await page.$$('.col-badge-filter');
-    expect(badges.length).toBe(0);
+    const allInactive = await page.$$eval('.col-filter-btn',
+      els => els.every(el => !el.classList.contains('active')));
+    expect(allInactive).toBe(true);
   });
 
-  test('sort and filter badges coexist on the same column', async ({ page }) => {
+  test('sort badge and filter button coexist on the same column', async ({ page }) => {
     await page.evaluate(() => {
       const win = app._test.windows[0];
       win.sortCols = [{ col: 'name', dir: 'asc' }];
@@ -107,35 +108,40 @@ test.describe('Column Header Badges', () => {
     await page.waitForTimeout(100);
 
     const th = page.locator('th.sorted.col-filtered');
-    const filterBadge = th.locator('.col-badge-filter');
+    const filterBtn = th.locator('.col-filter-btn.active');
     const sortBadge = th.locator('.col-badge-sort');
-    expect(await filterBadge.count()).toBe(1);
+    expect(await filterBtn.count()).toBe(1);
     expect(await sortBadge.count()).toBe(1);
   });
 
-  test('badge order is link, format, filter, sort', async ({ page }) => {
-    await page.evaluate(() => {
-      const win = app._test.windows[0];
-      win.sortCols = [{ col: 'name', dir: 'asc' }];
-      win.columnFilters['name'] = new Set(['Alice Johnson']);
-      app._test.rebuildTable(win);
-    });
-    await page.waitForTimeout(100);
-
-    const classes = await page.$$eval(
-      'th.sorted .col-badge',
+  test('badge order in col-badges is link, format', async ({ page }) => {
+    const badges = await page.$$eval(
+      '.col-badges .col-badge',
       els => els.map(el => {
         if (el.classList.contains('col-badge-link')) return 'link';
         if (el.classList.contains('col-badge-format')) return 'format';
-        if (el.classList.contains('col-badge-filter')) return 'filter';
-        if (el.classList.contains('col-badge-sort')) return 'sort';
         return 'unknown';
       })
     );
-    expect(classes).toEqual(['link', 'format', 'filter', 'sort']);
+    const unique = [...new Set(badges)];
+    expect(unique).toEqual(['link', 'format']);
   });
 
-  test('all four badge slots are rendered when any badge is active', async ({ page }) => {
+  test('dot badge slots always rendered with faint outlines for inactive', async ({ page }) => {
+    const badges = await page.$$eval(
+      '.col-badges .col-badge',
+      els => els.slice(0, 2).map(el => ({
+        type: el.classList.contains('col-badge-link') ? 'link' : 'format',
+        faint: el.classList.contains('badge-faint'),
+      }))
+    );
+    expect(badges).toEqual([
+      { type: 'link', faint: true },
+      { type: 'format', faint: true },
+    ]);
+  });
+
+  test('sort badge inline in th-inner shows filled when sorted', async ({ page }) => {
     await page.evaluate(() => {
       const win = app._test.windows[0];
       win.sortCols = [{ col: 'name', dir: 'asc' }];
@@ -143,21 +149,8 @@ test.describe('Column Header Badges', () => {
     });
     await page.waitForTimeout(100);
 
-    const badges = await page.$$eval(
-      'th.sorted .col-badge',
-      els => els.map(el => ({
-        type: el.classList.contains('col-badge-sort') ? 'sort' :
-              el.classList.contains('col-badge-filter') ? 'filter' :
-              el.classList.contains('col-badge-link') ? 'link' : 'format',
-        visible: getComputedStyle(el).visibility === 'visible'
-      }))
-    );
-    expect(badges).toEqual([
-      { type: 'link', visible: false },
-      { type: 'format', visible: false },
-      { type: 'filter', visible: false },
-      { type: 'sort', visible: true },
-    ]);
+    const sortBadge = await page.$('th.sorted .th-inner .col-badge-sort.sort-asc');
+    expect(sortBadge).not.toBeNull();
   });
 
   test('badges stay in fixed positions when other badges toggle', async ({ page }) => {
@@ -186,7 +179,7 @@ test.describe('Column Header Badges', () => {
     expect(Math.abs(sortX1 - sortX2)).toBeLessThan(1);
   });
 
-  test('badges are positioned at top-right of header cell', async ({ page }) => {
+  test('badges are positioned at center-bottom of header cell', async ({ page }) => {
     await page.evaluate(() => {
       const win = app._test.windows[0];
       win.sortCols = [{ col: 'name', dir: 'asc' }];
@@ -200,33 +193,13 @@ test.describe('Column Header Badges', () => {
       const thRect = th.getBoundingClientRect();
       const bRect = badges.getBoundingClientRect();
       return {
-        nearTop: bRect.y - thRect.y < 5,
-        nearRight: (thRect.x + thRect.width) - (bRect.x + bRect.width) < 25,
+        nearBottom: (thRect.y + thRect.height) - (bRect.y + bRect.height) < 5,
+        centered: Math.abs((thRect.x + thRect.width / 2) - (bRect.x + bRect.width / 2)) < 5,
       };
     });
 
-    expect(pos.nearTop).toBe(true);
-    expect(pos.nearRight).toBe(true);
-  });
-
-  test('badges overlap the filter button', async ({ page }) => {
-    await page.evaluate(() => {
-      const win = app._test.windows[0];
-      win.sortCols = [{ col: 'name', dir: 'asc' }];
-      app._test.rebuildTable(win);
-    });
-    await page.waitForTimeout(100);
-
-    const overlap = await page.evaluate(() => {
-      const th = document.querySelector('th.sorted');
-      const badges = th.querySelector('.col-badges');
-      const filterBtn = th.querySelector('.col-filter-btn');
-      const bRect = badges.getBoundingClientRect();
-      const fRect = filterBtn.getBoundingClientRect();
-      return (bRect.x + bRect.width) - fRect.x;
-    });
-
-    expect(overlap).toBeGreaterThan(0);
+    expect(pos.nearBottom).toBe(true);
+    expect(pos.centered).toBe(true);
   });
 
   test('no old sort-arrow elements exist', async ({ page }) => {
@@ -443,7 +416,7 @@ test.describe('Column Header Badges', () => {
     expect(pe).toBe('none');
   });
 
-  test('suspended format badge is hidden but takes space', async ({ page }) => {
+  test('suspended format badge shows faint outline', async ({ page }) => {
     // Load a plugin with a transform
     await page.evaluate(() => {
       const cfg = {
@@ -460,14 +433,14 @@ test.describe('Column Header Badges', () => {
     });
     await page.waitForTimeout(200);
 
-    // Verify format badge is visible
-    let vis = await page.evaluate(() => {
+    // Verify format badge is active (not faint)
+    let faint = await page.evaluate(() => {
       const th = document.querySelector('th.col-transformed');
       if (!th) return null;
       const badge = th.querySelector('.col-badge-format');
-      return badge ? getComputedStyle(badge).visibility : null;
+      return badge ? badge.classList.contains('badge-faint') : null;
     });
-    expect(vis).toBe('visible');
+    expect(faint).toBe(false);
 
     // Suspend formatting
     await page.evaluate(() => {
@@ -479,21 +452,20 @@ test.describe('Column Header Badges', () => {
     });
     await page.waitForTimeout(100);
 
-    // Format badge should be hidden
-    vis = await page.evaluate(() => {
+    // Format badge should be faint
+    faint = await page.evaluate(() => {
       const th = document.querySelector('th.col-transformed');
       if (!th) return null;
       const badge = th.querySelector('.col-badge-format');
-      return badge ? getComputedStyle(badge).visibility : null;
+      return badge ? badge.classList.contains('badge-faint') : null;
     });
-    expect(vis).toBe('hidden');
+    expect(faint).toBe(true);
 
     // Unload plugin
     await page.evaluate(() => app._test.unloadPlugin(0));
   });
 
-  test('chip order matches badge order: Linked, Linking, Formatted, Filtered, Sorted', async ({ page }) => {
-    // Apply sort + filter to get both chips visible
+  test('chip order is Linking, Linked, Formatted, Sorted, Filtered', async ({ page }) => {
     await page.evaluate(() => {
       const win = app._test.windows[0];
       win.sortCols = [{ col: 'name', dir: 'asc' }];
@@ -503,17 +475,10 @@ test.describe('Column Header Badges', () => {
     await page.waitForTimeout(100);
 
     const chipTexts = await page.$$eval('.status-chip', els => els.map(e => e.textContent));
-    expect(chipTexts).toEqual(['Filtered', 'Sorted']);
+    expect(chipTexts).toEqual(['Linking', 'Linked', 'Formatted', 'Sorted', 'Filtered']);
 
-    // Badge order should be: link, format, filter, sort
-    const badgeTypes = await page.$$eval('th.sorted .col-badge', els => els.map(el => {
-      if (el.classList.contains('col-badge-link')) return 'link';
-      if (el.classList.contains('col-badge-format')) return 'format';
-      if (el.classList.contains('col-badge-filter')) return 'filter';
-      if (el.classList.contains('col-badge-sort')) return 'sort';
-      return 'unknown';
-    }));
-    expect(badgeTypes).toEqual(['link', 'format', 'filter', 'sort']);
+    const activeChips = await page.$$eval('.status-chip:not(.chip-inactive)', els => els.map(e => e.textContent));
+    expect(activeChips).toEqual(['Sorted', 'Filtered']);
   });
 });
 
