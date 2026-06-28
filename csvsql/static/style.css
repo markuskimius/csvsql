@@ -492,11 +492,23 @@ body {
   align-items: center;
 }
 
-.th-inner > .col-badge-sort {
+.col-sort-btn {
   margin-left: 3px;
   flex-shrink: 0;
   cursor: pointer;
   pointer-events: auto;
+  border-radius: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  position: relative;
+  top: -1px;
+}
+
+.col-sort-btn:hover {
+  background: rgba(124,111,247,0.15);
 }
 
 .data-table th:hover {
@@ -629,17 +641,20 @@ body {
 
 .col-filter-btn {
   margin-left: 2px;
-  padding: 0 2px;
   font-size: 14px;
   color: var(--text-dim);
   opacity: 0.5;
   cursor: pointer;
   transition: opacity 0.15s;
   flex-shrink: 0;
-  line-height: 1;
   border-radius: 2px;
   display: flex;
   align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  position: relative;
+  top: -1px;
 }
 
 .data-table th:hover .col-filter-btn,

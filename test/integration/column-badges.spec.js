@@ -153,6 +153,107 @@ test.describe('Column Header Badges', () => {
     expect(sortBadge).not.toBeNull();
   });
 
+  test('sort badge is wrapped in col-sort-btn container', async ({ page }) => {
+    const structure = await page.evaluate(() => {
+      const th = document.querySelector('.data-table th:not(.row-num-header)');
+      const sortBtn = th.querySelector('.col-sort-btn');
+      const badge = sortBtn ? sortBtn.querySelector('.col-badge-sort') : null;
+      return { hasSortBtn: !!sortBtn, hasBadgeInside: !!badge };
+    });
+    expect(structure.hasSortBtn).toBe(true);
+    expect(structure.hasBadgeInside).toBe(true);
+  });
+
+  test('sort button shows hover highlight', async ({ page }) => {
+    const sortBtn = page.locator('.col-sort-btn').first();
+    const bgBefore = await sortBtn.evaluate(el => getComputedStyle(el).backgroundColor);
+    await sortBtn.hover();
+    const bgAfter = await sortBtn.evaluate(el => getComputedStyle(el).backgroundColor);
+    expect(bgBefore).not.toBe(bgAfter);
+    expect(bgAfter).toBe('rgba(124, 111, 247, 0.15)');
+  });
+
+  test('filter button shows hover highlight', async ({ page }) => {
+    const th = page.locator('.data-table th:not(.row-num-header)').first();
+    await th.hover();
+    const filterBtn = th.locator('.col-filter-btn');
+    const bgBefore = await filterBtn.evaluate(el => getComputedStyle(el).backgroundColor);
+    await filterBtn.hover();
+    const bgAfter = await filterBtn.evaluate(el => getComputedStyle(el).backgroundColor);
+    expect(bgBefore).not.toBe(bgAfter);
+    expect(bgAfter).toBe('rgba(124, 111, 247, 0.15)');
+  });
+
+  test('sort button and filter button have equal dimensions', async ({ page }) => {
+    const dims = await page.evaluate(() => {
+      const th = document.querySelector('.data-table th:not(.row-num-header)');
+      const sortBtn = th.querySelector('.col-sort-btn');
+      const filterBtn = th.querySelector('.col-filter-btn');
+      const sRect = sortBtn.getBoundingClientRect();
+      const fRect = filterBtn.getBoundingClientRect();
+      return {
+        sortW: Math.round(sRect.width),
+        sortH: Math.round(sRect.height),
+        filterW: Math.round(fRect.width),
+        filterH: Math.round(fRect.height),
+      };
+    });
+    expect(dims.sortW).toBe(dims.filterW);
+    expect(dims.sortH).toBe(dims.filterH);
+    expect(dims.sortW).toBe(14);
+    expect(dims.sortH).toBe(14);
+  });
+
+  test('sort button hover highlight matches filter button hover highlight', async ({ page }) => {
+    const sortBtn = page.locator('.col-sort-btn').first();
+    await sortBtn.hover();
+    const sortBg = await sortBtn.evaluate(el => getComputedStyle(el).backgroundColor);
+
+    const th = page.locator('.data-table th:not(.row-num-header)').first();
+    const filterBtn = th.locator('.col-filter-btn');
+    await filterBtn.hover();
+    const filterBg = await filterBtn.evaluate(el => getComputedStyle(el).backgroundColor);
+
+    expect(sortBg).toBe(filterBg);
+  });
+
+  test('sort button click still triggers sort', async ({ page }) => {
+    const sortBtn = page.locator('.data-table th:not(.row-num-header)').nth(0).locator('.col-sort-btn');
+    await sortBtn.click();
+    await page.waitForTimeout(200);
+
+    const sorted = await page.evaluate(() => {
+      const win = app._test.windows[0];
+      return win.sortCols.length > 0 && win.sortCols[0].dir === 'asc';
+    });
+    expect(sorted).toBe(true);
+  });
+
+  test('sort button click does not trigger column selection', async ({ page }) => {
+    const sortBtn = page.locator('.data-table th:not(.row-num-header)').nth(0).locator('.col-sort-btn');
+    await sortBtn.click();
+    await page.waitForTimeout(200);
+
+    const selectedCol = await page.evaluate(() => app._test.windows[0].selectedCol);
+    expect(selectedCol).toBeNull();
+  });
+
+  test('sort button has correct border-radius', async ({ page }) => {
+    const radius = await page.evaluate(() => {
+      const btn = document.querySelector('.col-sort-btn');
+      return getComputedStyle(btn).borderRadius;
+    });
+    expect(radius).toBe('2px');
+  });
+
+  test('filter button has correct border-radius', async ({ page }) => {
+    const radius = await page.evaluate(() => {
+      const btn = document.querySelector('.col-filter-btn');
+      return getComputedStyle(btn).borderRadius;
+    });
+    expect(radius).toBe('2px');
+  });
+
   test('badges stay in fixed positions when other badges toggle', async ({ page }) => {
     // Sort only — record sort badge x position
     await page.evaluate(() => {
