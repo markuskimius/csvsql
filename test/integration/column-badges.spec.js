@@ -378,7 +378,7 @@ test.describe('Column Header Badges', () => {
     expect(pos.numBottom).toBeLessThanOrEqual(pos.badgeBottom + 1);
   });
 
-  test('sort number color is white for contrast', async ({ page }) => {
+  test('sort number color is dark for contrast against gold badge', async ({ page }) => {
     await page.evaluate(() => {
       const win = app._test.windows[0];
       win.sortCols = [{ col: 'name', dir: 'asc' }, { col: 'email', dir: 'desc' }];
@@ -388,7 +388,46 @@ test.describe('Column Header Badges', () => {
 
     const color = await page.$eval('.sort-num',
       el => getComputedStyle(el).color);
-    expect(color).toBe('rgb(255, 255, 255)');
+    expect(color).toBe('rgb(26, 26, 46)');
+  });
+
+  test('sort badge triangle color is gold', async ({ page }) => {
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.sortCols = [{ col: 'name', dir: 'asc' }];
+      app._test.rebuildTable(win);
+    });
+    await page.waitForTimeout(100);
+
+    const ascColor = await page.$eval('.col-badge-sort.sort-asc',
+      el => getComputedStyle(el).borderBottomColor);
+    expect(ascColor).toBe('rgb(250, 204, 21)');
+  });
+
+  test('descending sort badge triangle color is gold', async ({ page }) => {
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.sortCols = [{ col: 'name', dir: 'desc' }];
+      app._test.rebuildTable(win);
+    });
+    await page.waitForTimeout(100);
+
+    const descColor = await page.$eval('.col-badge-sort.sort-desc',
+      el => getComputedStyle(el).borderTopColor);
+    expect(descColor).toBe('rgb(250, 204, 21)');
+  });
+
+  test('sort status chip has gold text color', async ({ page }) => {
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.sortCols = [{ col: 'name', dir: 'asc' }];
+      app._test.rebuildTable(win);
+    });
+    await page.waitForTimeout(100);
+
+    const chipColor = await page.$eval('.status-chip-sort',
+      el => getComputedStyle(el).color);
+    expect(chipColor).toBe('rgb(250, 204, 21)');
   });
 
   test('badges have pointer-events none so they do not block clicks', async ({ page }) => {
