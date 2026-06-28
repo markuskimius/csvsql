@@ -554,9 +554,17 @@ body {
   flex-shrink: 0;
 }
 
-.col-badge-filter  { background: #55cc88; box-shadow: 0 0 0 1px #88eebb; }
-.col-badge-link    { background: #55cccc; box-shadow: 0 0 0 1px #88eeee; }
+.col-badge-filter  { background: #55cccc; box-shadow: 0 0 0 1px rgba(85, 204, 204, 0.6); }
+.col-badge-linking { background: #ee6655; box-shadow: 0 0 0 1px #ff8877; }
+.col-badge-link    { background: #55cc88; box-shadow: 0 0 0 1px #88eebb; }
 .col-badge-format  { background: #dd88cc; box-shadow: 0 0 0 1px #eeaadd; }
+
+.col-badge.badge-numbered {
+  font-size: 5px;
+  line-height: 6px;
+  text-align: center;
+  color: black;
+}
 
 .col-badge.badge-faint {
   background: transparent;
@@ -666,11 +674,11 @@ body {
 }
 
 .col-filter-btn.active {
-  color: #55cc88;
+  color: #55cccc;
 }
 
 .col-filter-btn.active svg {
-  fill: #55cc88;
+  fill: #55cccc;
 }
 
 
@@ -939,21 +947,21 @@ body {
 }
 
 .status-chip-filter {
-  color: var(--success);
-  background: rgba(85, 204, 136, 0.15);
-  border: 1px solid rgba(85, 204, 136, 0.3);
-}
-
-.status-chip-link {
   color: #55cccc;
   background: rgba(85, 204, 204, 0.15);
   border: 1px solid rgba(85, 204, 204, 0.3);
 }
 
+.status-chip-link {
+  color: #55cc88;
+  background: rgba(85, 204, 136, 0.15);
+  border: 1px solid rgba(85, 204, 136, 0.3);
+}
+
 .status-chip-link-source {
-  color: #55aadd;
-  background: rgba(85, 170, 221, 0.15);
-  border: 1px solid rgba(85, 170, 221, 0.3);
+  color: #ee6655;
+  background: rgba(238, 102, 85, 0.15);
+  border: 1px solid rgba(238, 102, 85, 0.3);
 }
 
 .status-chip-format {

@@ -114,28 +114,31 @@ test.describe('Column Header Badges', () => {
     expect(await sortBadge.count()).toBe(1);
   });
 
-  test('badge order in col-badges is link, format', async ({ page }) => {
+  test('badge order in col-badges is linking, link, format', async ({ page }) => {
     const badges = await page.$$eval(
       '.col-badges .col-badge',
       els => els.map(el => {
+        if (el.classList.contains('col-badge-linking')) return 'linking';
         if (el.classList.contains('col-badge-link')) return 'link';
         if (el.classList.contains('col-badge-format')) return 'format';
         return 'unknown';
       })
     );
     const unique = [...new Set(badges)];
-    expect(unique).toEqual(['link', 'format']);
+    expect(unique).toEqual(['linking', 'link', 'format']);
   });
 
   test('dot badge slots always rendered with faint outlines for inactive', async ({ page }) => {
     const badges = await page.$$eval(
       '.col-badges .col-badge',
-      els => els.slice(0, 2).map(el => ({
-        type: el.classList.contains('col-badge-link') ? 'link' : 'format',
+      els => els.slice(0, 3).map(el => ({
+        type: el.classList.contains('col-badge-linking') ? 'linking'
+            : el.classList.contains('col-badge-link') ? 'link' : 'format',
         faint: el.classList.contains('badge-faint'),
       }))
     );
     expect(badges).toEqual([
+      { type: 'linking', faint: true },
       { type: 'link', faint: true },
       { type: 'format', faint: true },
     ]);
@@ -244,7 +247,7 @@ test.describe('Column Header Badges', () => {
     expect(svgFill).toBe('none');
   });
 
-  test('filter funnel fills green when active', async ({ page }) => {
+  test('filter funnel fills teal when active', async ({ page }) => {
     await page.evaluate(() => {
       const win = app._test.windows[0];
       win.columnFilters['name'] = new Set(['Alice Johnson']);
@@ -258,7 +261,7 @@ test.describe('Column Header Badges', () => {
       const svg = btn.querySelector('svg');
       return getComputedStyle(svg).fill;
     });
-    expect(fill).toBe('rgb(85, 204, 136)');
+    expect(fill).toBe('rgb(85, 204, 204)');
   });
 
   test('filter funnel outline color matches sort triangle outline color', async ({ page }) => {
@@ -809,6 +812,509 @@ test.describe('Column Badge Link Isolation', () => {
     });
     expect(custLinkFilters).toBe(0);
 
+    await page.evaluate(() => app._test.unloadPlugin(0));
+  });
+});
+
+test.describe('Linking Badge', () => {
+  test.beforeEach(async ({ page }) => {
+    await openApp(page);
+    await uploadFile(page, '../test/customers.csv');
+    await waitForWindow(page, 'customers');
+    await uploadFile(page, '../test/orders.csv');
+    await waitForWindow(page, 'orders');
+  });
+
+  function loadLinkPlugin(page, config) {
+    return page.evaluate((cfg) => {
+      const compiled = app._test.compilePlugin(cfg);
+      cfg._compiled = compiled;
+      app._test.plugins.push(cfg);
+      app._test.rebuildTransformCache();
+    }, config);
+  }
+
+  function selectRow(page, tableName, rowIdx) {
+    return page.evaluate(({ tableName, rowIdx }) => {
+      const win = app._test.windows.find(w => w.tableName === tableName);
+      const t = app._test.tables[tableName];
+      const row = t.rows[rowIdx];
+      win.selectedCells = new Set();
+      for (const col of t.columns) {
+        win.selectedCells.add(`${row._rownum}:${col}`);
+      }
+      win.anchorCell = { rownum: row._rownum, col: t.columns[0] };
+      app._test.applyLinkFilters(win);
+    }, { tableName, rowIdx });
+  }
+
+  test('linking badge appears on source column when linking is active', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Link Test',
+      links: [{ source: { table: 'customers', column: '^id$' }, target: { table: 'orders', column: '^customer_id$' } }]
+    });
+    await selectRow(page, 'customers', 0);
+    await page.waitForTimeout(200);
+
+    const result = await page.evaluate(() => {
+      const win = app._test.windows.find(w => w.tableName === 'customers');
+      const colTh = (w, col) => w.el.querySelector('th[data-col-idx="' + app._test.tables[w.tableName].columns.indexOf(col) + '"]');
+      const container = colTh(win, 'id').querySelector('.col-badges');
+      const badge = container.querySelector('.col-badge-linking');
+      return {
+        exists: !!badge,
+        faint: badge ? badge.classList.contains('badge-faint') : null
+      };
+    });
+    expect(result.exists).toBe(true);
+    expect(result.faint).toBe(false);
+    await page.evaluate(() => app._test.unloadPlugin(0));
+  });
+
+  test('linking badge is faint on non-source columns', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Link Test',
+      links: [{ source: { table: 'customers', column: '^id$' }, target: { table: 'orders', column: '^customer_id$' } }]
+    });
+    await selectRow(page, 'customers', 0);
+    await page.waitForTimeout(200);
+
+    const result = await page.evaluate(() => {
+      const win = app._test.windows.find(w => w.tableName === 'customers');
+      const nameHeader = win.el.querySelector('th[data-col-idx="' + app._test.tables[win.tableName].columns.indexOf('name') + '"]');
+      const badge = nameHeader.querySelector('.col-badge-linking');
+      return badge ? badge.classList.contains('badge-faint') : null;
+    });
+    expect(result).toBe(true);
+    await page.evaluate(() => app._test.unloadPlugin(0));
+  });
+
+  test('col-linking class set on source header column', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Link Test',
+      links: [{ source: { table: 'customers', column: '^id$' }, target: { table: 'orders', column: '^customer_id$' } }]
+    });
+    await selectRow(page, 'customers', 0);
+    await page.waitForTimeout(200);
+
+    const classes = await page.evaluate(() => {
+      const win = app._test.windows.find(w => w.tableName === 'customers');
+      const idHeader = win.el.querySelector('th[data-col-idx="' + app._test.tables[win.tableName].columns.indexOf('id') + '"]');
+      return {
+        hasLinking: idHeader.classList.contains('col-linking'),
+        nameHasLinking: win.el.querySelector('th[data-col-idx="' + app._test.tables[win.tableName].columns.indexOf('name') + '"]').classList.contains('col-linking')
+      };
+    });
+    expect(classes.hasLinking).toBe(true);
+    expect(classes.nameHasLinking).toBe(false);
+    await page.evaluate(() => app._test.unloadPlugin(0));
+  });
+
+  test('linkSourceCols set on source window after linking', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Link Test',
+      links: [{ source: { table: 'customers', column: '^id$' }, target: { table: 'orders', column: '^customer_id$' } }]
+    });
+    await selectRow(page, 'customers', 0);
+    await page.waitForTimeout(200);
+
+    const result = await page.evaluate(() => {
+      const win = app._test.windows.find(w => w.tableName === 'customers');
+      return {
+        hasSrcCols: win.linkSourceCols instanceof Set,
+        cols: win.linkSourceCols ? [...win.linkSourceCols].sort() : null
+      };
+    });
+    expect(result.hasSrcCols).toBe(true);
+    expect(result.cols).toEqual(['id']);
+    await page.evaluate(() => app._test.unloadPlugin(0));
+  });
+
+  test('linkSourceCols cleared after clearing selection', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Link Test',
+      links: [{ source: { table: 'customers', column: '^id$' }, target: { table: 'orders', column: '^customer_id$' } }]
+    });
+    await selectRow(page, 'customers', 0);
+    await page.waitForTimeout(200);
+
+    await page.evaluate(() => {
+      const win = app._test.windows.find(w => w.tableName === 'customers');
+      win.selectedCells = new Set();
+      win.anchorCell = null;
+      app._test.clearLinkFilters(win);
+    });
+    await page.waitForTimeout(200);
+
+    const result = await page.evaluate(() => {
+      const win = app._test.windows.find(w => w.tableName === 'customers');
+      return win.linkSourceCols;
+    });
+    expect(result).toBeNull();
+    await page.evaluate(() => app._test.unloadPlugin(0));
+  });
+
+  test('linking badge has coral red background color', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Link Test',
+      links: [{ source: { table: 'customers', column: '^id$' }, target: { table: 'orders', column: '^customer_id$' } }]
+    });
+    await selectRow(page, 'customers', 0);
+    await page.waitForTimeout(200);
+
+    const bg = await page.evaluate(() => {
+      const win = app._test.windows.find(w => w.tableName === 'customers');
+      const badge = win.el.querySelector('th[data-col-idx="' + app._test.tables[win.tableName].columns.indexOf('id') + '"] .col-badge-linking');
+      return getComputedStyle(badge).backgroundColor;
+    });
+    expect(bg).toBe('rgb(238, 102, 85)');
+    await page.evaluate(() => app._test.unloadPlugin(0));
+  });
+
+  test('Linking chip color is coral red', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Link Test',
+      links: [{ source: { table: 'customers', column: '^id$' }, target: { table: 'orders', column: '^customer_id$' } }]
+    });
+    await selectRow(page, 'customers', 0);
+    await page.waitForTimeout(200);
+
+    const color = await page.evaluate(() => {
+      const win = app._test.windows.find(w => w.tableName === 'customers');
+      const chip = win.el.querySelector('.status-chip-link-source');
+      return getComputedStyle(chip).color;
+    });
+    expect(color).toBe('rgb(238, 102, 85)');
+    await page.evaluate(() => app._test.unloadPlugin(0));
+  });
+
+  test('Linked chip color is green', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Link Test',
+      links: [{ source: { table: 'customers', column: '^id$' }, target: { table: 'orders', column: '^customer_id$' } }]
+    });
+    await selectRow(page, 'customers', 0);
+    await page.waitForTimeout(200);
+
+    const color = await page.evaluate(() => {
+      const win = app._test.windows.find(w => w.tableName === 'orders');
+      const chip = win.el.querySelector('.status-chip-link');
+      return getComputedStyle(chip).color;
+    });
+    expect(color).toBe('rgb(85, 204, 136)');
+    await page.evaluate(() => app._test.unloadPlugin(0));
+  });
+
+  test('link badge color is green', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Link Test',
+      links: [{ source: { table: 'customers', column: '^id$' }, target: { table: 'orders', column: '^customer_id$' } }]
+    });
+    await selectRow(page, 'customers', 0);
+    await page.waitForTimeout(200);
+
+    const bg = await page.evaluate(() => {
+      const win = app._test.windows.find(w => w.tableName === 'orders');
+      const badge = win.el.querySelector('th[data-col-idx="' + app._test.tables[win.tableName].columns.indexOf('customer_id') + '"] .col-badge-link');
+      return getComputedStyle(badge).backgroundColor;
+    });
+    expect(bg).toBe('rgb(85, 204, 136)');
+    await page.evaluate(() => app._test.unloadPlugin(0));
+  });
+
+  test('primary source linking badge has no depth number', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Link Test',
+      links: [{ source: { table: 'customers', column: '^id$' }, target: { table: 'orders', column: '^customer_id$' } }]
+    });
+    await selectRow(page, 'customers', 0);
+    await page.waitForTimeout(200);
+
+    const result = await page.evaluate(() => {
+      const win = app._test.windows.find(w => w.tableName === 'customers');
+      const badge = win.el.querySelector('th[data-col-idx="' + app._test.tables[win.tableName].columns.indexOf('id') + '"] .col-badge-linking');
+      return {
+        text: badge.textContent,
+        numbered: badge.classList.contains('badge-numbered'),
+        linkDepth: win.linkDepth
+      };
+    });
+    expect(result.text).toBe('');
+    expect(result.numbered).toBe(false);
+    expect(result.linkDepth).toBe(1);
+    await page.evaluate(() => app._test.unloadPlugin(0));
+  });
+
+  test('primary target link badge has no depth number', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Link Test',
+      links: [{ source: { table: 'customers', column: '^id$' }, target: { table: 'orders', column: '^customer_id$' } }]
+    });
+    await selectRow(page, 'customers', 0);
+    await page.waitForTimeout(200);
+
+    const result = await page.evaluate(() => {
+      const win = app._test.windows.find(w => w.tableName === 'orders');
+      const badge = win.el.querySelector('th[data-col-idx="' + app._test.tables[win.tableName].columns.indexOf('customer_id') + '"] .col-badge-link');
+      return {
+        text: badge.textContent,
+        numbered: badge.classList.contains('badge-numbered'),
+        linkedByDepth: win.linkedByDepth
+      };
+    });
+    expect(result.text).toBe('');
+    expect(result.numbered).toBe(false);
+    expect(result.linkedByDepth).toBe(1);
+    await page.evaluate(() => app._test.unloadPlugin(0));
+  });
+});
+
+test.describe('Transitive Linking Badge', () => {
+  test.beforeEach(async ({ page }) => {
+    await openApp(page);
+    await uploadFile(page, '../example/products.csv');
+    await waitForWindow(page, 'products');
+    await uploadFile(page, '../example/orders.csv');
+    await waitForWindow(page, 'orders');
+    await uploadFile(page, '../example/customers.csv');
+    await waitForWindow(page, 'customers');
+  });
+
+  function loadLinkPlugin(page, config) {
+    return page.evaluate((cfg) => {
+      const compiled = app._test.compilePlugin(cfg);
+      cfg._compiled = compiled;
+      app._test.plugins.push(cfg);
+      app._test.rebuildTransformCache();
+    }, config);
+  }
+
+  function selectRow(page, tableName, rowIdx) {
+    return page.evaluate(({ tableName, rowIdx }) => {
+      const win = app._test.windows.find(w => w.tableName === tableName);
+      const t = app._test.tables[tableName];
+      const row = t.rows[rowIdx];
+      win.selectedCells = new Set();
+      for (const col of t.columns) {
+        win.selectedCells.add(`${row._rownum}:${col}`);
+      }
+      win.anchorCell = { rownum: row._rownum, col: t.columns[0] };
+      app._test.applyLinkFilters(win);
+    }, { tableName, rowIdx });
+  }
+
+  test('intermediate table gets linkSourceCols for outbound linking', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Transitive',
+      links: [
+        { source: { table: 'products', column: '^id$' }, target: { table: 'orders', column: '^product_id$' } },
+        { source: { table: 'orders', column: '^customer_id$' }, target: { table: 'customers', column: '^id$' } }
+      ]
+    });
+    await selectRow(page, 'products', 0);
+    await page.waitForTimeout(200);
+
+    const result = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      return {
+        hasSrcCols: ordersWin.linkSourceCols instanceof Set,
+        cols: ordersWin.linkSourceCols ? [...ordersWin.linkSourceCols].sort() : null
+      };
+    });
+    expect(result.hasSrcCols).toBe(true);
+    expect(result.cols).toEqual(['customer_id']);
+    await page.evaluate(() => app._test.unloadPlugin(0));
+  });
+
+  test('Linking chip active on intermediate table', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Transitive',
+      links: [
+        { source: { table: 'products', column: '^id$' }, target: { table: 'orders', column: '^product_id$' } },
+        { source: { table: 'orders', column: '^customer_id$' }, target: { table: 'customers', column: '^id$' } }
+      ]
+    });
+    await selectRow(page, 'products', 0);
+    await page.waitForTimeout(200);
+
+    const result = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const chip = ordersWin.el.querySelector('.status-chip-link-source');
+      return {
+        inactive: chip.classList.contains('chip-inactive')
+      };
+    });
+    expect(result.inactive).toBe(false);
+    await page.evaluate(() => app._test.unloadPlugin(0));
+  });
+
+  test('linking badge on intermediate shows depth number 2', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Transitive',
+      links: [
+        { source: { table: 'products', column: '^id$' }, target: { table: 'orders', column: '^product_id$' } },
+        { source: { table: 'orders', column: '^customer_id$' }, target: { table: 'customers', column: '^id$' } }
+      ]
+    });
+    await selectRow(page, 'products', 0);
+    await page.waitForTimeout(200);
+
+    const result = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const badge = ordersWin.el.querySelector('th[data-col-idx="' + app._test.tables[ordersWin.tableName].columns.indexOf('customer_id') + '"] .col-badge-linking');
+      return {
+        text: badge.textContent,
+        numbered: badge.classList.contains('badge-numbered'),
+        linkDepth: ordersWin.linkDepth
+      };
+    });
+    expect(result.text).toBe('2');
+    expect(result.numbered).toBe(true);
+    expect(result.linkDepth).toBe(2);
+    await page.evaluate(() => app._test.unloadPlugin(0));
+  });
+
+  test('link badge on tertiary target shows depth number 2', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Transitive',
+      links: [
+        { source: { table: 'products', column: '^id$' }, target: { table: 'orders', column: '^product_id$' } },
+        { source: { table: 'orders', column: '^customer_id$' }, target: { table: 'customers', column: '^id$' } }
+      ]
+    });
+    await selectRow(page, 'products', 0);
+    await page.waitForTimeout(200);
+
+    const result = await page.evaluate(() => {
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      const badge = custWin.el.querySelector('th[data-col-idx="' + app._test.tables[custWin.tableName].columns.indexOf('id') + '"] .col-badge-link');
+      return {
+        text: badge.textContent,
+        numbered: badge.classList.contains('badge-numbered'),
+        linkedByDepth: custWin.linkedByDepth
+      };
+    });
+    expect(result.text).toBe('2');
+    expect(result.numbered).toBe(true);
+    expect(result.linkedByDepth).toBe(2);
+    await page.evaluate(() => app._test.unloadPlugin(0));
+  });
+
+  test('direct target link badge has no depth number', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Transitive',
+      links: [
+        { source: { table: 'products', column: '^id$' }, target: { table: 'orders', column: '^product_id$' } },
+        { source: { table: 'orders', column: '^customer_id$' }, target: { table: 'customers', column: '^id$' } }
+      ]
+    });
+    await selectRow(page, 'products', 0);
+    await page.waitForTimeout(200);
+
+    const result = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const badge = ordersWin.el.querySelector('th[data-col-idx="' + app._test.tables[ordersWin.tableName].columns.indexOf('product_id') + '"] .col-badge-link');
+      return {
+        text: badge.textContent,
+        numbered: badge.classList.contains('badge-numbered'),
+        linkedByDepth: ordersWin.linkedByDepth
+      };
+    });
+    expect(result.text).toBe('');
+    expect(result.numbered).toBe(false);
+    expect(result.linkedByDepth).toBe(1);
+    await page.evaluate(() => app._test.unloadPlugin(0));
+  });
+
+  test('col-linking class on intermediate outbound column', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Transitive',
+      links: [
+        { source: { table: 'products', column: '^id$' }, target: { table: 'orders', column: '^product_id$' } },
+        { source: { table: 'orders', column: '^customer_id$' }, target: { table: 'customers', column: '^id$' } }
+      ]
+    });
+    await selectRow(page, 'products', 0);
+    await page.waitForTimeout(200);
+
+    const result = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      return {
+        custIdLinking: ordersWin.el.querySelector('th[data-col-idx="' + app._test.tables[ordersWin.tableName].columns.indexOf('customer_id') + '"]').classList.contains('col-linking'),
+        prodIdLinking: ordersWin.el.querySelector('th[data-col-idx="' + app._test.tables[ordersWin.tableName].columns.indexOf('product_id') + '"]').classList.contains('col-linking')
+      };
+    });
+    expect(result.custIdLinking).toBe(true);
+    expect(result.prodIdLinking).toBe(false);
+    await page.evaluate(() => app._test.unloadPlugin(0));
+  });
+
+  test('depth numbers cleared after clearing selection', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Transitive',
+      links: [
+        { source: { table: 'products', column: '^id$' }, target: { table: 'orders', column: '^product_id$' } },
+        { source: { table: 'orders', column: '^customer_id$' }, target: { table: 'customers', column: '^id$' } }
+      ]
+    });
+    await selectRow(page, 'products', 0);
+    await page.waitForTimeout(200);
+
+    await page.evaluate(() => {
+      const prodWin = app._test.windows.find(w => w.tableName === 'products');
+      prodWin.selectedCells = new Set();
+      prodWin.anchorCell = null;
+      app._test.clearLinkFilters(prodWin);
+    });
+    await page.waitForTimeout(200);
+
+    const result = await page.evaluate(() => {
+      const prodWin = app._test.windows.find(w => w.tableName === 'products');
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      return {
+        prodDepth: prodWin.linkDepth,
+        prodSrcCols: prodWin.linkSourceCols,
+        ordersDepth: ordersWin.linkDepth,
+        ordersSrcCols: ordersWin.linkSourceCols,
+        ordersLinkedBy: ordersWin.linkedByDepth,
+        custLinkedBy: custWin.linkedByDepth
+      };
+    });
+    expect(result.prodDepth).toBeNull();
+    expect(result.prodSrcCols).toBeNull();
+    expect(result.ordersDepth).toBeNull();
+    expect(result.ordersSrcCols).toBeNull();
+    expect(result.ordersLinkedBy).toBeNull();
+    expect(result.custLinkedBy).toBeNull();
+    await page.evaluate(() => app._test.unloadPlugin(0));
+  });
+
+  test('suspended linking badge shows faint class', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Transitive',
+      links: [
+        { source: { table: 'products', column: '^id$' }, target: { table: 'orders', column: '^product_id$' } },
+        { source: { table: 'orders', column: '^customer_id$' }, target: { table: 'customers', column: '^id$' } }
+      ]
+    });
+    await selectRow(page, 'products', 0);
+    await page.waitForTimeout(200);
+
+    // Suspend linking on products
+    await page.evaluate(() => {
+      const prodWin = app._test.windows.find(w => w.tableName === 'products');
+      prodWin.disableLinkSource = true;
+      app._test.clearLinkFilters(prodWin);
+    });
+    await page.waitForTimeout(200);
+
+    const result = await page.evaluate(() => {
+      const prodWin = app._test.windows.find(w => w.tableName === 'products');
+      const badge = prodWin.el.querySelector('th[data-col-idx="' + app._test.tables[prodWin.tableName].columns.indexOf('id') + '"] .col-badge-linking');
+      return badge ? badge.classList.contains('badge-faint') : null;
+    });
+    expect(result).toBe(true);
     await page.evaluate(() => app._test.unloadPlugin(0));
   });
 });

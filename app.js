@@ -961,6 +961,9 @@ const app = (() => {
       filterText: '',
       columnFilters: {},  // { colName: Set of allowed string values }
       linkFilters: {},    // { colName: Set of allowed string values } — set by cross-table links
+      linkSourceCols: null, // Set of col names used for outbound linking (primary + transitive)
+      linkDepth: null, // BFS depth at which this table links outward (1=primary, 2=secondary, etc.)
+      linkedByDepth: null, // BFS depth of the table that linked to this one (2=linked by secondary, etc.)
       selectedCol: null, // column name currently highlighted (target for Ctrl+Arrow reorder)
       selectedCells: new Set(), // keys "rownum:colName" for cells highlighted by selection
       anchorCell: null, // { rownum, col } — fixed corner for Ctrl+Shift+Arrow extension
@@ -3178,6 +3181,10 @@ const app = (() => {
         th.classList.add('col-linked');
         if (win.disableLink) th.classList.add('feature-disabled');
       }
+      if (win.linkSourceCols && win.linkSourceCols.has(col)) {
+        th.classList.add('col-linking');
+        if (win.disableLinkSource) th.classList.add('feature-disabled');
+      }
       if (hasDisplayTransform(win.tableName, col)) {
         th.classList.add('col-transformed');
         if (win.disabledTransforms.size > 0 && win.disabledTransforms.has(col)) th.classList.add('feature-disabled');
@@ -3244,8 +3251,10 @@ const app = (() => {
       });
       thInner.appendChild(filterBtn);
       th.appendChild(thInner);
+      const linkSrcActive = win.linkSourceCols && win.linkSourceCols.has(col);
       const badgeDefs = [
-        { cls: 'link', active: !!win.linkFilters[col], hidden: !win.linkFilters[col] || win.disableLink },
+        { cls: 'linking', active: linkSrcActive, hidden: !linkSrcActive || win.disableLinkSource, depth: win.linkDepth },
+        { cls: 'link', active: !!win.linkFilters[col], hidden: !win.linkFilters[col] || win.disableLink, depth: win.linkedByDepth },
         { cls: 'format', active: hasDisplayTransform(win.tableName, col),
           hidden: !hasDisplayTransform(win.tableName, col) || (win.disabledTransforms.size > 0 && win.disabledTransforms.has(col)) },
       ];
@@ -3255,6 +3264,10 @@ const app = (() => {
         for (const b of badgeDefs) {
           const dot = document.createElement('span');
           dot.className = 'col-badge col-badge-' + b.cls + (b.hidden ? ' badge-faint' : '');
+          if ((b.cls === 'linking' || b.cls === 'link') && !b.hidden && b.depth >= 2) {
+            dot.textContent = String(b.depth);
+            dot.classList.add('badge-numbered');
+          }
           bc.appendChild(dot);
         }
         th.appendChild(bc);
@@ -4001,7 +4014,7 @@ const app = (() => {
     const statusCenter = win.statusbarEl.querySelector('.status-center');
     statusCenter.innerHTML = '';
     const chips = [
-      { key: 'link-source', label: 'Linking', active: win.id === _activeLinkSourceId || win.disableLinkSource, disabled: win.disableLinkSource,
+      { key: 'link-source', label: 'Linking', active: win.id === _activeLinkSourceId || !!win.linkSourceCols || win.disableLinkSource, disabled: win.disableLinkSource,
         title: (on) => on ? 'Linking to other tables \u2014 click to suspend' : 'Linking suspended \u2014 click to resume',
         toggle: () => {
           win.disableLinkSource = !win.disableLinkSource;
@@ -4045,6 +4058,7 @@ const app = (() => {
           try { rebuildTable(win); }
           finally { if (chip.key !== 'link-source') _applyingLinkFilters = false; }
         });
+        if (chip.key === 'link-source') el._hasClickHandler = true;
       }
       statusCenter.appendChild(el);
     }
@@ -6547,7 +6561,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.31 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.33 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `, true);
@@ -6614,9 +6628,9 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <li><strong>Multi-column sort:</strong> Shift+click additional sort badges. Numbers inside triangle badges indicate sort priority.</li>
 <li><strong>Filter:</strong> Type a SQL <code>WHERE</code> clause in the filter bar (without the <code>WHERE</code> keyword). For example: <code>age > 30 AND name LIKE '%Smith%'</code></li>
 <li>The filter supports all SQLite expressions including <code>REGEXP</code> (see below).</li>
-<li><strong>Column autofilter:</strong> Click the funnel icon on any column header to open a dropdown with checkboxes for each unique value. Use the search box to narrow the list. Uncheck values and click Apply to hide matching rows. Multiple column filters AND together and combine with the WHERE filter bar. The funnel fills green when a filter is active. Click Clear to remove a column&rsquo;s filter. Click the Filtered chip in the status bar to clear all column autofilters and the WHERE filter at once.</li>
+<li><strong>Column autofilter:</strong> Click the funnel icon on any column header to open a dropdown with checkboxes for each unique value. Use the search box to narrow the list. Uncheck values and click Apply to hide matching rows. Multiple column filters AND together and combine with the WHERE filter bar. The funnel fills teal when a filter is active. Click Clear to remove a column&rsquo;s filter. Click the Filtered chip in the status bar to clear all column autofilters and the WHERE filter at once.</li>
 <li><strong>Status chips:</strong> Five labeled chips are always shown in the status bar center in order: Linking, Linked, Formatted, Sorted, Filtered. Inactive chips appear with faint outlines. <strong>Sorted</strong> and <strong>Filtered</strong> chips clear the sort or filters when clicked (chip becomes inactive). <strong>Linked</strong> (on target tables receiving link filters) and <strong>Formatted</strong> chips toggle suspend/resume &mdash; suspended features show the chip with strikethrough. A <strong>Linking</strong> chip appears on the source table driving link filters; click to suspend/resume outbound linking. Keyboard shortcuts: <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>1</code> (clear sort), <code>2</code> (clear filters), <code>3</code> (toggle link), <code>4</code> (toggle format).</li>
-<li><strong>Column badges:</strong> The sort badge (orange triangle) and filter button (funnel icon) are rendered inline inside the column header as equal-sized clickable buttons. Both the sort triangle outline and funnel outline light up only when hovering their own button. Click the sort badge to sort; click the filter button to open the autofilter. The sort badge shows a filled triangle when sorted or a faint outline when unsorted. The filter button shows a faint funnel outline when inactive or a filled green funnel when a filter is active. Small link (teal dot) and format (pink dot) badges appear centered over the bottom border of column headers. Both slots are always rendered &mdash; active badges are filled, inactive badges show faint outlines. Badge colors match the status bar chips.</li>
+<li><strong>Column badges:</strong> The sort badge (orange triangle) and filter button (funnel icon) are rendered inline inside the column header as equal-sized clickable buttons. Both the sort triangle outline and funnel outline light up only when hovering their own button. Click the sort badge to sort; click the filter button to open the autofilter. The sort badge shows a filled triangle when sorted or a faint outline when unsorted. The filter button shows a faint funnel outline when inactive or a filled teal funnel when a filter is active. Small linking (coral red dot), link (green dot), and format (pink dot) badges appear centered over the bottom border of column headers. All three slots are always rendered &mdash; active badges are filled, inactive badges show faint outlines. The linking badge appears on columns used for outbound linking; the link badge appears on columns receiving link filters. For transitive links, badges show a depth number (2 for secondary, 3 for tertiary, etc.). Badge colors match the status bar chips.</li>
 </ul>
 
 <h4>SQL Console</h4>
@@ -6773,9 +6787,9 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 }</pre>
 <p>The <code>version</code>, <code>author</code>, <code>created</code>, and <code>description</code> fields are optional metadata shown in the About dialog. The <code>tables</code> array and <code>links</code> array are both optional &mdash; a plugin can have just display rules, just links, or both.</p>
 
-<p><strong>Cross-table linking:</strong> The <code>links</code> array defines relationships between tables. When you select rows in a source table, the target table is automatically filtered to matching values. Links propagate transitively &mdash; selecting a product filters orders for that product, which in turn filters customers who placed those orders. All patterns are regex. The source table is excluded from its own link targets. Link-filtered columns show a teal dot badge at the bottom-center of the header and a <strong>Linked</strong> chip (teal) on target tables. A <strong>Linking</strong> chip (blue) appears on the source table driving the filters; click to suspend/resume outbound linking &mdash; the chip stays visible when suspended so it can be re-enabled. When a table receives link filters from a new source, any previously suspended Linking state on that table is reset. Clearing the selection clears the link filter. Link filters are separate from manual column autofilters.</p>
+<p><strong>Cross-table linking:</strong> The <code>links</code> array defines relationships between tables. When you select rows in a source table, the target table is automatically filtered to matching values. Links propagate transitively &mdash; selecting a product filters orders for that product, which in turn filters customers who placed those orders. All patterns are regex. The source table is excluded from its own link targets. Link-filtered columns show a green dot badge (link badge) at the bottom-center of the header and a <strong>Linked</strong> chip on target tables. Outbound linking columns show a coral red dot badge (linking badge). A <strong>Linking</strong> chip appears on the source table and on intermediate tables in a transitive chain; click to suspend/resume outbound linking &mdash; the chip stays visible when suspended so it can be re-enabled. For transitive links, depth numbers appear inside the linking and link badges (2 for secondary, 3 for tertiary, etc.). When a table receives link filters from a new source, any previously suspended Linking state on that table is reset. Clearing the selection clears the link filter. Link filters are separate from manual column autofilters.</p>
 
-<p><strong>Toggle:</strong> Columns with an active plugin transform show a pink dot badge at the bottom-center of the header. The <strong>Formatted</strong> chip in the status bar toggles all transforms on/off (<code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>4</code>). A <strong>Sorted</strong> chip appears when sort is active (click to clear), and a <strong>Filtered</strong> chip when filters are active (click to clear).</p>
+<p><strong>Toggle:</strong> Columns with an active plugin transform show a pink dot badge (format badge) at the bottom-center of the header. The <strong>Formatted</strong> chip in the status bar toggles all transforms on/off (<code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>4</code>). A <strong>Sorted</strong> chip appears when sort is active (click to clear), and a <strong>Filtered</strong> chip when filters are active (click to clear).</p>
 
 <p><strong>Editing:</strong> When you enter edit mode on a cell with a display transform, the raw value is shown so you edit the actual data. The formatted display returns when you finish editing.</p>
 
@@ -8552,6 +8566,21 @@ ${_aiImageContext()}`;
     return !!(tableCache && tableCache[column]);
   }
 
+  function isLinkSourceColumn(tableName, col) {
+    for (const link of _linkCache) {
+      if (link.sourceTableRe.test(tableName) && link.sourceColRe.test(col)) return true;
+    }
+    return false;
+  }
+
+  function linkSourceColsEqual(a, b) {
+    if (!a && !b) return true;
+    if (!a || !b) return false;
+    if (a.size !== b.size) return false;
+    for (const v of a) { if (!b.has(v)) return false; }
+    return true;
+  }
+
   function linkFiltersEqual(a, b) {
     const aKeys = Object.keys(a);
     const bKeys = Object.keys(b);
@@ -8575,7 +8604,7 @@ ${_aiImageContext()}`;
       if (!statusCenter) continue;
       const existing = statusCenter.querySelector('.status-chip-link-source');
       if (!existing) continue;
-      const shouldShow = win.id === _activeLinkSourceId || win.disableLinkSource;
+      const shouldShow = win.id === _activeLinkSourceId || !!win.linkSourceCols || win.disableLinkSource;
       if (shouldShow) {
         existing.className = 'status-chip status-chip-link-source' + (win.disableLinkSource ? ' off' : '');
         existing.title = win.disableLinkSource ? 'Linking suspended — click to resume' : 'Linking to other tables — click to suspend';
@@ -8619,6 +8648,9 @@ ${_aiImageContext()}`;
     const queue = [{ tableName: sourceTable, rows: selectedRows }];
     const visited = new Set([sourceTable]);
     const allFilters = new Map();
+    const allSourceCols = new Map();
+    const allSourceDepths = new Map();
+    const allLinkedByDepths = new Map();
     let depth = 0;
 
     while (queue.length > 0 && depth < 10) {
@@ -8640,6 +8672,7 @@ ${_aiImageContext()}`;
           }
           if (sourceValues.size === 0) continue;
 
+          let didLink = false;
           for (const targetName of Object.keys(tables)) {
             if (visited.has(targetName)) continue;
             if (!link.targetTableRe.test(targetName)) continue;
@@ -8647,11 +8680,13 @@ ${_aiImageContext()}`;
             const targetColNames = tt.columns.filter(c => link.targetColRe.test(c));
             if (targetColNames.length === 0) continue;
 
+            didLink = true;
             const newFilters = {};
             for (const tc of targetColNames) {
               newFilters[tc] = sourceValues;
             }
             allFilters.set(targetName, newFilters);
+            allLinkedByDepths.set(targetName, depth);
             visited.add(targetName);
 
             const matchingRows = tt.rows.filter(row => {
@@ -8664,27 +8699,43 @@ ${_aiImageContext()}`;
               queue.push({ tableName: targetName, rows: matchingRows });
             }
           }
+          if (didLink) {
+            let sc = allSourceCols.get(srcName);
+            if (!sc) { sc = new Set(); allSourceCols.set(srcName, sc); }
+            for (const c of sourceColNames) sc.add(c);
+            if (!allSourceDepths.has(srcName)) allSourceDepths.set(srcName, depth);
+          }
         }
       }
     }
 
+    const prevSourceId = _activeLinkSourceId;
     _activeLinkSourceId = sourceWin.id;
     _applyingLinkFilters = true;
     try {
       for (const win of windows) {
         if (!win.tableName) continue;
         const newFilters = allFilters.get(win.tableName) || {};
+        const newSrcCols = allSourceCols.get(win.tableName) || null;
+        const newDepth = allSourceDepths.get(win.tableName) || null;
+        const newLinkedByDepth = allLinkedByDepths.get(win.tableName) || null;
         if (Object.keys(newFilters).length > 0 && win.disableLinkSource) {
           win.disableLinkSource = false;
         }
-        if (!linkFiltersEqual(win.linkFilters, newFilters)) {
-          win.linkFilters = newFilters;
-          rebuildTable(win);
-        }
+        const filtersChanged = !linkFiltersEqual(win.linkFilters, newFilters);
+        const srcColsChanged = !linkSourceColsEqual(win.linkSourceCols, newSrcCols);
+        const depthChanged = win.linkDepth !== newDepth;
+        const linkedByChanged = win.linkedByDepth !== newLinkedByDepth;
+        if (filtersChanged) win.linkFilters = newFilters;
+        if (srcColsChanged) win.linkSourceCols = newSrcCols;
+        if (depthChanged) win.linkDepth = newDepth;
+        if (linkedByChanged) win.linkedByDepth = newLinkedByDepth;
+        if (filtersChanged || srcColsChanged || depthChanged || linkedByChanged) rebuildTable(win);
       }
     } finally {
       _applyingLinkFilters = false;
     }
+    if (prevSourceId !== sourceWin.id) rebuildTable(sourceWin);
     updateLinkingChips();
   }
 
@@ -8699,18 +8750,28 @@ ${_aiImageContext()}`;
       }
       if (!isLinkSource) return;
     }
+    const prevSourceId = _activeLinkSourceId;
     if (sourceWin && _activeLinkSourceId === sourceWin.id) _activeLinkSourceId = null;
     else if (!sourceWin) _activeLinkSourceId = null;
     _applyingLinkFilters = true;
     try {
       for (const win of windows) {
-        if (Object.keys(win.linkFilters).length > 0) {
-          win.linkFilters = {};
-          rebuildTable(win);
-        }
+        const hadFilters = Object.keys(win.linkFilters).length > 0;
+        const hadSrcCols = !!win.linkSourceCols;
+        const hadDepth = win.linkDepth !== null;
+        const hadLinkedBy = win.linkedByDepth !== null;
+        if (hadFilters) win.linkFilters = {};
+        if (hadSrcCols) win.linkSourceCols = null;
+        if (hadDepth) win.linkDepth = null;
+        if (hadLinkedBy) win.linkedByDepth = null;
+        if (hadFilters || hadSrcCols || hadDepth || hadLinkedBy) rebuildTable(win);
       }
     } finally {
       _applyingLinkFilters = false;
+    }
+    if (prevSourceId && !_activeLinkSourceId) {
+      const prevWin = windows.find(w => w.id === prevSourceId);
+      if (prevWin) rebuildTable(prevWin);
     }
     updateLinkingChips();
   }
