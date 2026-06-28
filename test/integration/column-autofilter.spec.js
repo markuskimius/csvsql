@@ -317,12 +317,12 @@ test.describe('Column AutoFilter', () => {
     expect(await page.locator('.data-table tbody tr:not(.virtual-pad)').count()).toBe(10);
   });
 
-  test('filter icon uses ☰ and sort badge appears on sort', async ({ page }) => {
+  test('filter icon uses SVG funnel and sort badge appears on sort', async ({ page }) => {
     const th = page.locator('.data-table th:not(.row-num-header)').first();
 
-    // Filter icon should be ☰
-    const filterText = await th.locator('.col-filter-btn').textContent();
-    expect(filterText.trim()).toBe('☰');
+    // Filter icon should be an SVG funnel
+    const hasSvg = await th.locator('.col-filter-btn svg').count();
+    expect(hasSvg).toBe(1);
 
     // Sort the column
     await th.locator('.col-name').click();

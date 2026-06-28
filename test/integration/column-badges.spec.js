@@ -174,9 +174,7 @@ test.describe('Column Header Badges', () => {
   });
 
   test('filter button shows hover highlight', async ({ page }) => {
-    const th = page.locator('.data-table th:not(.row-num-header)').first();
-    await th.hover();
-    const filterBtn = th.locator('.col-filter-btn');
+    const filterBtn = page.locator('.col-filter-btn').first();
     const bgBefore = await filterBtn.evaluate(el => getComputedStyle(el).backgroundColor);
     await filterBtn.hover();
     const bgAfter = await filterBtn.evaluate(el => getComputedStyle(el).backgroundColor);
@@ -209,12 +207,104 @@ test.describe('Column Header Badges', () => {
     await sortBtn.hover();
     const sortBg = await sortBtn.evaluate(el => getComputedStyle(el).backgroundColor);
 
-    const th = page.locator('.data-table th:not(.row-num-header)').first();
-    const filterBtn = th.locator('.col-filter-btn');
+    const filterBtn = page.locator('.col-filter-btn').first();
     await filterBtn.hover();
     const filterBg = await filterBtn.evaluate(el => getComputedStyle(el).backgroundColor);
 
     expect(sortBg).toBe(filterBg);
+  });
+
+  test('filter button contains an SVG funnel icon', async ({ page }) => {
+    const svg = await page.evaluate(() => {
+      const btn = document.querySelector('.col-filter-btn');
+      const svgEl = btn.querySelector('svg');
+      if (!svgEl) return null;
+      const path = svgEl.querySelector('path');
+      return {
+        hasSvg: true,
+        hasPath: !!path,
+        fill: svgEl.getAttribute('fill'),
+        stroke: svgEl.getAttribute('stroke'),
+        viewBox: svgEl.getAttribute('viewBox'),
+      };
+    });
+    expect(svg).not.toBeNull();
+    expect(svg.hasSvg).toBe(true);
+    expect(svg.hasPath).toBe(true);
+    expect(svg.fill).toBe('none');
+    expect(svg.stroke).toBe('currentColor');
+  });
+
+  test('filter funnel is outline-only when inactive', async ({ page }) => {
+    const svgFill = await page.evaluate(() => {
+      const btn = document.querySelector('.col-filter-btn:not(.active)');
+      const svg = btn.querySelector('svg');
+      return svg.getAttribute('fill');
+    });
+    expect(svgFill).toBe('none');
+  });
+
+  test('filter funnel fills green when active', async ({ page }) => {
+    await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.columnFilters['name'] = new Set(['Alice Johnson']);
+      app._test.rebuildTable(win);
+    });
+    await page.waitForTimeout(100);
+
+    const fill = await page.evaluate(() => {
+      const btn = document.querySelector('.col-filter-btn.active');
+      if (!btn) return null;
+      const svg = btn.querySelector('svg');
+      return getComputedStyle(svg).fill;
+    });
+    expect(fill).toBe('rgb(85, 204, 136)');
+  });
+
+  test('filter funnel outline color matches sort triangle outline color', async ({ page }) => {
+    const colors = await page.evaluate(() => {
+      const filterBtn = document.querySelector('.col-filter-btn:not(.active)');
+      const filterColor = getComputedStyle(filterBtn).color;
+      return { filterColor };
+    });
+    expect(colors.filterColor).toBe('rgba(255, 255, 255, 0.15)');
+  });
+
+  test('filter funnel does not light up on header hover, only on button hover', async ({ page }) => {
+    const filterBtn = page.locator('.col-filter-btn').first();
+
+    // Move mouse away from the header entirely first
+    await page.mouse.move(0, 0);
+    const bgBefore = await filterBtn.evaluate(el => getComputedStyle(el).backgroundColor);
+
+    // Hover the filter button directly
+    await filterBtn.hover();
+    const bgAfterBtnHover = await filterBtn.evaluate(el => getComputedStyle(el).backgroundColor);
+    expect(bgAfterBtnHover).toBe('rgba(124, 111, 247, 0.15)');
+    expect(bgBefore).not.toBe(bgAfterBtnHover);
+  });
+
+  test('sort triangle outline does not light up on header hover, only on sort button hover', async ({ page }) => {
+    const th = page.locator('.data-table th:not(.row-num-header)').first();
+    const sortBtn = th.locator('.col-sort-btn');
+    const outline = sortBtn.locator('.col-badge-sort.sort-outline');
+
+    const bgBefore = await outline.evaluate(el => getComputedStyle(el).backgroundImage);
+    await th.hover({ position: { x: 5, y: 5 } });
+    const bgAfterThHover = await outline.evaluate(el => getComputedStyle(el).backgroundImage);
+    expect(bgAfterThHover).toBe(bgBefore);
+
+    await sortBtn.hover();
+    const bgAfterBtnHover = await outline.evaluate(el => getComputedStyle(el).backgroundImage);
+    expect(bgAfterBtnHover).not.toBe(bgBefore);
+  });
+
+  test('filter button has zero left margin for tight spacing with sort button', async ({ page }) => {
+    const margin = await page.evaluate(() => {
+      const btn = document.querySelector('.col-filter-btn');
+      return getComputedStyle(btn).marginLeft;
+    });
+    expect(margin).toBe('0px');
   });
 
   test('sort button click still triggers sort', async ({ page }) => {

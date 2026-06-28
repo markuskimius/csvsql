@@ -592,6 +592,10 @@ body {
   background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 8'%3E%3Cpolygon points='5,0.75 0.75,7.25 9.25,7.25' fill='none' stroke='white' stroke-opacity='0.15' stroke-width='1.2' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat center / contain;
 }
 
+.col-sort-btn:hover .col-badge-sort.sort-outline {
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 8'%3E%3Cpolygon points='5,0.75 0.75,7.25 9.25,7.25' fill='none' stroke='white' stroke-opacity='0.5' stroke-width='1.2' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat center / contain;
+}
+
 .col-badge-sort .sort-num {
   position: absolute;
   font-size: 7px;
@@ -640,12 +644,11 @@ body {
 }
 
 .col-filter-btn {
-  margin-left: 2px;
+  margin-left: 0px;
   font-size: 14px;
-  color: var(--text-dim);
-  opacity: 0.5;
+  color: rgba(255,255,255,0.15);
   cursor: pointer;
-  transition: opacity 0.15s;
+  transition: color 0.15s;
   flex-shrink: 0;
   border-radius: 2px;
   display: flex;
@@ -657,19 +660,17 @@ body {
   top: -1px;
 }
 
-.data-table th:hover .col-filter-btn,
-.col-filter-btn.active {
-  opacity: 1;
-}
-
 .col-filter-btn:hover {
-  color: var(--accent-hover);
+  color: var(--text-dim);
   background: rgba(124,111,247,0.15);
 }
 
 .col-filter-btn.active {
   color: #55cc88;
-  opacity: 1;
+}
+
+.col-filter-btn.active svg {
+  fill: #55cc88;
 }
 
 
