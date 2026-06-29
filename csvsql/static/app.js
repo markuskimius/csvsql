@@ -3048,6 +3048,7 @@ const app = (() => {
   function buildTableHTML(win, container, tableData) {
     closeAutoFilter();
     const { columns, rows } = tableData;
+    const pluginRelevant = tableHasPluginRules(win.tableName);
     let displayRows = [...rows];
 
     // SQL WHERE filter
@@ -3251,14 +3252,14 @@ const app = (() => {
       });
       thInner.appendChild(filterBtn);
       th.appendChild(thInner);
-      const linkSrcActive = win.linkSourceCols && win.linkSourceCols.has(col);
-      const badgeDefs = [
-        { cls: 'linking', active: linkSrcActive, hidden: !linkSrcActive || win.disableLinkSource, depth: win.linkDepth },
-        { cls: 'link', active: !!win.linkFilters[col], hidden: !win.linkFilters[col] || win.disableLink, depth: win.linkedByDepth },
-        { cls: 'format', active: hasDisplayTransform(win.tableName, col),
-          hidden: !hasDisplayTransform(win.tableName, col) || (win.disabledTransforms.size > 0 && win.disabledTransforms.has(col)) },
-      ];
-      {
+      if (pluginRelevant) {
+        const linkSrcActive = win.linkSourceCols && win.linkSourceCols.has(col);
+        const badgeDefs = [
+          { cls: 'linking', active: linkSrcActive, hidden: !linkSrcActive || win.disableLinkSource, depth: win.linkDepth },
+          { cls: 'link', active: !!win.linkFilters[col], hidden: !win.linkFilters[col] || win.disableLink, depth: win.linkedByDepth },
+          { cls: 'format', active: hasDisplayTransform(win.tableName, col),
+            hidden: !hasDisplayTransform(win.tableName, col) || (win.disabledTransforms.size > 0 && win.disabledTransforms.has(col)) },
+        ];
         const bc = document.createElement('span');
         bc.className = 'col-badges';
         for (const b of badgeDefs) {
@@ -4014,17 +4015,17 @@ const app = (() => {
     const statusCenter = win.statusbarEl.querySelector('.status-center');
     statusCenter.innerHTML = '';
     const chips = [
-      { key: 'link-source', label: 'Linking', active: win.id === _activeLinkSourceId || !!win.linkSourceCols || win.disableLinkSource, disabled: win.disableLinkSource,
+      pluginRelevant && { key: 'link-source', label: 'Linking', active: win.id === _activeLinkSourceId || !!win.linkSourceCols || win.disableLinkSource, disabled: win.disableLinkSource,
         title: (on) => on ? 'Linking to other tables \u2014 click to suspend' : 'Linking suspended \u2014 click to resume',
         toggle: () => {
           win.disableLinkSource = !win.disableLinkSource;
           if (win.disableLinkSource) clearLinkFilters(win);
           else applyLinkFilters(win);
         } },
-      { key: 'link', label: 'Linked', active: hasLinkFilters || win.disableLink, disabled: win.disableLink,
+      pluginRelevant && { key: 'link', label: 'Linked', active: hasLinkFilters || win.disableLink, disabled: win.disableLink,
         title: (on) => on ? 'Link filters enabled \u2014 click to suspend' : 'Link filters suspended \u2014 click to resume',
         toggle: () => { win.disableLink = !win.disableLink; } },
-      { key: 'format', label: 'Formatted', active: hasTransforms, disabled: hasTransforms && transformedCols.every(c => win.disabledTransforms.has(c)),
+      pluginRelevant && { key: 'format', label: 'Formatted', active: hasTransforms, disabled: hasTransforms && transformedCols.every(c => win.disabledTransforms.has(c)),
         title: (on) => on ? 'Formatting enabled \u2014 click to suspend' : 'Formatting suspended \u2014 click to resume',
         toggle: () => {
           const allOff = transformedCols.every(c => win.disabledTransforms.has(c));
@@ -4044,7 +4045,7 @@ const app = (() => {
           if (filterInput) filterInput.value = '';
         } },
     ];
-    for (const chip of chips) {
+    for (const chip of chips.filter(Boolean)) {
       const el = document.createElement('span');
       const inactive = !chip.active;
       el.className = 'status-chip status-chip-' + chip.key + (inactive ? ' chip-inactive' : '') + (chip.disabled ? ' off' : '');
@@ -6561,7 +6562,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.33 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.34 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `, true);
@@ -6629,8 +6630,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <li><strong>Filter:</strong> Type a SQL <code>WHERE</code> clause in the filter bar (without the <code>WHERE</code> keyword). For example: <code>age > 30 AND name LIKE '%Smith%'</code></li>
 <li>The filter supports all SQLite expressions including <code>REGEXP</code> (see below).</li>
 <li><strong>Column autofilter:</strong> Click the funnel icon on any column header to open a dropdown with checkboxes for each unique value. Use the search box to narrow the list. Uncheck values and click Apply to hide matching rows. Multiple column filters AND together and combine with the WHERE filter bar. The funnel fills teal when a filter is active. Click Clear to remove a column&rsquo;s filter. Click the Filtered chip in the status bar to clear all column autofilters and the WHERE filter at once.</li>
-<li><strong>Status chips:</strong> Five labeled chips are always shown in the status bar center in order: Linking, Linked, Formatted, Sorted, Filtered. Inactive chips appear with faint outlines. <strong>Sorted</strong> and <strong>Filtered</strong> chips clear the sort or filters when clicked (chip becomes inactive). <strong>Linked</strong> (on target tables receiving link filters) and <strong>Formatted</strong> chips toggle suspend/resume &mdash; suspended features show the chip with strikethrough. A <strong>Linking</strong> chip appears on the source table driving link filters; click to suspend/resume outbound linking. Keyboard shortcuts: <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>1</code> (clear sort), <code>2</code> (clear filters), <code>3</code> (toggle link), <code>4</code> (toggle format).</li>
-<li><strong>Column badges:</strong> The sort badge (orange triangle) and filter button (funnel icon) are rendered inline inside the column header as equal-sized clickable buttons. Both the sort triangle outline and funnel outline light up only when hovering their own button. Click the sort badge to sort; click the filter button to open the autofilter. The sort badge shows a filled triangle when sorted or a faint outline when unsorted. The filter button shows a faint funnel outline when inactive or a filled teal funnel when a filter is active. Small linking (coral red dot), link (green dot), and format (pink dot) badges appear centered over the bottom border of column headers. All three slots are always rendered &mdash; active badges are filled, inactive badges show faint outlines. The linking badge appears on columns used for outbound linking; the link badge appears on columns receiving link filters. For transitive links, badges show a depth number (2 for secondary, 3 for tertiary, etc.). Badge colors match the status bar chips.</li>
+<li><strong>Status chips:</strong> <strong>Sorted</strong> and <strong>Filtered</strong> chips are always shown in the status bar center. <strong>Linking</strong>, <strong>Linked</strong>, and <strong>Formatted</strong> chips only appear when a loaded plugin references the table. <strong>Sorted</strong> and <strong>Filtered</strong> chips clear the sort or filters when clicked (chip becomes inactive). <strong>Linked</strong> (on target tables receiving link filters) and <strong>Formatted</strong> chips toggle suspend/resume &mdash; suspended features show the chip with strikethrough. A <strong>Linking</strong> chip appears on the source table driving link filters; click to suspend/resume outbound linking. Keyboard shortcuts: <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>1</code> (clear sort), <code>2</code> (clear filters), <code>3</code> (toggle link), <code>4</code> (toggle format).</li>
+<li><strong>Column badges:</strong> The sort badge (orange triangle) and filter button (funnel icon) are rendered inline inside the column header as equal-sized clickable buttons. Both the sort triangle outline and funnel outline light up only when hovering their own button. Click the sort badge to sort; click the filter button to open the autofilter. The sort badge shows a filled triangle when sorted or a faint outline when unsorted. The filter button shows a faint funnel outline when inactive or a filled teal funnel when a filter is active. Small linking (coral red dot), link (green dot), and format (pink dot) badges appear centered over the bottom border of column headers when a loaded plugin references the table. Active badges are filled, inactive badges show faint outlines. The linking badge appears on columns used for outbound linking; the link badge appears on columns receiving link filters. For transitive links, badges show a depth number (2 for secondary, 3 for tertiary, etc.). Badge colors match the status bar chips.</li>
 </ul>
 
 <h4>SQL Console</h4>
@@ -8573,6 +8574,15 @@ ${_aiImageContext()}`;
     return false;
   }
 
+  function tableHasPluginRules(tableName) {
+    if (!plugins.length) return false;
+    if (_columnTransformCache[tableName]) return true;
+    for (const link of _linkCache) {
+      if (link.sourceTableRe.test(tableName) || link.targetTableRe.test(tableName)) return true;
+    }
+    return false;
+  }
+
   function linkSourceColsEqual(a, b) {
     if (!a && !b) return true;
     if (!a || !b) return false;
@@ -9494,7 +9504,7 @@ choose(value, 'A', 'Active', 'I', 'Inactive')
         exprCompile, exprEval, exprEvalToString,
         validatePlugin, compilePlugin, loadPersistedPlugins,
         rebuildTransformCache, rebuildTransformCacheForTable, rebuildLinkCache,
-        getDisplayValue, hasDisplayTransform,
+        getDisplayValue, hasDisplayTransform, tableHasPluginRules,
         get _activeLinkSourceId() { return _activeLinkSourceId; },
         applyLinkFilters, clearLinkFilters, linkFiltersEqual,
         loadPluginFile, unloadPlugin, persistPlugins, updatePluginMenu,

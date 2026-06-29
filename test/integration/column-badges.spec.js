@@ -115,6 +115,15 @@ test.describe('Column Header Badges', () => {
   });
 
   test('badge order in col-badges is linking, link, format', async ({ page }) => {
+    await page.evaluate(() => {
+      const cfg = { name: 'Test', table: '.*', columns: [{ match: '.*', display: 'value' }] };
+      const compiled = app._test.compilePlugin(cfg);
+      cfg._compiled = compiled;
+      app._test.plugins.push(cfg);
+      app._test.rebuildTransformCache();
+      app._test.rebuildTable(app._test.windows[0]);
+    });
+    await page.waitForTimeout(100);
     const badges = await page.$$eval(
       '.col-badges .col-badge',
       els => els.map(el => {
@@ -128,7 +137,21 @@ test.describe('Column Header Badges', () => {
     expect(unique).toEqual(['linking', 'link', 'format']);
   });
 
-  test('dot badge slots always rendered with faint outlines for inactive', async ({ page }) => {
+  test('no col-badges rendered when no plugin references the table', async ({ page }) => {
+    const count = await page.$$eval('.col-badges', els => els.length);
+    expect(count).toBe(0);
+  });
+
+  test('dot badge slots rendered with faint outlines for inactive when plugin loaded', async ({ page }) => {
+    await page.evaluate(() => {
+      const cfg = { name: 'Test', table: '.*', columns: [{ match: '.*', display: 'value' }] };
+      const compiled = app._test.compilePlugin(cfg);
+      cfg._compiled = compiled;
+      app._test.plugins.push(cfg);
+      app._test.rebuildTransformCache();
+      app._test.rebuildTable(app._test.windows[0]);
+    });
+    await page.waitForTimeout(100);
     const badges = await page.$$eval(
       '.col-badges .col-badge',
       els => els.slice(0, 3).map(el => ({
@@ -140,7 +163,7 @@ test.describe('Column Header Badges', () => {
     expect(badges).toEqual([
       { type: 'linking', faint: true },
       { type: 'link', faint: true },
-      { type: 'format', faint: true },
+      { type: 'format', faint: false },
     ]);
   });
 
@@ -375,6 +398,11 @@ test.describe('Column Header Badges', () => {
 
   test('badges are positioned at center-bottom of header cell', async ({ page }) => {
     await page.evaluate(() => {
+      const cfg = { name: 'Test', table: '.*', columns: [{ match: '.*', display: 'value' }] };
+      const compiled = app._test.compilePlugin(cfg);
+      cfg._compiled = compiled;
+      app._test.plugins.push(cfg);
+      app._test.rebuildTransformCache();
       const win = app._test.windows[0];
       win.sortCols = [{ col: 'name', dir: 'asc' }];
       app._test.rebuildTable(win);
@@ -599,6 +627,11 @@ test.describe('Column Header Badges', () => {
 
   test('badges have pointer-events none so they do not block clicks', async ({ page }) => {
     await page.evaluate(() => {
+      const cfg = { name: 'Test', table: '.*', columns: [{ match: '.*', display: 'value' }] };
+      const compiled = app._test.compilePlugin(cfg);
+      cfg._compiled = compiled;
+      app._test.plugins.push(cfg);
+      app._test.rebuildTransformCache();
       const win = app._test.windows[0];
       win.sortCols = [{ col: 'name', dir: 'asc' }];
       app._test.rebuildTable(win);
@@ -659,8 +692,26 @@ test.describe('Column Header Badges', () => {
     await page.evaluate(() => app._test.unloadPlugin(0));
   });
 
-  test('chip order is Linking, Linked, Formatted, Sorted, Filtered', async ({ page }) => {
+  test('chip order is Sorted, Filtered when no plugin loaded', async ({ page }) => {
     await page.evaluate(() => {
+      const win = app._test.windows[0];
+      win.sortCols = [{ col: 'name', dir: 'asc' }];
+      win.columnFilters['name'] = new Set(['Alice Johnson']);
+      app._test.rebuildTable(win);
+    });
+    await page.waitForTimeout(100);
+
+    const chipTexts = await page.$$eval('.status-chip', els => els.map(e => e.textContent));
+    expect(chipTexts).toEqual(['Sorted', 'Filtered']);
+  });
+
+  test('chip order is Linking, Linked, Formatted, Sorted, Filtered with plugin', async ({ page }) => {
+    await page.evaluate(() => {
+      const cfg = { name: 'Test', table: '.*', columns: [{ match: '.*', display: 'value' }] };
+      const compiled = app._test.compilePlugin(cfg);
+      cfg._compiled = compiled;
+      app._test.plugins.push(cfg);
+      app._test.rebuildTransformCache();
       const win = app._test.windows[0];
       win.sortCols = [{ col: 'name', dir: 'asc' }];
       win.columnFilters['name'] = new Set(['Alice Johnson']);
@@ -672,7 +723,185 @@ test.describe('Column Header Badges', () => {
     expect(chipTexts).toEqual(['Linking', 'Linked', 'Formatted', 'Sorted', 'Filtered']);
 
     const activeChips = await page.$$eval('.status-chip:not(.chip-inactive)', els => els.map(e => e.textContent));
-    expect(activeChips).toEqual(['Sorted', 'Filtered']);
+    expect(activeChips).toEqual(['Formatted', 'Sorted', 'Filtered']);
+  });
+
+  test('all chips have equal width', async ({ page }) => {
+    await page.evaluate(() => {
+      const cfg = { name: 'Test', table: '.*', columns: [{ match: '.*', display: 'value' }] };
+      const compiled = app._test.compilePlugin(cfg);
+      cfg._compiled = compiled;
+      app._test.plugins.push(cfg);
+      app._test.rebuildTransformCache();
+      const win = app._test.windows[0];
+      win.sortCols = [{ col: 'name', dir: 'asc' }];
+      win.columnFilters['name'] = new Set(['Alice Johnson']);
+      app._test.rebuildTable(win);
+    });
+    await page.waitForTimeout(100);
+
+    const widths = await page.$$eval('.status-chip', els => els.map(e => e.getBoundingClientRect().width));
+    expect(widths.length).toBe(5);
+    const allEqual = widths.every(w => w === widths[0]);
+    expect(allEqual).toBe(true);
+  });
+
+  test('badge container has opaque background', async ({ page }) => {
+    await page.evaluate(() => {
+      const cfg = { name: 'Test', table: '.*', columns: [{ match: '.*', display: 'value' }] };
+      const compiled = app._test.compilePlugin(cfg);
+      cfg._compiled = compiled;
+      app._test.plugins.push(cfg);
+      app._test.rebuildTransformCache();
+      app._test.rebuildTable(app._test.windows[0]);
+    });
+    await page.waitForTimeout(100);
+
+    const bg = await page.$eval('.col-badges', el => getComputedStyle(el).backgroundColor);
+    expect(bg).not.toBe('transparent');
+    expect(bg).not.toBe('rgba(0, 0, 0, 0)');
+  });
+});
+
+test.describe('Plugin-gated chips and badges', () => {
+  test.beforeEach(async ({ page }) => {
+    await openApp(page);
+    await uploadFile(page, '../test/sample1.csv');
+    await waitForWindow(page, 'sample1');
+  });
+
+  test('plugin loaded but not matching the table hides plugin chips and badges', async ({ page }) => {
+    await page.evaluate(() => {
+      const cfg = { name: 'Test', table: '^nonexistent$', columns: [{ match: '.*', display: '"X"' }] };
+      const compiled = app._test.compilePlugin(cfg);
+      cfg._compiled = compiled;
+      app._test.plugins.push(cfg);
+      app._test.rebuildTransformCache();
+      app._test.rebuildTable(app._test.windows[0]);
+    });
+    await page.waitForTimeout(100);
+
+    const chipTexts = await page.$$eval('.status-chip', els => els.map(e => e.textContent));
+    expect(chipTexts).toEqual(['Sorted', 'Filtered']);
+
+    const badgeCount = await page.$$eval('.col-badges', els => els.length);
+    expect(badgeCount).toBe(0);
+  });
+
+  test('plugin with only link rules shows plugin chips and badges', async ({ page }) => {
+    await uploadFile(page, '../test/customers.csv');
+    await waitForWindow(page, 'customers');
+
+    await page.evaluate(() => {
+      const cfg = {
+        name: 'Link Only',
+        links: [{ source: { table: 'sample1', column: 'name' }, target: { table: 'customers', column: 'name' } }]
+      };
+      const compiled = app._test.compilePlugin(cfg);
+      cfg._compiled = compiled;
+      app._test.plugins.push(cfg);
+      app._test.rebuildTransformCache();
+      app._test.rebuildTable(app._test.windows[0]);
+    });
+    await page.waitForTimeout(100);
+
+    const chipTexts = await page.$$eval(
+      '#window-area .subwindow:first-of-type .status-chip',
+      els => els.map(e => e.textContent)
+    );
+    expect(chipTexts).toContain('Linking');
+
+    const badgeCount = await page.$$eval(
+      '#window-area .subwindow:first-of-type .col-badges',
+      els => els.length
+    );
+    expect(badgeCount).toBeGreaterThan(0);
+  });
+
+  test('unloading plugin removes plugin chips and badges', async ({ page }) => {
+    await page.evaluate(() => {
+      const cfg = { name: 'Test', table: '.*', columns: [{ match: '.*', display: 'value' }] };
+      const compiled = app._test.compilePlugin(cfg);
+      cfg._compiled = compiled;
+      app._test.plugins.push(cfg);
+      app._test.rebuildTransformCache();
+      app._test.rebuildTable(app._test.windows[0]);
+    });
+    await page.waitForTimeout(100);
+
+    let chipTexts = await page.$$eval('.status-chip', els => els.map(e => e.textContent));
+    expect(chipTexts).toContain('Formatted');
+
+    let badgeCount = await page.$$eval('.col-badges', els => els.length);
+    expect(badgeCount).toBeGreaterThan(0);
+
+    await page.evaluate(() => app._test.unloadPlugin(0));
+    await page.waitForTimeout(100);
+
+    chipTexts = await page.$$eval('.status-chip', els => els.map(e => e.textContent));
+    expect(chipTexts).toEqual(['Sorted', 'Filtered']);
+
+    badgeCount = await page.$$eval('.col-badges', els => els.length);
+    expect(badgeCount).toBe(0);
+  });
+
+  test('tableHasPluginRules returns false with no plugins', async ({ page }) => {
+    const result = await page.evaluate(() => app._test.tableHasPluginRules('sample1'));
+    expect(result).toBe(false);
+  });
+
+  test('tableHasPluginRules returns true for matching transform plugin', async ({ page }) => {
+    await page.evaluate(() => {
+      const cfg = { name: 'Test', table: '.*', columns: [{ match: '.*', display: 'value' }] };
+      const compiled = app._test.compilePlugin(cfg);
+      cfg._compiled = compiled;
+      app._test.plugins.push(cfg);
+      app._test.rebuildTransformCache();
+    });
+    const result = await page.evaluate(() => app._test.tableHasPluginRules('sample1'));
+    expect(result).toBe(true);
+  });
+
+  test('tableHasPluginRules returns false for non-matching plugin', async ({ page }) => {
+    await page.evaluate(() => {
+      const cfg = { name: 'Test', table: '^other$', columns: [{ match: '.*', display: 'value' }] };
+      const compiled = app._test.compilePlugin(cfg);
+      cfg._compiled = compiled;
+      app._test.plugins.push(cfg);
+      app._test.rebuildTransformCache();
+    });
+    const result = await page.evaluate(() => app._test.tableHasPluginRules('sample1'));
+    expect(result).toBe(false);
+  });
+
+  test('tableHasPluginRules returns true for matching link source', async ({ page }) => {
+    await page.evaluate(() => {
+      const cfg = {
+        name: 'Link',
+        links: [{ source: { table: 'sample1', column: 'name' }, target: { table: 'other', column: 'name' } }]
+      };
+      const compiled = app._test.compilePlugin(cfg);
+      cfg._compiled = compiled;
+      app._test.plugins.push(cfg);
+      app._test.rebuildTransformCache();
+    });
+    const result = await page.evaluate(() => app._test.tableHasPluginRules('sample1'));
+    expect(result).toBe(true);
+  });
+
+  test('tableHasPluginRules returns true for matching link target', async ({ page }) => {
+    await page.evaluate(() => {
+      const cfg = {
+        name: 'Link',
+        links: [{ source: { table: 'other', column: 'name' }, target: { table: 'sample1', column: 'name' } }]
+      };
+      const compiled = app._test.compilePlugin(cfg);
+      cfg._compiled = compiled;
+      app._test.plugins.push(cfg);
+      app._test.rebuildTransformCache();
+    });
+    const result = await page.evaluate(() => app._test.tableHasPluginRules('sample1'));
+    expect(result).toBe(true);
   });
 });
 

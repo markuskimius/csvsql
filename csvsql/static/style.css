@@ -545,6 +545,9 @@ body {
   align-items: center;
   gap: 2px;
   pointer-events: none;
+  background: var(--surface2);
+  padding: 1px 3px;
+  border-radius: 4px;
 }
 
 .col-badge {
@@ -931,7 +934,7 @@ body {
   font-weight: 500;
   letter-spacing: 0.02em;
   transition: opacity 0.15s, background 0.15s;
-  min-width: 52px;
+  width: 72px;
   text-align: center;
   box-sizing: border-box;
 }
