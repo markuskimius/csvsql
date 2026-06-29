@@ -431,8 +431,11 @@ test.describe('Cell row/column highlight', () => {
     const scrollBefore = await container.evaluate(el => el.scrollLeft);
     expect(scrollBefore).toBeGreaterThan(0);
 
-    // Deselect via Ctrl+Shift+A
-    await page.keyboard.press('Control+Shift+a');
+    // Deselect via selectNoneCells (no cell focused in this context)
+    await page.evaluate((name) => {
+      const win = app._test.windows.find(w => w.tableName === name);
+      app._test.selectNoneCells(win);
+    }, qName);
     await page.waitForTimeout(150);
 
     const sel = await page.evaluate((name) => {

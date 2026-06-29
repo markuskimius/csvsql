@@ -377,15 +377,15 @@ test.describe('Copy, Paste, Undo, Redo', () => {
     expect(sel.cells.length).toBe(30);
   });
 
-  test('Ctrl+Shift+A deselects all cells via keyboard', async ({ page }) => {
+  test('Escape deselects all cells via keyboard', async ({ page }) => {
     const cell = page.locator('.subwindow table tbody td.data-cell').first();
     await cell.click();
     await page.keyboard.press('Control+a');
     await page.waitForTimeout(100);
     let sel = await getSelection(page, 'sample1');
     expect(sel.cells.length).toBe(30);
-    // Ctrl+Shift+A deselects all
-    await page.keyboard.press('Control+Shift+a');
+    // Escape deselects all
+    await page.keyboard.press('Escape');
     await page.waitForTimeout(100);
     sel = await getSelection(page, 'sample1');
     expect(sel.cells.length).toBe(0);
@@ -466,8 +466,8 @@ test.describe('Copy, Paste, Undo, Redo', () => {
       return w._copyWithHeader;
     });
     expect(copyWithHeader).toBe(true);
-    // Ctrl+Shift+A to select none
-    await page.keyboard.press('Control+Shift+a');
+    // Escape to select none
+    await page.keyboard.press('Escape');
     await page.waitForTimeout(100);
     copyWithHeader = await page.evaluate(() => {
       const w = app._test.windows.find(w => w.tableName === 'sample1');
@@ -476,7 +476,7 @@ test.describe('Copy, Paste, Undo, Redo', () => {
     expect(copyWithHeader).toBe(false);
   });
 
-  test('Ctrl+Shift+A from global handler deselects without cell focus', async ({ page }) => {
+  test('Edit menu Select None deselects without cell focus', async ({ page }) => {
     // Select all from title bar (global handler)
     await page.locator('.subwindow .win-title').first().click();
     await page.waitForTimeout(100);
@@ -484,13 +484,70 @@ test.describe('Copy, Paste, Undo, Redo', () => {
     await page.waitForTimeout(100);
     let sel = await getSelection(page, 'sample1');
     expect(sel.cells.length).toBe(30);
-    // Deselect from title bar (global handler)
-    await page.locator('.subwindow .win-title').first().click();
+    // Deselect via Edit menu
+    await page.locator('#menu-edit .menu-label').click();
     await page.waitForTimeout(100);
-    await page.keyboard.press('Control+Shift+a');
+    await page.locator('#btn-select-none').click();
     await page.waitForTimeout(100);
     sel = await getSelection(page, 'sample1');
     expect(sel.cells.length).toBe(0);
+  });
+
+  test('Escape in edit mode reverts edit instead of deselecting', async ({ page }) => {
+    const cell = page.locator('.subwindow table tbody td.data-cell').first();
+    await cell.click();
+    await page.waitForTimeout(50);
+    const original = await cell.textContent();
+    // Enter edit mode
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(50);
+    await page.keyboard.type('CHANGED');
+    // Escape should revert the edit
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(100);
+    const after = await cell.textContent();
+    expect(after).toBe(original);
+    // Cell should still be focused (selection not cleared)
+    const sel = await getSelection(page, 'sample1');
+    expect(sel.cells.length).toBeGreaterThan(0);
+  });
+
+  test('Select None shortcut shows Esc in Edit menu', async ({ page }) => {
+    await page.locator('#menu-edit .menu-label').click();
+    await page.waitForTimeout(100);
+    const shortcut = await page.locator('#btn-select-none .shortcut').textContent();
+    expect(shortcut).toBe('Esc');
+  });
+
+  test('Escape clears selectedCol and _copyWithHeader', async ({ page }) => {
+    // Click a data cell first to ensure focus is on the table
+    const cell = page.locator('.subwindow table tbody td.data-cell').first();
+    await cell.click();
+    await page.waitForTimeout(50);
+    // Select a column via programmatic call (sets selectedCol + _copyWithHeader)
+    await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'sample1');
+      app._test.selectColumns(w, 0, 0);
+      w.selectedCol = w._columns[0];
+    });
+    await page.waitForTimeout(100);
+    let state = await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'sample1');
+      return { selectedCol: w.selectedCol, copyWithHeader: w._copyWithHeader, cells: w.selectedCells.size };
+    });
+    expect(state.selectedCol).not.toBeNull();
+    expect(state.copyWithHeader).toBe(true);
+    expect(state.cells).toBeGreaterThan(0);
+    // Press Escape — should clear everything via selectNoneCells
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(100);
+    state = await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'sample1');
+      return { selectedCol: w.selectedCol, copyWithHeader: w._copyWithHeader, cells: w.selectedCells.size };
+    });
+    expect(state.selectedCol).toBeNull();
+    expect(state.copyWithHeader).toBe(false);
+    expect(state.cells).toBe(0);
   });
 
   test('Ctrl+A selects all from partial selection', async ({ page }) => {

@@ -3048,7 +3048,9 @@ const app = (() => {
   function buildTableHTML(win, container, tableData) {
     closeAutoFilter();
     const { columns, rows } = tableData;
-    const pluginRelevant = tableHasPluginRules(win.tableName);
+    const isLinkSource = tableIsLinkSource(win.tableName);
+    const isLinkTarget = tableIsLinkTarget(win.tableName);
+    const hasFormats = tableHasTransforms(win.tableName);
     let displayRows = [...rows];
 
     // SQL WHERE filter
@@ -3252,14 +3254,14 @@ const app = (() => {
       });
       thInner.appendChild(filterBtn);
       th.appendChild(thInner);
-      if (pluginRelevant) {
+      if (isLinkSource || isLinkTarget || hasFormats) {
         const linkSrcActive = win.linkSourceCols && win.linkSourceCols.has(col);
         const badgeDefs = [
-          { cls: 'linking', active: linkSrcActive, hidden: !linkSrcActive || win.disableLinkSource, depth: win.linkDepth },
-          { cls: 'link', active: !!win.linkFilters[col], hidden: !win.linkFilters[col] || win.disableLink, depth: win.linkedByDepth },
-          { cls: 'format', active: hasDisplayTransform(win.tableName, col),
+          isLinkSource && { cls: 'linking', active: linkSrcActive, hidden: !linkSrcActive || win.disableLinkSource, depth: win.linkDepth },
+          isLinkTarget && { cls: 'link', active: !!win.linkFilters[col], hidden: !win.linkFilters[col] || win.disableLink, depth: win.linkedByDepth },
+          hasFormats && { cls: 'format', active: hasDisplayTransform(win.tableName, col),
             hidden: !hasDisplayTransform(win.tableName, col) || (win.disabledTransforms.size > 0 && win.disabledTransforms.has(col)) },
-        ];
+        ].filter(Boolean);
         const bc = document.createElement('span');
         bc.className = 'col-badges';
         for (const b of badgeDefs) {
@@ -3873,7 +3875,6 @@ const app = (() => {
         if (k === 'z' && !e.shiftKey) { e.preventDefault(); undoTable(win.tableName, win); return; }
         if (k === 'z' && e.shiftKey) { e.preventDefault(); redoTable(win.tableName, win); return; }
         if (k === 'a' && !e.shiftKey) { e.preventDefault(); selectAllCells(win); return; }
-        if (k === 'a' && e.shiftKey) { e.preventDefault(); selectNoneCells(win); return; }
       }
 
       if (e.key === 'Tab') {
@@ -3920,9 +3921,7 @@ const app = (() => {
           win._programmaticFocus = false;
         } else {
           td.blur();
-          win.selectedCells = new Set();
-          win.anchorCell = null;
-          applyCellHighlights(win, true);
+          selectNoneCells(win);
         }
       }
     });
@@ -4015,17 +4014,17 @@ const app = (() => {
     const statusCenter = win.statusbarEl.querySelector('.status-center');
     statusCenter.innerHTML = '';
     const chips = [
-      pluginRelevant && { key: 'link-source', label: 'Linking', active: win.id === _activeLinkSourceId || !!win.linkSourceCols || win.disableLinkSource, disabled: win.disableLinkSource,
+      isLinkSource && { key: 'link-source', label: 'Linking', active: win.id === _activeLinkSourceId || !!win.linkSourceCols || win.disableLinkSource, disabled: win.disableLinkSource,
         title: (on) => on ? 'Linking to other tables \u2014 click to suspend' : 'Linking suspended \u2014 click to resume',
         toggle: () => {
           win.disableLinkSource = !win.disableLinkSource;
           if (win.disableLinkSource) clearLinkFilters(win);
           else applyLinkFilters(win);
         } },
-      pluginRelevant && { key: 'link', label: 'Linked', active: hasLinkFilters || win.disableLink, disabled: win.disableLink,
+      isLinkTarget && { key: 'link', label: 'Linked', active: hasLinkFilters || win.disableLink, disabled: win.disableLink,
         title: (on) => on ? 'Link filters enabled \u2014 click to suspend' : 'Link filters suspended \u2014 click to resume',
         toggle: () => { win.disableLink = !win.disableLink; } },
-      pluginRelevant && { key: 'format', label: 'Formatted', active: hasTransforms, disabled: hasTransforms && transformedCols.every(c => win.disabledTransforms.has(c)),
+      hasFormats && { key: 'format', label: 'Formatted', active: hasTransforms, disabled: hasTransforms && transformedCols.every(c => win.disabledTransforms.has(c)),
         title: (on) => on ? 'Formatting enabled \u2014 click to suspend' : 'Formatting suspended \u2014 click to resume',
         toggle: () => {
           const allOff = transformedCols.every(c => win.disabledTransforms.has(c));
@@ -5784,8 +5783,7 @@ const app = (() => {
         const win = getActiveDataWindow();
         if (win && win.tableName) {
           e.preventDefault();
-          if (e.shiftKey) selectNoneCells(win);
-          else selectAllCells(win);
+          selectAllCells(win);
           return;
         }
       }
@@ -6562,7 +6560,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.34 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.35 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `, true);
@@ -6603,7 +6601,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <h4>Editing</h4>
 <ul>
 <li><strong>Edit cells:</strong> Click a cell to select it; press <code>Enter</code>, <code>i</code>, <code>F2</code>, or <code>Ctrl</code>/<code>&#8984;</code>+<code>U</code> to enter edit mode, or <code>Ctrl</code>/<code>&#8984;</code>+click a cell to edit it directly. <code>Tab</code>/<code>Shift+Tab</code> moves between cells and <code>Enter</code> moves down to the column where editing started &mdash; all three stay in edit mode. <code>Escape</code> reverts the edit (and clears the selection when not editing).</li>
-<li><strong>Highlight row &amp; column:</strong> Clicking a cell highlights its row and column. Click a column header to select the entire column (with header row included for copy). Move the selection with arrow keys or vim-style <code>h</code>/<code>j</code>/<code>k</code>/<code>l</code>; extend to a rectangle of cells with <code>Shift</code>+arrow (or <code>Shift</code>+<code>H</code>/<code>J</code>/<code>K</code>/<code>L</code>), <code>Shift</code>+click on another cell, or click-and-drag across cells &mdash; every selected cell's row and column is highlighted so you can see what lines up with what. Click a row number to select an entire row; drag across row numbers or <code>Shift</code>+click another row number to select a range. <code>Ctrl</code>/<code>&#8984;</code>+<code>A</code> selects all cells; <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>A</code> deselects all. Clicking the <code>#</code> corner cell toggles between select all and select none. Pressing an arrow key with no cell selected focuses the cell in the middle of the current view. <code>Esc</code> clears the selection.</li>
+<li><strong>Highlight row &amp; column:</strong> Clicking a cell highlights its row and column. Click a column header to select the entire column (with header row included for copy). Move the selection with arrow keys or vim-style <code>h</code>/<code>j</code>/<code>k</code>/<code>l</code>; extend to a rectangle of cells with <code>Shift</code>+arrow (or <code>Shift</code>+<code>H</code>/<code>J</code>/<code>K</code>/<code>L</code>), <code>Shift</code>+click on another cell, or click-and-drag across cells &mdash; every selected cell's row and column is highlighted so you can see what lines up with what. Click a row number to select an entire row; drag across row numbers or <code>Shift</code>+click another row number to select a range. <code>Ctrl</code>/<code>&#8984;</code>+<code>A</code> selects all cells; <code>Esc</code> deselects all. Clicking the <code>#</code> corner cell toggles between select all and select none. Pressing an arrow key with no cell selected focuses the cell in the middle of the current view.</li>
 <li><strong>Cut / Copy / Paste:</strong> Select cells and use <code>Ctrl</code>/<code>&#8984;</code>+<code>X</code>, <code>Ctrl</code>/<code>&#8984;</code>+<code>C</code>, <code>Ctrl</code>/<code>&#8984;</code>+<code>V</code>. Data is copied as tab-separated values. Select All and row selection copies include the column header row. In edit mode, these shortcuts pass through to native browser behavior for text within the cell.</li>
 <li><strong>Undo / Redo:</strong> <code>Ctrl</code>/<code>&#8984;</code>+<code>Z</code> to undo, <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>Z</code> to redo. Undoes cell edits, paste, cut, row insert/delete, column insert/delete, column rename, column reorder, and column resize. Multi-cell paste and cut undo as a single step. Also available from the Edit menu.</li>
 <li><strong>Rows:</strong> Right-click a row number to insert below or delete. Right-click the <code>#</code> corner cell to insert a row at the beginning.</li>
@@ -6630,8 +6628,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <li><strong>Filter:</strong> Type a SQL <code>WHERE</code> clause in the filter bar (without the <code>WHERE</code> keyword). For example: <code>age > 30 AND name LIKE '%Smith%'</code></li>
 <li>The filter supports all SQLite expressions including <code>REGEXP</code> (see below).</li>
 <li><strong>Column autofilter:</strong> Click the funnel icon on any column header to open a dropdown with checkboxes for each unique value. Use the search box to narrow the list. Uncheck values and click Apply to hide matching rows. Multiple column filters AND together and combine with the WHERE filter bar. The funnel fills teal when a filter is active. Click Clear to remove a column&rsquo;s filter. Click the Filtered chip in the status bar to clear all column autofilters and the WHERE filter at once.</li>
-<li><strong>Status chips:</strong> <strong>Sorted</strong> and <strong>Filtered</strong> chips are always shown in the status bar center. <strong>Linking</strong>, <strong>Linked</strong>, and <strong>Formatted</strong> chips only appear when a loaded plugin references the table. <strong>Sorted</strong> and <strong>Filtered</strong> chips clear the sort or filters when clicked (chip becomes inactive). <strong>Linked</strong> (on target tables receiving link filters) and <strong>Formatted</strong> chips toggle suspend/resume &mdash; suspended features show the chip with strikethrough. A <strong>Linking</strong> chip appears on the source table driving link filters; click to suspend/resume outbound linking. Keyboard shortcuts: <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>1</code> (clear sort), <code>2</code> (clear filters), <code>3</code> (toggle link), <code>4</code> (toggle format).</li>
-<li><strong>Column badges:</strong> The sort badge (orange triangle) and filter button (funnel icon) are rendered inline inside the column header as equal-sized clickable buttons. Both the sort triangle outline and funnel outline light up only when hovering their own button. Click the sort badge to sort; click the filter button to open the autofilter. The sort badge shows a filled triangle when sorted or a faint outline when unsorted. The filter button shows a faint funnel outline when inactive or a filled teal funnel when a filter is active. Small linking (coral red dot), link (green dot), and format (pink dot) badges appear centered over the bottom border of column headers when a loaded plugin references the table. Active badges are filled, inactive badges show faint outlines. The linking badge appears on columns used for outbound linking; the link badge appears on columns receiving link filters. For transitive links, badges show a depth number (2 for secondary, 3 for tertiary, etc.). Badge colors match the status bar chips.</li>
+<li><strong>Status chips:</strong> <strong>Sorted</strong> and <strong>Filtered</strong> chips are always shown in the status bar center. <strong>Linking</strong> only appears when the table is a link source, <strong>Linked</strong> only when it is a link target, and <strong>Formatted</strong> only when a plugin has matching column transform rules. <strong>Sorted</strong> and <strong>Filtered</strong> chips clear the sort or filters when clicked (chip becomes inactive). <strong>Linked</strong> (on target tables receiving link filters) and <strong>Formatted</strong> chips toggle suspend/resume &mdash; suspended features show the chip with strikethrough. A <strong>Linking</strong> chip appears on the source table driving link filters; click to suspend/resume outbound linking. Keyboard shortcuts: <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>1</code> (clear sort), <code>2</code> (clear filters), <code>3</code> (toggle link), <code>4</code> (toggle format).</li>
+<li><strong>Column badges:</strong> The sort badge (orange triangle) and filter button (funnel icon) are rendered inline inside the column header as equal-sized clickable buttons. Both the sort triangle outline and funnel outline light up only when hovering their own button. Click the sort badge to sort; click the filter button to open the autofilter. The sort badge shows a filled triangle when sorted or a faint outline when unsorted. The filter button shows a faint funnel outline when inactive or a filled teal funnel when a filter is active. Small linking (coral red dot), link (green dot), and format (pink dot) badges appear centered over the bottom border of column headers &mdash; each badge type only renders when the table is relevant for that feature (link source, link target, or has matching transforms respectively). Active badges are filled, inactive badges show faint outlines. The linking badge appears on columns used for outbound linking; the link badge appears on columns receiving link filters. For transitive links, badges show a depth number (2 for secondary, 3 for tertiary, etc.). Badge colors match the status bar chips.</li>
 </ul>
 
 <h4>SQL Console</h4>
@@ -6717,7 +6715,7 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <tr><td>Arrow keys or <code>h</code>/<code>j</code>/<code>k</code>/<code>l</code> (cell selected, not editing)</td><td>Move selection to the adjacent cell</td></tr>
 <tr><td><code>Shift+</code>arrow or <code>Shift+H</code>/<code>J</code>/<code>K</code>/<code>L</code></td><td>Extend cell selection (highlights row &amp; column of every selected cell)</td></tr>
 <tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>A</code></td><td>Select all cells</td></tr>
-<tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>A</code></td><td>Deselect all cells</td></tr>
+<tr><td><code>Escape</code> (cell selected, not editing)</td><td>Deselect all cells</td></tr>
 <tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>X</code></td><td>Cut selected cells</td></tr>
 <tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>C</code></td><td>Copy selected cells</td></tr>
 <tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>V</code></td><td>Paste at selected cell</td></tr>
@@ -8583,6 +8581,24 @@ ${_aiImageContext()}`;
     return false;
   }
 
+  function tableIsLinkSource(tableName) {
+    for (const link of _linkCache) {
+      if (link.sourceTableRe.test(tableName)) return true;
+    }
+    return false;
+  }
+
+  function tableIsLinkTarget(tableName) {
+    for (const link of _linkCache) {
+      if (link.targetTableRe.test(tableName)) return true;
+    }
+    return false;
+  }
+
+  function tableHasTransforms(tableName) {
+    return !!_columnTransformCache[tableName];
+  }
+
   function linkSourceColsEqual(a, b) {
     if (!a && !b) return true;
     if (!a || !b) return false;
@@ -9504,7 +9520,7 @@ choose(value, 'A', 'Active', 'I', 'Inactive')
         exprCompile, exprEval, exprEvalToString,
         validatePlugin, compilePlugin, loadPersistedPlugins,
         rebuildTransformCache, rebuildTransformCacheForTable, rebuildLinkCache,
-        getDisplayValue, hasDisplayTransform, tableHasPluginRules,
+        getDisplayValue, hasDisplayTransform, tableHasPluginRules, tableIsLinkSource, tableIsLinkTarget, tableHasTransforms,
         get _activeLinkSourceId() { return _activeLinkSourceId; },
         applyLinkFilters, clearLinkFilters, linkFiltersEqual,
         loadPluginFile, unloadPlugin, persistPlugins, updatePluginMenu,
