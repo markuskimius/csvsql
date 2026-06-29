@@ -4258,7 +4258,9 @@ const app = (() => {
         curRownum = rownum;
       }
       const row = rowMap.get(rownum);
-      curRow.push(String(row ? (row[col] ?? '') : ''));
+      const raw = row ? (row[col] ?? '') : '';
+      const useTransform = row && !win.disabledTransforms.has(col) && hasDisplayTransform(win.tableName, col);
+      curRow.push(String(useTransform ? getDisplayValue(win.tableName, col, row) : raw));
     }
     if (curRow.length) rows.push(curRow);
     if (win._copyWithHeader) {
@@ -5777,6 +5779,17 @@ const app = (() => {
         }
         return;
       }
+      if (e.key.toLowerCase() === 'c' || e.key.toLowerCase() === 'x') {
+        const tgt = e.target;
+        if (tgt && tgt.matches && tgt.matches('input, textarea, [contenteditable="true"], td.data-cell')) return;
+        const win = getActiveDataWindow();
+        if (win && win.tableName) {
+          e.preventDefault();
+          if (e.key.toLowerCase() === 'x') cutSelectedCells(win);
+          else copySelectedCells(win);
+          return;
+        }
+      }
       if (e.key.toLowerCase() === 'a') {
         const tgt = e.target;
         if (tgt && tgt.matches && tgt.matches('input, textarea, [contenteditable="true"], td.data-cell')) return;
@@ -6560,7 +6573,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.35 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.36 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `, true);
@@ -6602,7 +6615,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <ul>
 <li><strong>Edit cells:</strong> Click a cell to select it; press <code>Enter</code>, <code>i</code>, <code>F2</code>, or <code>Ctrl</code>/<code>&#8984;</code>+<code>U</code> to enter edit mode, or <code>Ctrl</code>/<code>&#8984;</code>+click a cell to edit it directly. <code>Tab</code>/<code>Shift+Tab</code> moves between cells and <code>Enter</code> moves down to the column where editing started &mdash; all three stay in edit mode. <code>Escape</code> reverts the edit (and clears the selection when not editing).</li>
 <li><strong>Highlight row &amp; column:</strong> Clicking a cell highlights its row and column. Click a column header to select the entire column (with header row included for copy). Move the selection with arrow keys or vim-style <code>h</code>/<code>j</code>/<code>k</code>/<code>l</code>; extend to a rectangle of cells with <code>Shift</code>+arrow (or <code>Shift</code>+<code>H</code>/<code>J</code>/<code>K</code>/<code>L</code>), <code>Shift</code>+click on another cell, or click-and-drag across cells &mdash; every selected cell's row and column is highlighted so you can see what lines up with what. Click a row number to select an entire row; drag across row numbers or <code>Shift</code>+click another row number to select a range. <code>Ctrl</code>/<code>&#8984;</code>+<code>A</code> selects all cells; <code>Esc</code> deselects all. Clicking the <code>#</code> corner cell toggles between select all and select none. Pressing an arrow key with no cell selected focuses the cell in the middle of the current view.</li>
-<li><strong>Cut / Copy / Paste:</strong> Select cells and use <code>Ctrl</code>/<code>&#8984;</code>+<code>X</code>, <code>Ctrl</code>/<code>&#8984;</code>+<code>C</code>, <code>Ctrl</code>/<code>&#8984;</code>+<code>V</code>. Data is copied as tab-separated values. Select All and row selection copies include the column header row. In edit mode, these shortcuts pass through to native browser behavior for text within the cell.</li>
+<li><strong>Cut / Copy / Paste:</strong> Select cells and use <code>Ctrl</code>/<code>&#8984;</code>+<code>X</code>, <code>Ctrl</code>/<code>&#8984;</code>+<code>C</code>, <code>Ctrl</code>/<code>&#8984;</code>+<code>V</code>. Data is copied as tab-separated values. When a plugin display transform is active, copy uses the formatted display values; when formatting is disabled, copy uses raw values. Select All and row selection copies include the column header row. Copy and cut work from any focus context (column header, titlebar, etc.), not just when a data cell is focused. In edit mode, these shortcuts pass through to native browser behavior for text within the cell.</li>
 <li><strong>Undo / Redo:</strong> <code>Ctrl</code>/<code>&#8984;</code>+<code>Z</code> to undo, <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>Z</code> to redo. Undoes cell edits, paste, cut, row insert/delete, column insert/delete, column rename, column reorder, and column resize. Multi-cell paste and cut undo as a single step. Also available from the Edit menu.</li>
 <li><strong>Rows:</strong> Right-click a row number to insert below or delete. Right-click the <code>#</code> corner cell to insert a row at the beginning.</li>
 <li><strong>Columns:</strong> Right-click a column header to insert a column to the right or delete. Right-click the <code>#</code> corner cell to insert a column at the beginning. <code>Ctrl</code>/<code>&#8984;</code>+click a column header to rename inline &mdash; duplicate names are rejected with a red border on the input.</li>

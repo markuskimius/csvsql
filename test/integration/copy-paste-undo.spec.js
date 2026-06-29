@@ -579,4 +579,193 @@ test.describe('Copy, Paste, Undo, Redo', () => {
     expect(clip).toBe('Alice Johnson');
     expect(clip).not.toContain('name');
   });
+
+  // --- Copy from global handler (no cell focus) ---
+
+  test('Ctrl+C works after clicking a column header', async ({ page }) => {
+    const header = page.locator('.subwindow table thead th').nth(1);
+    await header.click();
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Control+c');
+    const clip = await page.evaluate(() => navigator.clipboard.readText());
+    const lines = clip.split('\n');
+    expect(lines[0]).toBe('name');
+    expect(lines.length).toBe(11); // header + 10 data rows
+  });
+
+  test('Ctrl+C works after switching between column headers', async ({ page }) => {
+    // Click first column header
+    const header1 = page.locator('.subwindow table thead th').nth(1);
+    await header1.click();
+    await page.waitForTimeout(100);
+    // Switch to second column header
+    const header2 = page.locator('.subwindow table thead th').nth(2);
+    await header2.click();
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Control+c');
+    const clip = await page.evaluate(() => navigator.clipboard.readText());
+    const lines = clip.split('\n');
+    expect(lines[0]).toBe('email');
+    expect(lines[1]).toBe('alice@example.com');
+  });
+
+  test('Ctrl+X works after clicking a column header', async ({ page }) => {
+    const header = page.locator('.subwindow table thead th').nth(1);
+    await header.click();
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Control+x');
+    await page.waitForTimeout(200);
+    const clip = await page.evaluate(() => navigator.clipboard.readText());
+    const lines = clip.split('\n');
+    expect(lines[0]).toBe('name');
+    expect(lines.length).toBe(11);
+    // Verify cells were cleared
+    const data = await getTableData(page, 'sample1');
+    expect(data.rows[0].name).toBe('');
+    expect(data.rows[1].name).toBe('');
+  });
+
+  test('Ctrl+C from titlebar copies previously selected cells', async ({ page }) => {
+    // Select all via corner cell
+    const corner = page.locator('.subwindow table thead th.row-num-header');
+    await corner.click();
+    await page.waitForTimeout(100);
+    // Click titlebar to move focus away from the table
+    await page.locator('.subwindow .win-title').first().click();
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Control+c');
+    const clip = await page.evaluate(() => navigator.clipboard.readText());
+    const lines = clip.split('\n');
+    expect(lines[0]).toBe('name\temail\tmember_since');
+    expect(lines.length).toBe(11);
+  });
+
+  test('Ctrl+C global handler does not fire when focus is in an input', async ({ page }) => {
+    // Select a cell, then copy to populate clipboard
+    const cell = page.locator('.subwindow table tbody td.data-cell').first();
+    await cell.click();
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Control+c');
+    const clip1 = await page.evaluate(() => navigator.clipboard.readText());
+    expect(clip1).toBe('Alice Johnson');
+    // Focus the SQL input — the global handler should NOT fire copySelectedCells
+    await page.locator('#sql-input').click();
+    await page.keyboard.type('test');
+    // Clear clipboard and press Ctrl+C while in the input
+    await page.evaluate(() => navigator.clipboard.writeText(''));
+    await page.keyboard.press('Control+c');
+    const clip2 = await page.evaluate(() => navigator.clipboard.readText());
+    // Clipboard should NOT contain the previously selected cell data
+    expect(clip2).not.toBe('Alice Johnson');
+  });
+
+  // --- Copy formatted vs raw values ---
+
+  test('copy uses formatted display value when transform is active', async ({ page }) => {
+    // Load a plugin that transforms the name column
+    await page.evaluate(() => {
+      const cfg = {
+        name: 'Upper Name',
+        table: 'sample1',
+        columns: [{ match: '^name$', display: 'upper(value)' }]
+      };
+      const errors = app._test.validatePlugin(cfg);
+      if (errors.length) throw new Error(errors.join(', '));
+      cfg._compiled = app._test.compilePlugin(cfg);
+      app._test.plugins.push(cfg);
+      app._test.rebuildTransformCache();
+      app._test.rerenderAllWindows();
+    });
+    await page.waitForTimeout(300);
+    // Select the first name cell and copy
+    const cell = page.locator('.subwindow table tbody td.data-cell').first();
+    await cell.click();
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Control+c');
+    const clip = await page.evaluate(() => navigator.clipboard.readText());
+    expect(clip).toBe('ALICE JOHNSON');
+  });
+
+  test('copy uses raw value when transform is disabled', async ({ page }) => {
+    // Load a plugin that transforms the name column
+    await page.evaluate(() => {
+      const cfg = {
+        name: 'Upper Name',
+        table: 'sample1',
+        columns: [{ match: '^name$', display: 'upper(value)' }]
+      };
+      const errors = app._test.validatePlugin(cfg);
+      if (errors.length) throw new Error(errors.join(', '));
+      cfg._compiled = app._test.compilePlugin(cfg);
+      app._test.plugins.push(cfg);
+      app._test.rebuildTransformCache();
+      app._test.rerenderAllWindows();
+    });
+    await page.waitForTimeout(300);
+    // Disable the transform via Ctrl+Shift+4
+    await page.keyboard.press('Control+Shift+4');
+    await page.waitForTimeout(200);
+    // Select the first name cell and copy
+    const cell = page.locator('.subwindow table tbody td.data-cell').first();
+    await cell.click();
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Control+c');
+    const clip = await page.evaluate(() => navigator.clipboard.readText());
+    expect(clip).toBe('Alice Johnson');
+  });
+
+  test('copy multi-cell selection uses formatted values per column', async ({ page }) => {
+    // Load a plugin that only transforms the name column
+    await page.evaluate(() => {
+      const cfg = {
+        name: 'Upper Name',
+        table: 'sample1',
+        columns: [{ match: '^name$', display: 'upper(value)' }]
+      };
+      const errors = app._test.validatePlugin(cfg);
+      if (errors.length) throw new Error(errors.join(', '));
+      cfg._compiled = app._test.compilePlugin(cfg);
+      app._test.plugins.push(cfg);
+      app._test.rebuildTransformCache();
+      app._test.rerenderAllWindows();
+    });
+    await page.waitForTimeout(300);
+    // Select name and email of first row
+    const cell = page.locator('.subwindow table tbody td.data-cell').first();
+    await cell.click();
+    await page.keyboard.press('Shift+ArrowRight');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Control+c');
+    const clip = await page.evaluate(() => navigator.clipboard.readText());
+    // name should be formatted (uppercase), email should be raw (no transform)
+    expect(clip).toBe('ALICE JOHNSON\talice@example.com');
+  });
+
+  test('column header copy uses formatted values when transform is active', async ({ page }) => {
+    // Load a plugin that transforms the name column
+    await page.evaluate(() => {
+      const cfg = {
+        name: 'Upper Name',
+        table: 'sample1',
+        columns: [{ match: '^name$', display: 'upper(value)' }]
+      };
+      const errors = app._test.validatePlugin(cfg);
+      if (errors.length) throw new Error(errors.join(', '));
+      cfg._compiled = app._test.compilePlugin(cfg);
+      app._test.plugins.push(cfg);
+      app._test.rebuildTransformCache();
+      app._test.rerenderAllWindows();
+    });
+    await page.waitForTimeout(300);
+    // Click the name column header to select the whole column
+    const header = page.locator('.subwindow table thead th').nth(1);
+    await header.click();
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Control+c');
+    const clip = await page.evaluate(() => navigator.clipboard.readText());
+    const lines = clip.split('\n');
+    expect(lines[0]).toBe('name');
+    expect(lines[1]).toBe('ALICE JOHNSON');
+    expect(lines[2]).toBe('BOB SMITH');
+  });
 });
