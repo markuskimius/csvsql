@@ -6573,7 +6573,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.36 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.38 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `, true);
@@ -6623,7 +6623,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <li><strong>Reorder columns:</strong> Drag a column header to a new position. Click a column header to select it, then press <code>Ctrl</code>/<code>&#8984;</code>+<code>&larr;</code>/<code>&rarr;</code> to nudge it.</li>
 <li><strong>Column Manager:</strong> Open via <strong>Edit &rarr; Manage Columns&hellip;</strong>, <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>M</code>, or right-click a column header. Shows a searchable vertical list of all columns. Click to select, Shift+click for range, Ctrl/&#8984;+click to toggle. Drag to reorder within the list or drop onto the table&rsquo;s column headers. Use <code>Alt</code>+<code>&uarr;</code>/<code>&darr;</code> to move selected columns. Double-click a column name to scroll the table to it. All reorders are batched into a single undo entry when the manager closes.</li>
 <li><strong>Resize columns:</strong> Drag any column border to resize &mdash; the resize handle spans both sides of the divider line, including the <code>#</code> row-number column. Double-click the border to auto-fit the column to its content. When multiple columns are selected (e.g. via Ctrl+A), double-click auto-fits all selected columns, and drag-resize sets all selected columns to the dragged column&rsquo;s width on release. Column widths are fixed after initial load and survive sorting and filtering.</li>
-<li><strong>Frozen row-number column:</strong> The <code>#</code> row-number column stays fixed on the left edge when scrolling horizontally, so you always know which row you&rsquo;re looking at.</li>
+<li><strong>Frozen row-number column:</strong> The <code>#</code> row-number column stays fixed on the left edge when scrolling horizontally, so you always know which row you&rsquo;re looking at. Column headers use opaque backgrounds so scrolling data never shows through &mdash; including when a column is selected.</li>
 <li><strong>Rename tables:</strong> <code>Ctrl</code>/<code>&#8984;</code>+click the window title.</li>
 </ul>
 

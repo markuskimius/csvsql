@@ -236,4 +236,95 @@ test.describe('Sticky Row Number Column', () => {
       getComputedStyle(el).backgroundColor);
     expect(bg).not.toContain('rgba');
   });
+
+  test('col-highlight on th uses opaque background', async ({ page }) => {
+    await uploadFile(page, 'sample1.csv');
+    await waitForWindow(page, 'sample1');
+
+    const header = page.locator('.subwindow table thead th').nth(1);
+    await header.click();
+    await page.waitForTimeout(100);
+
+    const bg = await header.evaluate(el => getComputedStyle(el).backgroundColor);
+    expect(bg).not.toContain('rgba');
+  });
+
+  test('col-highlight th has box-shadow overlay for highlight color', async ({ page }) => {
+    await uploadFile(page, 'sample1.csv');
+    await waitForWindow(page, 'sample1');
+
+    const header = page.locator('.subwindow table thead th').nth(1);
+    await header.click();
+    await page.waitForTimeout(100);
+
+    const boxShadow = await header.evaluate(el => getComputedStyle(el).boxShadow);
+    expect(boxShadow).not.toBe('none');
+    expect(boxShadow).toContain('inset');
+  });
+
+  test('selected column header stays opaque during vertical scroll', async ({ page }) => {
+    // Create a tall table that requires vertical scrolling
+    const cols = ['ColA', 'ColB', 'ColC'];
+    const rows = Array.from({ length: 100 }, (_, r) =>
+      cols.map((_, c) => `R${r + 1}C${c + 1}`).join(',')
+    );
+    const csv = cols.join(',') + '\n' + rows.join('\n');
+    const fileInput = page.locator('#file-input');
+    await fileInput.setInputFiles({
+      name: 'tall.csv',
+      mimeType: 'text/csv',
+      buffer: Buffer.from(csv),
+    });
+    await waitForWindow(page, 'tall');
+    await page.waitForTimeout(200);
+
+    // Select a column
+    const header = page.locator('.subwindow table thead th').nth(1);
+    await header.click();
+    await page.waitForTimeout(100);
+
+    // Scroll down
+    const container = page.locator('.table-container');
+    await container.evaluate(el => { el.scrollTop = 500; });
+    await page.waitForTimeout(100);
+
+    // Header should still have opaque background
+    const bg = await header.evaluate(el => getComputedStyle(el).backgroundColor);
+    expect(bg).not.toContain('rgba');
+  });
+
+  test('unselected column headers use the base opaque background', async ({ page }) => {
+    await uploadFile(page, 'sample1.csv');
+    await waitForWindow(page, 'sample1');
+
+    // Check a regular header without any selection
+    const header = page.locator('.subwindow table thead th').nth(1);
+    const bg = await header.evaluate(el => getComputedStyle(el).backgroundColor);
+    expect(bg).not.toContain('rgba');
+  });
+
+  test('multiple selected columns all have opaque header backgrounds', async ({ page }) => {
+    await uploadFile(page, 'sample1.csv');
+    await waitForWindow(page, 'sample1');
+
+    // Select first column
+    const firstHeader = page.locator('.subwindow table thead th').nth(1);
+    await firstHeader.click();
+    await page.waitForTimeout(100);
+
+    // Shift+click third column to select range
+    const thirdHeader = page.locator('.subwindow table thead th').nth(3);
+    await thirdHeader.click({ modifiers: ['Shift'] });
+    await page.waitForTimeout(100);
+
+    // All three data headers should have opaque backgrounds
+    const bgs = await page.$$eval(
+      '.subwindow table thead th.col-highlight',
+      els => els.map(el => getComputedStyle(el).backgroundColor)
+    );
+    expect(bgs.length).toBe(3);
+    for (const bg of bgs) {
+      expect(bg).not.toContain('rgba');
+    }
+  });
 });
