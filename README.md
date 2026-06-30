@@ -25,6 +25,7 @@ A browser-based CSV database application. Open CSV, Excel, and compressed files 
 - **Drag and drop** — Drop files directly onto the window to open them
 - **Open from URL** — Load data files from any HTTP/HTTPS URL
 - **Save** — Write directly back to the original file (Chrome/Edge) or download. Save As supports CSV, TSV, PSV, Excel, Gzip, and ZIP formats
+- **Frozen row-number column** — The `#` column stays pinned on the left edge when scrolling horizontally, so you always know which row you're looking at
 - **Virtual scrolling** — Handles large datasets efficiently
 - **AI analysis** *(experimental)* — Natural language data analysis with automatic SQL query execution, inline charts, formatted tables, and PDF report generation. Supports WebLLM (in-browser), Ollama (local), Claude, and OpenAI
 
