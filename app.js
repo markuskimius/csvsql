@@ -4225,11 +4225,13 @@ const app = (() => {
     const sel = window.getSelection();
     sel.removeAllRanges();
     sel.addRange(range);
+    td.scrollLeft = td.scrollWidth;
   }
 
   function exitEditMode(td) {
     if (td.getAttribute('contenteditable') === 'true') {
       td.removeAttribute('contenteditable');
+      td.scrollLeft = 0;
     }
   }
 
@@ -5056,10 +5058,12 @@ const app = (() => {
     let maxW = measurer.offsetWidth + 40;
 
     const displayRows = win._displayRows;
-    const start = win._renderStart || 0;
-    const end = Math.min(win._renderEnd || displayRows.length, displayRows.length);
-    for (let i = start; i < end; i++) {
-      measurer.textContent = String(displayRows[i][col] ?? '');
+    const useTransform = !win.disabledTransforms.has(col) && hasDisplayTransform(win.tableName, col);
+    for (let i = 0; i < displayRows.length; i++) {
+      const row = displayRows[i];
+      measurer.textContent = useTransform
+        ? String(getDisplayValue(win.tableName, col, row))
+        : String(row[col] ?? '');
       maxW = Math.max(maxW, measurer.offsetWidth + CELL_BORDER);
     }
     measurer.remove();
@@ -5131,8 +5135,6 @@ const app = (() => {
 
     const columns = win._columns;
     const displayRows = win._displayRows;
-    const start = win._renderStart || 0;
-    const end = Math.min(win._renderEnd || displayRows.length, displayRows.length);
 
     for (let colIdx = 0; colIdx < columns.length; colIdx++) {
       const col = columns[colIdx];
@@ -5141,7 +5143,7 @@ const app = (() => {
 
       const useTransform = !win.disabledTransforms.has(col) && hasDisplayTransform(win.tableName, col);
 
-      for (let i = start; i < end; i++) {
+      for (let i = 0; i < displayRows.length; i++) {
         const row = displayRows[i];
         measurer.textContent = useTransform
           ? String(getDisplayValue(win.tableName, col, row))
@@ -6573,7 +6575,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.39 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.40 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `, true);
@@ -6613,7 +6615,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 <h4>Editing</h4>
 <ul>
-<li><strong>Edit cells:</strong> Click a cell to select it; press <code>Enter</code>, <code>i</code>, <code>F2</code>, or <code>Ctrl</code>/<code>&#8984;</code>+<code>U</code> to enter edit mode, or <code>Ctrl</code>/<code>&#8984;</code>+click a cell to edit it directly. <code>Tab</code>/<code>Shift+Tab</code> moves between cells and <code>Enter</code> moves down to the column where editing started &mdash; all three stay in edit mode. <code>Escape</code> reverts the edit (and clears the selection when not editing).</li>
+<li><strong>Edit cells:</strong> Click a cell to select it; press <code>Enter</code>, <code>i</code>, <code>F2</code>, or <code>Ctrl</code>/<code>&#8984;</code>+<code>U</code> to enter edit mode, or <code>Ctrl</code>/<code>&#8984;</code>+click a cell to edit it directly. <code>Tab</code>/<code>Shift+Tab</code> moves between cells and <code>Enter</code> moves down to the column where editing started &mdash; all three stay in edit mode. Long text scrolls within the cell to keep the cursor visible. <code>Escape</code> reverts the edit (and clears the selection when not editing).</li>
 <li><strong>Highlight row &amp; column:</strong> Clicking a cell highlights its row and column. Click a column header to select the entire column (with header row included for copy). Move the selection with arrow keys or vim-style <code>h</code>/<code>j</code>/<code>k</code>/<code>l</code>; extend to a rectangle of cells with <code>Shift</code>+arrow (or <code>Shift</code>+<code>H</code>/<code>J</code>/<code>K</code>/<code>L</code>), <code>Shift</code>+click on another cell, or click-and-drag across cells &mdash; every selected cell's row and column is highlighted so you can see what lines up with what. Click a row number to select an entire row; drag across row numbers or <code>Shift</code>+click another row number to select a range. <code>Ctrl</code>/<code>&#8984;</code>+<code>A</code> selects all cells; <code>Esc</code> deselects all. Clicking the <code>#</code> corner cell toggles between select all and select none. Pressing an arrow key with no cell selected focuses the cell in the middle of the current view.</li>
 <li><strong>Cut / Copy / Paste:</strong> Select cells and use <code>Ctrl</code>/<code>&#8984;</code>+<code>X</code>, <code>Ctrl</code>/<code>&#8984;</code>+<code>C</code>, <code>Ctrl</code>/<code>&#8984;</code>+<code>V</code>. Data is copied as tab-separated values. When a plugin display transform is active, copy uses the formatted display values; when formatting is disabled, copy uses raw values. Select All and row selection copies include the column header row. Copy and cut work from any focus context (column header, titlebar, etc.), not just when a data cell is focused. In edit mode, these shortcuts pass through to native browser behavior for text within the cell.</li>
 <li><strong>Undo / Redo:</strong> <code>Ctrl</code>/<code>&#8984;</code>+<code>Z</code> to undo, <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>Z</code> to redo. Undoes cell edits, paste, cut, row insert/delete, column insert/delete, column rename, column reorder, and column resize. Multi-cell paste and cut undo as a single step. Also available from the Edit menu.</li>
@@ -6622,7 +6624,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <li><strong>Select a column:</strong> Click a column header to select the entire column. Click the sort badge (triangle) to sort. Selection is the target for <code>Ctrl</code>/<code>&#8984;</code>+<code>&larr;</code>/<code>&rarr;</code> column reorder.</li>
 <li><strong>Reorder columns:</strong> Drag a column header to a new position. Click a column header to select it, then press <code>Ctrl</code>/<code>&#8984;</code>+<code>&larr;</code>/<code>&rarr;</code> to nudge it.</li>
 <li><strong>Column Manager:</strong> Open via <strong>Edit &rarr; Manage Columns&hellip;</strong>, <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>M</code>, or right-click a column header. Shows a searchable vertical list of all columns. Click to select, Shift+click for range, Ctrl/&#8984;+click to toggle. Drag to reorder within the list or drop onto the table&rsquo;s column headers. Use <code>Alt</code>+<code>&uarr;</code>/<code>&darr;</code> to move selected columns. Double-click a column name to scroll the table to it. All reorders are batched into a single undo entry when the manager closes.</li>
-<li><strong>Resize columns:</strong> Drag any column border to resize &mdash; the resize handle spans both sides of the divider line, including the <code>#</code> row-number column. Double-click the border to auto-fit the column to its content. When multiple columns are selected (e.g. via Ctrl+A), double-click auto-fits all selected columns, and drag-resize sets all selected columns to the dragged column&rsquo;s width on release. Column widths are fixed after initial load and survive sorting and filtering.</li>
+<li><strong>Resize columns:</strong> Drag any column border to resize &mdash; the resize handle spans both sides of the divider line, including the <code>#</code> row-number column. Double-click the border to auto-fit the column to its content (measures all rows, not just visible ones). When multiple columns are selected (e.g. via Ctrl+A), double-click auto-fits all selected columns, and drag-resize sets all selected columns to the dragged column&rsquo;s width on release. Column widths are fixed after initial load and survive sorting and filtering.</li>
 <li><strong>Frozen row-number column:</strong> The <code>#</code> row-number column stays fixed on the left edge when scrolling horizontally, so you always know which row you&rsquo;re looking at. Column headers use opaque backgrounds so scrolling data never shows through &mdash; including when a column is selected.</li>
 <li><strong>Rename tables:</strong> <code>Ctrl</code>/<code>&#8984;</code>+click the window title.</li>
 </ul>
