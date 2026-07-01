@@ -934,8 +934,16 @@ body {
   border-radius: 0 0 6px 6px;
   border-top: 1px solid var(--border);
   flex-shrink: 0;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
+.status-left, .status-right {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 1;
+  min-width: 0;
+}
 
 .status-center {
   display: flex;
