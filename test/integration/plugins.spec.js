@@ -304,7 +304,7 @@ test.describe('Plugin system', () => {
 
     const cell = page.locator('.subwindow table tbody td.data-cell').first();
     await cell.click();
-    await page.keyboard.press('Enter'); // enter edit mode
+    await page.keyboard.press('F2'); // enter edit mode
     await page.waitForTimeout(100);
 
     // In edit mode, cell should show raw value
@@ -333,7 +333,7 @@ test.describe('Plugin system', () => {
 
     const cell = page.locator('.subwindow table tbody td.data-cell').first();
     await cell.click();
-    await page.keyboard.press('Enter'); // enter edit mode
+    await page.keyboard.press('F2'); // enter edit mode
     await page.waitForTimeout(100);
 
     await page.keyboard.press('Enter'); // commit edit
@@ -655,7 +655,7 @@ test.describe('Plugin system', () => {
     expect(await cell.textContent()).toBe('ALICE JOHNSON');
 
     await cell.click();
-    await page.keyboard.press('Enter');
+    await page.keyboard.press('F2');
     await page.waitForTimeout(100);
     expect(await cell.textContent()).toBe('Alice Johnson');
 
@@ -683,7 +683,7 @@ test.describe('Plugin system', () => {
     expect(await cell.textContent()).toBe('Alice Johnson');
 
     await cell.click();
-    await page.keyboard.press('Enter');
+    await page.keyboard.press('F2');
     await page.waitForTimeout(100);
     expect(await cell.textContent()).toBe('Alice Johnson');
 

@@ -107,7 +107,7 @@ test.describe('Display transforms in docked panes', () => {
   // ===========================================================================
   test.describe('Edit mode in docked panes', () => {
 
-    test('Enter key enters edit mode and shows raw value', async ({ page }) => {
+    test('F2 enters edit mode and shows raw value', async ({ page }) => {
       await setupSplitDockWithPlugin(page);
 
       // Verify transform is active
@@ -115,7 +115,7 @@ test.describe('Display transforms in docked panes', () => {
 
       // Click and enter edit mode
       await clickWindowCell(page, 'sample1', 0, 0);
-      await page.keyboard.press('Enter');
+      await page.keyboard.press('F2');
       await page.waitForTimeout(100);
 
       // Cell should show raw value in edit mode
@@ -152,7 +152,7 @@ test.describe('Display transforms in docked panes', () => {
       expect(await getCellText(page, 'sample2', 0, 0)).toBe('ALICE JOHNSON');
 
       await clickWindowCell(page, 'sample2', 0, 0);
-      await page.keyboard.press('Enter');
+      await page.keyboard.press('F2');
       await page.waitForTimeout(100);
 
       expect(await getCellText(page, 'sample2', 0, 0)).toBe('Alice Johnson');
@@ -168,7 +168,7 @@ test.describe('Display transforms in docked panes', () => {
       await setupSplitDockWithPlugin(page);
 
       await clickWindowCell(page, 'sample1', 0, 0);
-      await page.keyboard.press('Enter');
+      await page.keyboard.press('F2');
       await page.waitForTimeout(100);
       expect(await getCellText(page, 'sample1', 0, 0)).toBe('Alice Johnson');
 
@@ -192,7 +192,7 @@ test.describe('Display transforms in docked panes', () => {
       await setupSplitDockWithPlugin(page);
 
       await clickWindowCell(page, 'sample1', 0, 0);
-      await page.keyboard.press('Enter');
+      await page.keyboard.press('F2');
       await page.waitForTimeout(100);
       expect(await getCellText(page, 'sample1', 0, 0)).toBe('Alice Johnson');
 
@@ -208,7 +208,7 @@ test.describe('Display transforms in docked panes', () => {
       await setupSplitDockWithPlugin(page);
 
       await clickWindowCell(page, 'sample1', 0, 0);
-      await page.keyboard.press('Enter');
+      await page.keyboard.press('F2');
       await page.waitForTimeout(100);
       expect(await getCellText(page, 'sample1', 0, 0)).toBe('Alice Johnson');
 
@@ -224,7 +224,7 @@ test.describe('Display transforms in docked panes', () => {
       await setupSplitDockWithPlugin(page);
 
       await clickWindowCell(page, 'sample1', 0, 0);
-      await page.keyboard.press('Enter');
+      await page.keyboard.press('F2');
       await page.waitForTimeout(100);
 
       // Clear cell and type a new value
@@ -279,7 +279,7 @@ test.describe('Display transforms in docked panes', () => {
 
       // Enter edit mode
       await clickWindowCell(page, 'sample1', 0, 0);
-      await page.keyboard.press('Enter');
+      await page.keyboard.press('F2');
       await page.waitForTimeout(100);
 
       // Should show raw value
@@ -319,7 +319,7 @@ test.describe('Display transforms in docked panes', () => {
         expect(await getCellText(page, name, 0, 0)).toBe('ALICE JOHNSON');
 
         await clickWindowCell(page, name, 0, 0);
-        await page.keyboard.press('Enter');
+        await page.keyboard.press('F2');
         await page.waitForTimeout(100);
         expect(await getCellText(page, name, 0, 0)).toBe('Alice Johnson');
 
@@ -350,7 +350,7 @@ test.describe('Display transforms in docked panes', () => {
       expect(await getCellText(page, 'sample1', 0, 0)).toBe('ALICE JOHNSON');
 
       await clickWindowCell(page, 'sample1', 0, 0);
-      await page.keyboard.press('Enter');
+      await page.keyboard.press('F2');
       await page.waitForTimeout(100);
       expect(await getCellText(page, 'sample1', 0, 0)).toBe('Alice Johnson');
 

@@ -245,18 +245,32 @@ test.describe('Cell row/column highlight', () => {
     expect(sel.anchor).toEqual({ rownum: 3, col: 'email' });
   });
 
-  test('plain arrow in edit mode does not move selection', async ({ page }) => {
+  test('left/right arrows in edit mode move the caret, not the selection', async ({ page }) => {
     const firstCell = page.locator('.subwindow table tbody td.data-cell').first();
     await firstCell.click();
     await page.keyboard.press('F2');
     await page.waitForTimeout(50);
 
-    // In edit mode, arrow keys move the caret; anchor unchanged.
-    await page.keyboard.press('ArrowDown');
+    // In edit mode, left/right arrows move the caret; anchor unchanged.
+    await page.keyboard.press('ArrowLeft');
+    await page.keyboard.press('ArrowRight');
     await page.waitForTimeout(50);
 
     const sel = await getSelection(page, 'sample1');
     expect(sel.anchor).toEqual({ rownum: 1, col: 'name' });
+  });
+
+  test('down arrow in edit mode commits the edit and moves selection down', async ({ page }) => {
+    const firstCell = page.locator('.subwindow table tbody td.data-cell').first();
+    await firstCell.click();
+    await page.keyboard.press('F2');
+    await page.waitForTimeout(50);
+
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(100);
+
+    const sel = await getSelection(page, 'sample1');
+    expect(sel.anchor).toEqual({ rownum: 2, col: 'name' });
   });
 
   test('clicking a different cell resets anchor and selection', async ({ page }) => {

@@ -180,7 +180,7 @@ The AI receives column statistics and sample rows, then writes SQL queries to ge
 
 - **Move** — Drag the title bar. Windows snap to workspace edges and other window edges within 10 px
 - **Resize** — Drag any edge or corner. Edges snap to workspace boundaries and other window edges
-- **Maximize/Restore** — Double-click the title bar, or click the maximize button
+- **Maximize/Restore** — Double-click the title bar, or click the maximize button. Dragging the title bar of a maximized window restores it to its previous size and moves it
 - **Minimize** — Click the minimize button. Restore from the Windows menu
 - **Close** — Click the close button. Ctrl/Cmd+click closes all windows
 - **Layout** — Use the Windows menu to Tile Horizontally, Tile Vertically, Grid, or Cascade
@@ -197,7 +197,7 @@ Windows can be combined into tabbed groups and split layouts for an IDE-style wo
 - **Move tabs** — Hold Shift and drag a tab to move it to another window or dock pane. A ghost preview shows where the window will land. Dropping on empty space moves the window to the drop location
 - **Undock** — Hold Shift and drag a tab outside its dock container to detach it as a standalone window. The undocked window retains the pane's size
 - **Splitter** — Drag the divider between split panes to resize. Double-click to reset to 50/50
-- **Maximize** — Double-click a tab or the empty tab bar area to maximize/restore the dock container
+- **Maximize** — Double-click a tab or the empty tab bar area to maximize/restore the dock container. Dragging the tab bar of a maximized dock restores it to its previous size and moves it
 - **Rename** — Ctrl/Cmd+click a tab to rename the table
 - **Close tab** — Click the ✕ on a tab. When a dock reduces to a single tab, it dissolves back to a standalone window
 

@@ -1148,6 +1148,22 @@ const app = (() => {
     }
   }
 
+  // Called when a titlebar/tab-bar drag starts on a maximized window or dock:
+  // restores the pre-maximize size, keeping the grab point at the same
+  // proportional position along the titlebar. Returns the new left position
+  // (the drag handler adopts it as the drag origin).
+  function unmaximizeForDrag(obj, grabClientX, areaLeft) {
+    obj.maximized = false;
+    const b = obj.prevBounds;
+    const curLeft = parseInt(obj.el.style.left) || 0;
+    if (!b) return curLeft;
+    const pointerX = grabClientX - areaLeft;
+    const ratio = Math.max(0, Math.min(1, (pointerX - curLeft) / obj.el.offsetWidth));
+    obj.el.style.width = b.width + 'px';
+    obj.el.style.height = b.height + 'px';
+    return Math.round(pointerX - b.width * ratio);
+  }
+
   function getSnapEdges(excludeWin) {
     const area = document.getElementById('window-area');
     const areaW = area.clientWidth, areaH = area.clientHeight;
@@ -1286,6 +1302,7 @@ const app = (() => {
         if (target) showDropOverlay(target);
         else hideDropOverlay();
       } else {
+        if (win.maximized) origX = unmaximizeForDrag(win, startX, area.left);
         const areaW = area.right - area.left, areaH = area.bottom - area.top;
         const winW = win.el.offsetWidth, winH = win.el.offsetHeight;
         let left = Math.max(0, Math.min(origX + dx, areaW - winW));
@@ -1294,7 +1311,6 @@ const app = (() => {
         win.el.style.left = snapped.left + 'px';
         win.el.style.top = snapped.top + 'px';
         showSnapGuides(snapped.guidesX, snapped.guidesY);
-        if (win.maximized) win.maximized = false;
       }
     });
 
@@ -1364,6 +1380,7 @@ const app = (() => {
       if (_touchWinDrag.dragging) {
         if (e.cancelable) e.preventDefault();
         const area = document.getElementById('window-area').getBoundingClientRect();
+        if (win.maximized) _touchWinDrag.origX = unmaximizeForDrag(win, _touchWinDrag.startX, area.left);
         const cx = Math.max(area.left, Math.min(touch.clientX, area.right));
         const cy = Math.max(area.top, Math.min(touch.clientY, area.bottom));
         const ax = cx - _touchWinDrag.startX;
@@ -1376,7 +1393,6 @@ const app = (() => {
         win.el.style.left = snapped.left + 'px';
         win.el.style.top = snapped.top + 'px';
         showSnapGuides(snapped.guidesX, snapped.guidesY);
-        if (win.maximized) win.maximized = false;
       }
     }, { passive: false });
 
@@ -1460,6 +1476,7 @@ const app = (() => {
           win.el.style.top = newTop + 'px';
         }
         showSnapGuides(guidesX, guidesY);
+        if (win.maximized) win.maximized = false;
       });
 
       document.addEventListener('mouseup', () => { if (resizing) hideSnapGuides(); resizing = false; });
@@ -2146,6 +2163,7 @@ const app = (() => {
       const cy = Math.max(area.top, Math.min(e.clientY, area.bottom));
       const dx = cx - startX, dy = cy - startY;
       if (Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
+      if (dock.maximized) origX = unmaximizeForDrag(dock, startX, area.left);
       const areaW = area.right - area.left, areaH = area.bottom - area.top;
       const dockW = dock.el.offsetWidth, dockH = dock.el.offsetHeight;
       let left = Math.max(0, Math.min(origX + dx, areaW - dockW));
@@ -2154,7 +2172,6 @@ const app = (() => {
       dock.el.style.left = snapped.left + 'px';
       dock.el.style.top = snapped.top + 'px';
       showSnapGuides(snapped.guidesX, snapped.guidesY);
-      if (dock.maximized) dock.maximized = false;
     });
 
     document.addEventListener('mouseup', () => {
@@ -2169,8 +2186,8 @@ const app = (() => {
   function setupTabDragFromMousedown(startEvent, tabEl, winId, leaf, dock) {
     const startX = startEvent.clientX;
     const startY = startEvent.clientY;
-    const origDockX = parseInt(dock.el.style.left);
-    const origDockY = parseInt(dock.el.style.top);
+    let origDockX = parseInt(dock.el.style.left);
+    let origDockY = parseInt(dock.el.style.top);
     let movingDock = false;
     let undocking = false;
     let reordering = false;
@@ -2210,6 +2227,7 @@ const app = (() => {
 
       if (movingDock) {
         const area = document.getElementById('window-area').getBoundingClientRect();
+        if (dock.maximized) origDockX = unmaximizeForDrag(dock, startX, area.left);
         const cx = Math.max(area.left, Math.min(e.clientX, area.right));
         const cy = Math.max(area.top, Math.min(e.clientY, area.bottom));
         const areaW = area.right - area.left, areaH = area.bottom - area.top;
@@ -2220,7 +2238,6 @@ const app = (() => {
         dock.el.style.left = snapped.left + 'px';
         dock.el.style.top = snapped.top + 'px';
         showSnapGuides(snapped.guidesX, snapped.guidesY);
-        if (dock.maximized) dock.maximized = false;
       }
 
       if (reordering) {
@@ -6608,7 +6625,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.40 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.42 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `, true);
@@ -6728,7 +6745,7 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <ul>
 <li><strong>Move:</strong> Drag the title bar. Windows snap to workspace edges and other window edges within 10 px. Blue guide lines show the snap alignment.</li>
 <li><strong>Resize:</strong> Drag any edge or corner. Edges snap to workspace boundaries and other window edges.</li>
-<li><strong>Maximize/Restore:</strong> Double-click the title bar, or click the maximize button.</li>
+<li><strong>Maximize/Restore:</strong> Double-click the title bar, or click the maximize button. Dragging the title bar of a maximized window restores it to its previous size and moves it.</li>
 <li><strong>Minimize:</strong> Click the minimize button. Restore from the Windows menu.</li>
 <li><strong>Close:</strong> Click the close button. <code>Ctrl</code>/<code>&#8984;</code>+click closes all windows.</li>
 <li><strong>Layout:</strong> Use the Windows menu to tile, grid, or cascade all windows.</li>
@@ -6745,7 +6762,7 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <li><strong>Move tabs:</strong> Hold <code>Shift</code> and drag a tab to move it to another window or dock pane. A ghost preview shows where the window will land. Dropping on empty space moves the window to the drop location.</li>
 <li><strong>Undock:</strong> Hold <code>Shift</code> and drag a tab outside its dock container to detach it as a standalone window. The undocked window retains the pane's size.</li>
 <li><strong>Splitter:</strong> Drag the divider between split panes to resize. Double-click to reset to 50/50.</li>
-<li><strong>Maximize:</strong> Double-click a tab or the empty tab bar area to maximize/restore the dock container.</li>
+<li><strong>Maximize:</strong> Double-click a tab or the empty tab bar area to maximize/restore the dock container. Dragging the tab bar of a maximized dock restores it to its previous size and moves it.</li>
 <li><strong>Rename:</strong> <code>Ctrl</code>/<code>&#8984;</code>+click a tab to rename the table.</li>
 <li><strong>Close tab:</strong> Click the &#10005; on a tab. When a dock reduces to a single tab, it dissolves back to a standalone window.</li>
 </ul>
@@ -9590,7 +9607,7 @@ choose(value, 'A', 'Active', 'I', 'Inactive')
         dockWindowAsTab, dockWindowAsSplit,
         undockWindow, closeDock,
         removeTabFromLeaf, cleanupAfterTabRemoval,
-        toggleMaximizeDock, getDropZone, detectDropTarget,
+        toggleMaximize, toggleMaximizeDock, getDropZone, detectDropTarget,
         autoFitAllColumns,
         updateTableWidth, selectAllCells, selectNoneCells, selectColumns, copySelectedCells,
         showColManager, closeColManager, finalizeColManager,

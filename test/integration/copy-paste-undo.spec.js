@@ -499,7 +499,7 @@ test.describe('Copy, Paste, Undo, Redo', () => {
     await page.waitForTimeout(50);
     const original = await cell.textContent();
     // Enter edit mode
-    await page.keyboard.press('Enter');
+    await page.keyboard.press('F2');
     await page.waitForTimeout(50);
     await page.keyboard.type('CHANGED');
     // Escape should revert the edit
