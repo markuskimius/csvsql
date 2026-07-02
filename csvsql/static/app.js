@@ -3796,10 +3796,10 @@ const app = (() => {
       const isArrow = navKey === 'ArrowUp' || navKey === 'ArrowDown' ||
                       navKey === 'ArrowLeft' || navKey === 'ArrowRight';
 
-      // F2, Enter, i, or Ctrl/Cmd+U: enter edit mode (select mode only)
+      // F2, i, or Ctrl/Cmd+U: enter edit mode (select mode only)
       const noMods = !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
       if (!inEdit && (e.key === 'F2' ||
-          (noMods && (e.key === 'Enter' || e.key === 'i')) ||
+          (noMods && e.key === 'i') ||
           ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'u' || e.key === 'U')))) {
         e.preventDefault();
         win._editStartColIdx = parseInt(td.dataset.colIdx, 10);
@@ -3815,6 +3815,27 @@ const app = (() => {
           filterInput.focus();
           return;
         }
+      }
+
+      // Edit-mode up/down: commit edit and move to adjacent row
+      if (inEdit && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+        e.preventDefault();
+        td.blur();
+        const displayIdx = parseInt(tr.dataset.displayIdx, 10);
+        const colIdx = parseInt(td.dataset.colIdx, 10);
+        if (!isNaN(displayIdx) && !isNaN(colIdx)) {
+          const maxDisplay = win._displayRows.length - 1;
+          const newDisplay = e.key === 'ArrowUp' ? Math.max(0, displayIdx - 1) : Math.min(maxDisplay, displayIdx + 1);
+          const row = win._displayRows[newDisplay];
+          const col = win._columns[colIdx];
+          if (row && col != null) {
+            win.anchorCell = { rownum: row._rownum, col };
+            win.selectedCells = new Set([`${row._rownum}:${col}`]);
+            focusCellAt(win, newDisplay, colIdx);
+            applyCellHighlights(win, true);
+          }
+        }
+        return;
       }
 
       // Select-mode arrow key handling
@@ -3839,11 +3860,11 @@ const app = (() => {
         }
       }
 
-      // Select-mode Tab / Shift+Tab: cycle table windows.
+      // Select-mode Tab / Shift+Tab: move to adjacent cell in the row.
       // Edit-mode Tab still moves between cells in the row.
       if (e.key === 'Tab' && !inEdit && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
-        cycleTableWindow(win, e.shiftKey ? -1 : 1);
+        moveSingleCellSelection(win, tr, td, e.shiftKey ? 'ArrowLeft' : 'ArrowRight');
         return;
       }
       // Ctrl/Cmd (+Shift) + H/J/K/L in select mode:
@@ -3887,17 +3908,29 @@ const app = (() => {
           if (inEdit) enterEditMode(next);
         }
       } else if (e.key === 'Enter' && !e.shiftKey) {
-        if (!inEdit) return;
         e.preventDefault();
-        td.blur();
-        const nextTr = tr.nextElementSibling;
-        if (nextTr && !nextTr.classList.contains('virtual-pad')) {
+        if (inEdit) {
+          td.blur();
           const targetColIdx = win._editStartColIdx != null ? win._editStartColIdx : parseInt(td.dataset.colIdx, 10);
-          const nextTd = nextTr.children[targetColIdx + 1];
-          if (nextTd && nextTd.classList.contains('data-cell')) {
-            nextTd.focus();
-            enterEditMode(nextTd);
+          const displayIdx = parseInt(tr.dataset.displayIdx, 10);
+          if (!isNaN(displayIdx) && !isNaN(targetColIdx)) {
+            const maxDisplay = win._displayRows.length - 1;
+            const newDisplay = Math.min(maxDisplay, displayIdx + 1);
+            const row = win._displayRows[newDisplay];
+            const col = win._columns[targetColIdx];
+            if (row && col != null) {
+              win.anchorCell = { rownum: row._rownum, col };
+              win.selectedCells = new Set([`${row._rownum}:${col}`]);
+              focusCellAt(win, newDisplay, targetColIdx);
+              applyCellHighlights(win, true);
+              if (newDisplay !== displayIdx) {
+                const newTd = win._tbody.querySelector(`tr[data-display-idx="${newDisplay}"]`)?.children[targetColIdx + 1];
+                if (newTd && newTd.classList.contains('data-cell')) enterEditMode(newTd);
+              }
+            }
           }
+        } else {
+          moveSingleCellSelection(win, tr, td, 'ArrowDown');
         }
       } else if (e.key === 'Escape') {
         e.preventDefault();
@@ -6615,7 +6648,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 <h4>Editing</h4>
 <ul>
-<li><strong>Edit cells:</strong> Click a cell to select it; press <code>Enter</code>, <code>i</code>, <code>F2</code>, or <code>Ctrl</code>/<code>&#8984;</code>+<code>U</code> to enter edit mode, or <code>Ctrl</code>/<code>&#8984;</code>+click a cell to edit it directly. <code>Tab</code>/<code>Shift+Tab</code> moves between cells and <code>Enter</code> moves down to the column where editing started &mdash; all three stay in edit mode. Long text scrolls within the cell to keep the cursor visible. <code>Escape</code> reverts the edit (and clears the selection when not editing).</li>
+<li><strong>Edit cells:</strong> Click a cell to select it; press <code>i</code>, <code>F2</code>, or <code>Ctrl</code>/<code>&#8984;</code>+<code>U</code> to enter edit mode, or <code>Ctrl</code>/<code>&#8984;</code>+click a cell to edit it directly. <code>Tab</code>/<code>Shift+Tab</code> moves between cells and <code>Enter</code> moves down to the column where editing started &mdash; all three stay in edit mode (Enter exits edit mode on the last row). <code>Up</code>/<code>Down</code> arrow commits and moves to the adjacent row, exiting edit mode. Long text scrolls within the cell to keep the cursor visible. <code>Escape</code> reverts the edit.</li>
+<li><strong>Navigate in select mode:</strong> Arrow keys or <code>h</code>/<code>j</code>/<code>k</code>/<code>l</code> move the selection. <code>Tab</code>/<code>Shift+Tab</code> move right/left. <code>Enter</code> moves down. <code>Escape</code> clears the selection.</li>
 <li><strong>Highlight row &amp; column:</strong> Clicking a cell highlights its row and column. Click a column header to select the entire column (with header row included for copy). Move the selection with arrow keys or vim-style <code>h</code>/<code>j</code>/<code>k</code>/<code>l</code>; extend to a rectangle of cells with <code>Shift</code>+arrow (or <code>Shift</code>+<code>H</code>/<code>J</code>/<code>K</code>/<code>L</code>), <code>Shift</code>+click on another cell, or click-and-drag across cells &mdash; every selected cell's row and column is highlighted so you can see what lines up with what. Click a row number to select an entire row; drag across row numbers or <code>Shift</code>+click another row number to select a range. <code>Ctrl</code>/<code>&#8984;</code>+<code>A</code> selects all cells; <code>Esc</code> deselects all. Clicking the <code>#</code> corner cell toggles between select all and select none. Pressing an arrow key with no cell selected focuses the cell in the middle of the current view.</li>
 <li><strong>Cut / Copy / Paste:</strong> Select cells and use <code>Ctrl</code>/<code>&#8984;</code>+<code>X</code>, <code>Ctrl</code>/<code>&#8984;</code>+<code>C</code>, <code>Ctrl</code>/<code>&#8984;</code>+<code>V</code>. Data is copied as tab-separated values. When a plugin display transform is active, copy uses the formatted display values; when formatting is disabled, copy uses raw values. Select All and row selection copies include the column header row. Copy and cut work from any focus context (column header, titlebar, etc.), not just when a data cell is focused. In edit mode, these shortcuts pass through to native browser behavior for text within the cell.</li>
 <li><strong>Undo / Redo:</strong> <code>Ctrl</code>/<code>&#8984;</code>+<code>Z</code> to undo, <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>Z</code> to redo. Undoes cell edits, paste, cut, row insert/delete, column insert/delete, column rename, column reorder, and column resize. Multi-cell paste and cut undo as a single step. Also available from the Edit menu.</li>
@@ -6724,11 +6758,14 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <tr><td><code>Ctrl+N</code> / <code>&#8984;N</code></td><td>New table</td></tr>
 <tr><td><code>Ctrl+W</code> / <code>&#8984;W</code></td><td>Close window</td></tr>
 <tr><td><code>Ctrl+&larr;</code> / <code>Ctrl+&rarr;</code> (or <code>&#8984;</code>+arrow)</td><td>Move selected header column, or cell-selection's columns, left / right</td></tr>
-<tr><td><code>Enter</code>, <code>i</code>, <code>F2</code>, or <code>Ctrl</code>/<code>&#8984;</code>+<code>U</code></td><td>Enter edit mode on the selected cell</td></tr>
+<tr><td><code>i</code>, <code>F2</code>, or <code>Ctrl</code>/<code>&#8984;</code>+<code>U</code></td><td>Enter edit mode on the selected cell</td></tr>
 <tr><td><code>/</code> (cell selected, not editing)</td><td>Jump to the window's filter input</td></tr>
 <tr><td><code>Escape</code> (in filter input)</td><td>Return focus to the selected cell</td></tr>
 <tr><td>Arrow keys (no cell selected)</td><td>Focus the cell in the middle of the visible table</td></tr>
 <tr><td>Arrow keys or <code>h</code>/<code>j</code>/<code>k</code>/<code>l</code> (cell selected, not editing)</td><td>Move selection to the adjacent cell</td></tr>
+<tr><td><code>Tab</code>/<code>Shift+Tab</code> (cell selected, not editing)</td><td>Move selection right / left</td></tr>
+<tr><td><code>Enter</code> (cell selected, not editing)</td><td>Move selection down</td></tr>
+<tr><td><code>&uarr;</code>/<code>&darr;</code> (editing)</td><td>Commit edit, move to adjacent row (exits edit mode)</td></tr>
 <tr><td><code>Shift+</code>arrow or <code>Shift+H</code>/<code>J</code>/<code>K</code>/<code>L</code></td><td>Extend cell selection (highlights row &amp; column of every selected cell)</td></tr>
 <tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>A</code></td><td>Select all cells</td></tr>
 <tr><td><code>Escape</code> (cell selected, not editing)</td><td>Deselect all cells</td></tr>
@@ -6738,8 +6775,8 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>Z</code></td><td>Undo</td></tr>
 <tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>Z</code></td><td>Redo</td></tr>
 <tr><td><code>Tab</code>/<code>Shift+Tab</code> (editing)</td><td>Move to next / previous cell (stays in edit mode)</td></tr>
-<tr><td><code>Enter</code> (editing)</td><td>Move down to the column where editing started (stays in edit mode)</td></tr>
-<tr><td><code>Tab</code>/<code>Shift+Tab</code> or <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>L</code>/<code>H</code> (cell selected, not editing)</td><td>Switch to next / previous table window</td></tr>
+<tr><td><code>Enter</code> (editing)</td><td>Move down to the column where editing started (stays in edit mode; exits on last row)</td></tr>
+<tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>L</code>/<code>H</code> (cell selected, not editing)</td><td>Switch to next / previous table window</td></tr>
 <tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>H</code>/<code>J</code>/<code>K</code>/<code>L</code> (cell selected, not editing)</td><td>Nudge the active window 5 px left / down / up / right</td></tr>
 <tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>1</code>/<code>2</code>/<code>3</code>/<code>4</code></td><td>Clear Sort / Clear Filters / Toggle Link / Toggle Format</td></tr>
 <tr><td><code>Ctrl+Enter</code></td><td>Execute SQL query</td></tr>

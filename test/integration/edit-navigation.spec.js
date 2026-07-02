@@ -101,16 +101,25 @@ test.describe('Edit mode navigation', () => {
     expect(startColIdx).toBe(1);
   });
 
-  test('_editStartColIdx is set when entering edit mode via Enter key', async ({ page }) => {
-    const thirdCell = page.locator('.subwindow table tbody tr:first-child td.data-cell').nth(2);
-    await thirdCell.click();
-    await page.keyboard.press('Enter');
+  test('Enter in select mode moves down (does not enter edit mode)', async ({ page }) => {
+    const cell = page.locator('.subwindow table tbody tr:first-child td.data-cell').first();
+    await cell.click();
+    await expect(cell).not.toHaveAttribute('contenteditable', 'true');
 
-    const startColIdx = await page.evaluate(() => {
-      const win = app._test.windows.find(w => w.tableName === 'sample1');
-      return win._editStartColIdx;
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(200);
+
+    // Should NOT enter edit mode — the cell should still not be contenteditable
+    await expect(cell).not.toHaveAttribute('contenteditable', 'true');
+
+    // Focus should have moved to the second row
+    const focused = await page.evaluate(() => {
+      const el = document.activeElement;
+      return el && el.classList.contains('data-cell')
+        ? parseInt(el.parentElement.dataset.displayIdx, 10)
+        : null;
     });
-    expect(startColIdx).toBe(2);
+    expect(focused).toBe(1);
   });
 
   test('_editStartColIdx is set when entering edit mode via i key', async ({ page }) => {
@@ -196,19 +205,154 @@ test.describe('Edit mode navigation', () => {
     expect(data.rows.length).toBe(10);
   });
 
-  test('Enter on last row does not crash', async ({ page }) => {
-    // Focus the last row
+  test('Enter on last row exits edit mode and keeps cell focused', async ({ page }) => {
     const lastRowCell = page.locator('.subwindow table tbody tr:last-child td.data-cell').first();
     await lastRowCell.click();
     await page.keyboard.press('F2');
     await expect(lastRowCell).toHaveAttribute('contenteditable', 'true');
 
-    // Enter on the last row should not crash
     await page.keyboard.press('Enter');
     await page.waitForTimeout(200);
 
+    // Should exit edit mode (no contenteditable)
+    const isEditable = await page.evaluate(() => {
+      const el = document.activeElement;
+      return el && el.getAttribute('contenteditable') === 'true';
+    });
+    expect(isEditable).toBe(false);
+
+    // Should still have a data cell focused (navigable)
+    const hasFocus = await page.evaluate(() => {
+      const el = document.activeElement;
+      return el && el.classList.contains('data-cell');
+    });
+    expect(hasFocus).toBe(true);
+
+    // Arrow keys should still work from here
+    await page.keyboard.press('ArrowUp');
+    await page.waitForTimeout(200);
+    const movedUp = await page.evaluate(() => {
+      const el = document.activeElement;
+      return el && el.classList.contains('data-cell')
+        ? parseInt(el.parentElement.dataset.displayIdx, 10)
+        : null;
+    });
+    expect(movedUp).toBeLessThan(9);
+  });
+
+  test('ArrowDown in edit mode commits and moves to next row in nav mode', async ({ page }) => {
+    const cell = page.locator('.subwindow table tbody tr:first-child td.data-cell').first();
+    await cell.click();
+    await page.keyboard.press('F2');
+    await expect(cell).toHaveAttribute('contenteditable', 'true');
+    await cell.fill('ARROW_DOWN_TEST');
+
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(200);
+
+    // Should have committed the edit
     const data = await getTableData(page, 'sample1');
-    expect(data.rows.length).toBe(10);
+    expect(data.rows[0].name).toBe('ARROW_DOWN_TEST');
+
+    // Should be on the next row
+    const focused = await page.evaluate(() => {
+      const el = document.activeElement;
+      return el && el.classList.contains('data-cell')
+        ? parseInt(el.parentElement.dataset.displayIdx, 10)
+        : null;
+    });
+    expect(focused).toBe(1);
+
+    // Should NOT be in edit mode
+    const isEditable = await page.evaluate(() => {
+      const el = document.activeElement;
+      return el && el.getAttribute('contenteditable') === 'true';
+    });
+    expect(isEditable).toBe(false);
+  });
+
+  test('ArrowUp in edit mode commits and moves to previous row in nav mode', async ({ page }) => {
+    const secondRowCell = page.locator('.subwindow table tbody tr:nth-child(2) td.data-cell').first();
+    await secondRowCell.click();
+    await page.keyboard.press('F2');
+    await expect(secondRowCell).toHaveAttribute('contenteditable', 'true');
+    await secondRowCell.fill('ARROW_UP_TEST');
+
+    await page.keyboard.press('ArrowUp');
+    await page.waitForTimeout(200);
+
+    // Should have committed the edit
+    const data = await getTableData(page, 'sample1');
+    expect(data.rows[1].name).toBe('ARROW_UP_TEST');
+
+    // Should be on the first row
+    const focused = await page.evaluate(() => {
+      const el = document.activeElement;
+      return el && el.classList.contains('data-cell')
+        ? parseInt(el.parentElement.dataset.displayIdx, 10)
+        : null;
+    });
+    expect(focused).toBe(0);
+
+    // Should NOT be in edit mode
+    const isEditable = await page.evaluate(() => {
+      const el = document.activeElement;
+      return el && el.getAttribute('contenteditable') === 'true';
+    });
+    expect(isEditable).toBe(false);
+  });
+
+  test('ArrowDown on last row in edit mode commits and stays on last row', async ({ page }) => {
+    const lastRowCell = page.locator('.subwindow table tbody tr:last-child td.data-cell').first();
+    await lastRowCell.click();
+    await page.keyboard.press('F2');
+
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(200);
+
+    // Should still be on the last row (display index 9)
+    const focused = await page.evaluate(() => {
+      const el = document.activeElement;
+      return el && el.classList.contains('data-cell')
+        ? parseInt(el.parentElement.dataset.displayIdx, 10)
+        : null;
+    });
+    expect(focused).toBe(9);
+  });
+
+  test('ArrowUp on first row in edit mode commits and stays on first row', async ({ page }) => {
+    const firstCell = page.locator('.subwindow table tbody tr:first-child td.data-cell').first();
+    await firstCell.click();
+    await page.keyboard.press('F2');
+
+    await page.keyboard.press('ArrowUp');
+    await page.waitForTimeout(200);
+
+    const focused = await page.evaluate(() => {
+      const el = document.activeElement;
+      return el && el.classList.contains('data-cell')
+        ? parseInt(el.parentElement.dataset.displayIdx, 10)
+        : null;
+    });
+    expect(focused).toBe(0);
+  });
+
+  test('ArrowDown in edit mode stays in same column', async ({ page }) => {
+    // Start editing in column 1
+    const cell = page.locator('.subwindow table tbody tr:first-child td.data-cell').nth(1);
+    await cell.click();
+    await page.keyboard.press('F2');
+
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(200);
+
+    const focused = await page.evaluate(() => {
+      const el = document.activeElement;
+      return el && el.classList.contains('data-cell')
+        ? { row: parseInt(el.parentElement.dataset.displayIdx, 10), col: parseInt(el.dataset.colIdx, 10) }
+        : null;
+    });
+    expect(focused).toEqual({ row: 1, col: 1 });
   });
 
   test('Enter saves the edited value before moving down', async ({ page }) => {
@@ -223,30 +367,90 @@ test.describe('Edit mode navigation', () => {
     expect(data.rows[0].name).toBe('EDITED_VIA_ENTER');
   });
 
-  test('Tab in select mode cycles windows (not cells)', async ({ page }) => {
-    // Verify that Tab in select mode (not edit mode) does NOT move to next cell
+  test('Tab in select mode moves to next cell (not cycles windows)', async ({ page }) => {
     const cell = page.locator('.subwindow table tbody tr:first-child td.data-cell').first();
     await cell.click();
-    // Should be in select mode (no contenteditable)
     await expect(cell).not.toHaveAttribute('contenteditable', 'true');
 
-    // Tab should cycle windows, not move to next cell
     await page.keyboard.press('Tab');
     await page.waitForTimeout(200);
 
-    // The cell should not have contenteditable
+    // Focus should have moved to the next cell in the same row
+    const focused = await page.evaluate(() => {
+      const el = document.activeElement;
+      return el && el.classList.contains('data-cell')
+        ? parseInt(el.dataset.colIdx, 10)
+        : null;
+    });
+    expect(focused).toBe(1);
+    // Should still be in select mode
     const nextCell = page.locator('.subwindow table tbody tr:first-child td.data-cell').nth(1);
     await expect(nextCell).not.toHaveAttribute('contenteditable', 'true');
   });
 
-  test('Enter in select mode enters edit mode (does not move down)', async ({ page }) => {
-    const cell = page.locator('.subwindow table tbody tr:first-child td.data-cell').first();
-    await cell.click();
-    await expect(cell).not.toHaveAttribute('contenteditable', 'true');
+  test('Shift+Tab in select mode moves to previous cell', async ({ page }) => {
+    const secondCell = page.locator('.subwindow table tbody tr:first-child td.data-cell').nth(1);
+    await secondCell.click();
+    await expect(secondCell).not.toHaveAttribute('contenteditable', 'true');
 
-    // Enter from select mode should enter edit mode
+    await page.keyboard.press('Shift+Tab');
+    await page.waitForTimeout(200);
+
+    const focused = await page.evaluate(() => {
+      const el = document.activeElement;
+      return el && el.classList.contains('data-cell')
+        ? parseInt(el.dataset.colIdx, 10)
+        : null;
+    });
+    expect(focused).toBe(0);
+  });
+
+  test('Tab at last cell in row in select mode stays at last cell', async ({ page }) => {
+    const lastCell = page.locator('.subwindow table tbody tr:first-child td.data-cell').last();
+    await lastCell.click();
+
+    const colBefore = await page.evaluate(() => {
+      const el = document.activeElement;
+      return el && el.classList.contains('data-cell')
+        ? parseInt(el.dataset.colIdx, 10)
+        : null;
+    });
+
+    await page.keyboard.press('Tab');
+    await page.waitForTimeout(200);
+
+    // Should stay at the same cell (no crash, no wrap)
+    const colAfter = await page.evaluate(() => {
+      const el = document.activeElement;
+      return el && el.classList.contains('data-cell')
+        ? parseInt(el.dataset.colIdx, 10)
+        : null;
+    });
+    expect(colAfter).toBe(colBefore);
+  });
+
+  test('Enter in select mode on last row stays on last row', async ({ page }) => {
+    const lastRowCell = page.locator('.subwindow table tbody tr:last-child td.data-cell').first();
+    await lastRowCell.click();
+
+    const rowBefore = await page.evaluate(() => {
+      const el = document.activeElement;
+      return el && el.classList.contains('data-cell')
+        ? parseInt(el.parentElement.dataset.displayIdx, 10)
+        : null;
+    });
+
     await page.keyboard.press('Enter');
-    await expect(cell).toHaveAttribute('contenteditable', 'true');
+    await page.waitForTimeout(200);
+
+    // Should still be on the same row
+    const rowAfter = await page.evaluate(() => {
+      const el = document.activeElement;
+      return el && el.classList.contains('data-cell')
+        ? parseInt(el.parentElement.dataset.displayIdx, 10)
+        : null;
+    });
+    expect(rowAfter).toBe(rowBefore);
   });
 
   test('multiple Tab then Enter navigates correctly across rows', async ({ page }) => {

@@ -12,7 +12,7 @@ A browser-based CSV database application. Open CSV, Excel, and compressed files 
 - **Multiple file formats** — CSV, TSV, PSV, Excel (.xlsx/.xls), Gzip (.csv.gz), and ZIP archives
 - **SQL queries** — Full SQLite syntax from the built-in console, including joins, subqueries, aggregates, UNION, CASE, and REGEXP. Query results are queryable tables too
 - **SQL syntax highlighting** — Keywords, strings, numbers, comments, and identifiers are color-coded in the SQL console and filter inputs
-- **Inline editing** — Click a cell to select it; press Enter, i, F2, or Ctrl/Cmd+U to edit; or Ctrl/Cmd+click a cell to edit directly. Tab/Shift+Tab/Enter navigate between cells while staying in edit mode. Enter returns to the column where editing started. Long text scrolls within the cell to keep the cursor visible. Escape to revert
+- **Inline editing** — Click a cell to select it; press i, F2, or Ctrl/Cmd+U to edit; or Ctrl/Cmd+click a cell to edit directly. Tab/Shift+Tab/Enter navigate between cells while staying in edit mode. Enter returns to the column where editing started. Up/Down arrow commits and exits edit mode. Long text scrolls within the cell to keep the cursor visible. Escape to revert
 - **Sort and filter** — Click the sort badge (triangle icon) in column headers to sort (multi-column with Shift+click on sort badges). Filter with SQL WHERE expressions including REGEXP. Excel-style column autofilter dropdowns with searchable checkboxes for point-and-click filtering. Status chips in the status bar show active features. Click Sorted or Filtered to clear; click Linked or Formatted to suspend/resume
 - **Multi-window workspace** — Draggable, resizable subwindows with edge snapping. Tile, Grid, or Cascade layouts. Tabbing and docking support for IDE-style split layouts
 - **Row and column management** — Right-click a row number to insert below or delete. Right-click a column header to insert a column to the right or delete. Right-click the `#` corner cell to insert a row or column when the table is empty. Ctrl/Cmd+click a column header to rename inline (duplicate names are rejected with a red border). Full undo/redo for all structural operations. Resize any column by dragging column borders — including the row-number column (double-click to auto-fit based on all rows, not just visible ones). When multiple columns are selected, double-click auto-fits all selected columns and drag-resize sets all selected columns to the same width
@@ -81,8 +81,9 @@ Use **File > Open** (Ctrl+O / Cmd+O), **File > Open URL**, or drag and drop file
 
 ### Editing
 
-- **Edit cells** — Click a cell to select it; press Enter, i, F2, or Ctrl/Cmd+U to enter edit mode; or Ctrl/Cmd+click a cell to edit it directly. Long text scrolls within the cell to keep the cursor visible
-- **Navigate** — Tab/Shift+Tab to move between cells (stays in edit mode), Enter to save and move down to the column where editing started (stays in edit mode), Escape to revert the edit (or clear the selection when not editing)
+- **Edit cells** — Click a cell to select it; press i, F2, or Ctrl/Cmd+U to enter edit mode; or Ctrl/Cmd+click a cell to edit it directly. Long text scrolls within the cell to keep the cursor visible
+- **Navigate in edit mode** — Tab/Shift+Tab to move between cells (stays in edit mode), Enter to save and move down to the column where editing started (stays in edit mode, exits on last row), Up/Down arrow to commit and move to the adjacent row (exits edit mode), Escape to revert the edit
+- **Navigate in select mode** — Arrow keys or h/j/k/l to move the selection, Tab/Shift+Tab to move right/left, Enter to move down, Escape to clear the selection
 - **Insert/delete rows** — Right-click a row number and choose "Insert Row Below" or "Delete Row"
 - **Insert/delete columns** — Right-click a column header and choose "Insert Column Right" or "Delete Column"
 - **Empty table entry point** — Right-click the `#` corner cell to insert a row or column when the table has no data
@@ -270,14 +271,17 @@ The in-app **Plugins > Expression Reference** has the full language documentatio
 | Ctrl+N / Cmd+N | New table |
 | Ctrl+W / Cmd+W | Close window |
 | Ctrl+← / Ctrl+→ (or Cmd+arrow on Mac) | Move header-selected column left / right |
-| Enter, i, F2, or Ctrl+U / Cmd+U | Enter edit mode on the selected cell |
+| i, F2, or Ctrl+U / Cmd+U | Enter edit mode on the selected cell |
 | Ctrl+click / Cmd+click | Enter edit mode on the clicked cell directly |
 | / (cell selected, not editing) | Jump to the window's filter input |
 | Escape (in filter input) | Return focus to the selected cell |
-| Tab / Shift+Tab or Ctrl+Shift+L / Ctrl+Shift+H (cell selected, not editing) | Switch to next / previous table window |
+| Tab / Shift+Tab (cell selected, not editing) | Move selection right / left |
+| Enter (cell selected, not editing) | Move selection down |
+| Ctrl+Shift+L / Ctrl+Shift+H (cell selected, not editing) | Switch to next / previous table window |
 | Ctrl+H / J / K / L (cell selected, not editing) | Nudge the active window 5 px left / down / up / right |
 | Arrow keys (no cell selected) | Focus the cell in the middle of the view |
 | Arrow keys or h/j/k/l (cell selected, not editing) | Move selection to the adjacent cell |
+| Up / Down arrow (editing) | Commit edit and move to adjacent row (exits edit mode) |
 | Shift+arrow or Shift+H/J/K/L | Extend cell selection — highlights each selected cell's row & column |
 | Ctrl+A / Cmd+A | Select all cells |
 | Esc (cell selected, not editing) | Deselect all cells |
