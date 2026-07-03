@@ -3,7 +3,7 @@ const path = require('path');
 /**
  * Poll page.evaluate until predicate returns truthy, with timeout.
  */
-async function pollUntil(page, fn, arg, { timeout = 10000, interval = 200 } = {}) {
+async function pollUntil(page, fn, arg, { timeout = 10000, interval = 25 } = {}) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
     const result = arg !== undefined

@@ -12,6 +12,7 @@ A browser-based CSV database application. Open CSV, Excel, and compressed files 
 - **Multiple file formats** — CSV, TSV, PSV, Excel (.xlsx/.xls), Gzip (.csv.gz), and ZIP archives
 - **SQL queries** — Full SQLite syntax from the built-in console, including joins, subqueries, aggregates, UNION, CASE, and REGEXP. Query results are queryable tables too
 - **SQL syntax highlighting** — Keywords, strings, numbers, comments, and identifiers are color-coded in the SQL console and filter inputs
+- **SQL autocompletion** — Context-aware suggestions for table names, column names, and keywords in the SQL console and filter inputs. Tab/Enter accepts, Ctrl+Space opens manually; names needing quoting are inserted bracket-quoted
 - **Inline editing** — Click a cell to select it; press i, F2, or Ctrl/Cmd+U to edit; or Ctrl/Cmd+click a cell to edit directly. Tab/Shift+Tab/Enter navigate between cells while staying in edit mode. Enter returns to the column where editing started. Up/Down arrow commits and exits edit mode. Long text scrolls within the cell to keep the cursor visible. Escape to revert
 - **Sort and filter** — Click the sort badge (triangle icon) in column headers to sort (multi-column with Shift+click on sort badges). Filter with SQL WHERE expressions including REGEXP. Excel-style column autofilter dropdowns with searchable checkboxes for point-and-click filtering. Status chips in the status bar show active features. Click Sorted or Filtered to clear; click Linked or Formatted to suspend/resume
 - **Multi-window workspace** — Draggable, resizable subwindows with edge snapping. Tile, Grid, or Cascade layouts. Tabbing and docking support for IDE-style split layouts
@@ -114,6 +115,7 @@ Use **File > Open** (Ctrl+O / Cmd+O), **File > Open URL**, or drag and drop file
   age > 30 AND name LIKE '%Smith%'
   name REGEXP 'smith|jones'
   ```
+- **Filter autocompletion** — The filter bar suggests the table's column names and SQL keywords as you type (see SQL Console below)
 - **Column autofilter** — Click the funnel icon on any column header to open an Excel-style dropdown with searchable checkboxes for each unique value. Uncheck values to hide matching rows. Multiple column filters AND together and combine with the WHERE filter. The funnel fills teal when a filter is active. Click the **Filtered** chip in the status bar to clear all filters at once
 - **Status chips** — **Sorted** and **Filtered** chips are always shown in the status bar center. **Linking** only appears when the table is a link source, **Linked** only when it is a link target, and **Formatted** only when a plugin has matching column transform rules. Inactive chips appear with faint outlines. **Sorted** and **Filtered** chips clear the sort or filters when clicked (chip becomes inactive). **Linked** (on target tables receiving link filters) and **Formatted** chips toggle suspend/resume — suspended features show the chip with strikethrough. A **Linking** chip (coral red) appears on the source table whose selection drives link filters and on intermediate tables in a transitive chain; click to suspend/resume outbound linking. When a table becomes a link target (receives link filters from another source), any previously suspended Linking state on that table is reset. Keyboard shortcuts: Ctrl/Cmd+Shift+1 (clear sort), 2 (clear filters), 3 (toggle link), 4 (toggle format)
 - **Column badges** — The sort badge (orange triangle) and filter button (funnel icon) are rendered inline inside the column header as equal-sized clickable buttons. Both the sort triangle outline and funnel outline light up only when hovering their own button. Click the sort badge to sort; click the filter button to open the autofilter. The sort badge shows a filled triangle when sorted or a faint outline when unsorted. The filter button shows a faint funnel outline when inactive or a filled teal funnel when a filter is active. Small linking (coral red dot), link (green dot), and format (pink dot) badges appear centered over the bottom border of column headers — each badge type only renders when the table is relevant for that feature (link source, link target, or has matching transforms respectively). Active badges are filled, inactive badges show faint outlines. The linking badge appears on columns used for outbound linking; the link badge appears on columns receiving link filters. For transitive links, badges show a depth number (2 for secondary, 3 for tertiary, etc.). Badge colors match the status bar chips
@@ -123,6 +125,8 @@ Use **File > Open** (Ctrl+O / Cmd+O), **File > Open URL**, or drag and drop file
 ### SQL Console
 
 The SQL Console at the bottom runs queries against all open tables using SQLite syntax. Press **Ctrl+Enter** (Cmd+Enter on Mac) to execute. The console and filter inputs feature SQL syntax highlighting. Query results open as new queryable tables.
+
+**Autocompletion:** As you type, a dropdown suggests table names (after `FROM`, `JOIN`, `INSERT INTO`, etc.), column names (after `tablename.` or a query alias, plus columns of any table referenced in the statement), and SQL keywords. **Tab** or **Enter** accepts the highlighted suggestion, **↑**/**↓** navigate, **Escape** dismisses, and **Ctrl+Space** opens the dropdown manually. Names that need quoting are inserted bracket-quoted automatically. Suggestions never appear inside string literals or comments, and while the dropdown is closed no keys are intercepted. The same autocompletion works in every table's filter bar, where that table's own columns are suggested first.
 
 ```sql
 -- Query a loaded table by its filename (minus extension)
@@ -292,6 +296,8 @@ The in-app **Plugins > Expression Reference** has the full language documentatio
 | Ctrl+Shift+M / Cmd+Shift+M | Open Column Manager |
 | Ctrl+Shift+1 / Cmd+Shift+1 through 4 | Clear Sort / Clear Filters / Toggle Link / Toggle Format |
 | Ctrl+Enter / Cmd+Enter | Execute SQL query |
+| Ctrl+Space (SQL console or filter input) | Open the autocomplete dropdown |
+| Tab/Enter, Up/Down, Escape (autocomplete open) | Accept / navigate / dismiss suggestions |
 | Enter (AI tab) | Send AI prompt |
 | Shift+Enter (AI tab) | Newline in AI prompt |
 | Up / Down (AI tab) | AI prompt history |

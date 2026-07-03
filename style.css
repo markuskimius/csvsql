@@ -2396,3 +2396,85 @@ body.col-resizing * {
   pointer-events: none;
   transition: filter 0.2s ease;
 }
+
+/* ---- SQL Autocomplete ---- */
+#sql-autocomplete {
+  position: fixed;
+  display: none;
+  background: var(--menu-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  min-width: 140px;
+  max-width: 340px;
+  max-height: 240px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  z-index: 100000;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  font-size: 12px;
+  padding: 3px 0;
+}
+
+#sql-autocomplete::-webkit-scrollbar {
+  width: 8px;
+}
+
+#sql-autocomplete::-webkit-scrollbar-thumb {
+  background: var(--scrollbar);
+  border-radius: 4px;
+}
+
+.ac-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 12px 3px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.ac-item.selected {
+  background: var(--accent);
+  color: #fff;
+}
+
+.ac-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ac-label b {
+  font-weight: 700;
+}
+
+.ac-kind {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  line-height: 15px;
+  border-radius: 3px;
+  text-align: center;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.ac-column .ac-kind {
+  background: #24513a;
+  color: #7fd7a5;
+}
+
+.ac-table .ac-kind {
+  background: #2a3f63;
+  color: #86b3f2;
+}
+
+.ac-keyword .ac-kind {
+  background: #4d3a63;
+  color: #c39bec;
+}
+
+.ac-item.selected .ac-kind {
+  background: rgba(255,255,255,0.25);
+  color: #fff;
+}

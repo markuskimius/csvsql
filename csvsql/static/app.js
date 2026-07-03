@@ -3042,6 +3042,11 @@ const app = (() => {
       filterOverlay.scrollLeft = filterInput.scrollLeft;
     });
 
+    // Attach before the Escape handler below so an open dropdown consumes
+    // the first Escape and return-to-cell needs a second press
+    attachAutocomplete(filterInput, (text, caret) =>
+      sqlCompletionContext(text, caret, { schema: liveSQLSchema(), filterTable: win.tableName }));
+
     let filterTimeout;
     filterInput.addEventListener('input', () => {
       updateFilterHighlight();
@@ -5943,32 +5948,39 @@ const app = (() => {
     'JULIANDAY','NOT','BOOLEAN','TRUE','FALSE','INTEGER','REAL','TEXT','BLOB','NUMERIC',
   ]);
 
-  function sqlHighlightHTML(text) {
-    let out = '';
+  // Lexer shared by SQL syntax highlighting and autocompletion. Emits tokens
+  // { type, start, end, text } where end is exclusive and concatenating all
+  // token texts reconstructs the input exactly.
+  // Types: 'ws', 'comment', 'string', 'bracket', 'number', 'keyword', 'word', 'op'
+  function sqlTokenize(text) {
+    const tokens = [];
     let i = 0;
     const len = text.length;
+    const push = (type, start, end) => {
+      tokens.push({ type, start, end, text: text.slice(start, end) });
+      i = end;
+    };
     while (i < len) {
       const ch = text[i];
       // Whitespace
       if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
-        out += ch;
-        i++;
+        let j = i + 1;
+        while (j < len && (text[j] === ' ' || text[j] === '\t' || text[j] === '\n' || text[j] === '\r')) j++;
+        push('ws', i, j);
         continue;
       }
       // Single-line comment --
       if (ch === '-' && i + 1 < len && text[i + 1] === '-') {
         let end = text.indexOf('\n', i);
         if (end === -1) end = len;
-        out += '<span class="sql-cmt">' + escHtml(text.slice(i, end)) + '</span>';
-        i = end;
+        push('comment', i, end);
         continue;
       }
       // Block comment /* */
       if (ch === '/' && i + 1 < len && text[i + 1] === '*') {
         let end = text.indexOf('*/', i + 2);
         if (end === -1) end = len; else end += 2;
-        out += '<span class="sql-cmt">' + escHtml(text.slice(i, end)) + '</span>';
-        i = end;
+        push('comment', i, end);
         continue;
       }
       // Single-quoted string
@@ -5979,44 +5991,446 @@ const app = (() => {
           if (text[j] === "'") { j++; break; }
           j++;
         }
-        out += '<span class="sql-str">' + escHtml(text.slice(i, j)) + '</span>';
-        i = j;
+        push('string', i, j);
         continue;
       }
       // Bracket-quoted identifier [...]
       if (ch === '[') {
         let end = text.indexOf(']', i + 1);
         if (end === -1) end = len - 1;
-        out += '<span class="sql-brk">' + escHtml(text.slice(i, end + 1)) + '</span>';
-        i = end + 1;
+        push('bracket', i, end + 1);
         continue;
       }
       // Numbers
       if ((ch >= '0' && ch <= '9') || (ch === '.' && i + 1 < len && text[i + 1] >= '0' && text[i + 1] <= '9')) {
         let j = i;
         while (j < len && ((text[j] >= '0' && text[j] <= '9') || text[j] === '.')) j++;
-        out += '<span class="sql-num">' + escHtml(text.slice(i, j)) + '</span>';
-        i = j;
+        push('number', i, j);
         continue;
       }
       // Words (identifiers/keywords)
       if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch === '_') {
         let j = i + 1;
         while (j < len && ((text[j] >= 'a' && text[j] <= 'z') || (text[j] >= 'A' && text[j] <= 'Z') || (text[j] >= '0' && text[j] <= '9') || text[j] === '_')) j++;
-        const word = text.slice(i, j);
-        if (_sqlKeywords.has(word.toUpperCase())) {
-          out += '<span class="sql-kw">' + escHtml(word) + '</span>';
-        } else {
-          out += escHtml(word);
-        }
-        i = j;
+        push(_sqlKeywords.has(text.slice(i, j).toUpperCase()) ? 'keyword' : 'word', i, j);
         continue;
       }
       // Operators and other characters
-      out += escHtml(ch);
-      i++;
+      push('op', i, i + 1);
+    }
+    return tokens;
+  }
+
+  const _sqlTokenClass = {
+    comment: 'sql-cmt',
+    string: 'sql-str',
+    bracket: 'sql-brk',
+    number: 'sql-num',
+    keyword: 'sql-kw',
+  };
+
+  function sqlHighlightHTML(text) {
+    let out = '';
+    for (const tok of sqlTokenize(text)) {
+      const cls = _sqlTokenClass[tok.type];
+      out += cls ? '<span class="' + cls + '">' + escHtml(tok.text) + '</span>' : escHtml(tok.text);
     }
     return out;
+  }
+
+  const _sqlKeywordList = Array.from(_sqlKeywords).sort();
+
+  // Completion context for SQL inputs. Pure function: given text, caret offset,
+  // and a schema snapshot, decide what the user is typing and return ranked,
+  // prefix-filtered candidates. Deliberately lexical — it looks at token
+  // patterns around the caret, never a grammar — so unfinished or future SQL
+  // syntax degrades to broader suggestions instead of wrong or broken ones.
+  // opts: { schema: { tableName: [colName, ...] }, filterTable: string|null }
+  //   filterTable = the table a filter input belongs to: its columns rank
+  //   first and bare table names are not suggested (a filter is a WHERE
+  //   clause against one table; subqueries still get tables after FROM).
+  // Returns null when completion must not trigger (caret inside a string,
+  // comment, or number), otherwise { start, end, prefix, items } where
+  // [start, end) is the text range an accepted item replaces, prefix is the
+  // typed text being matched, and items is [{ label, insert, kind }] with
+  // kind 'column' | 'table' | 'keyword'. Inserted names are bracket-quoted
+  // when they are not plain identifiers or collide with a SQL keyword.
+  function sqlCompletionContext(text, caret, opts) {
+    opts = opts || {};
+    const schema = opts.schema || {};
+    const filterTable = opts.filterTable && schema[opts.filterTable] ? opts.filterTable : null;
+    const tableNames = Object.keys(schema);
+    const lowerToTable = {};
+    for (const n of tableNames) lowerToTable[n.toLowerCase()] = n;
+
+    const tokens = sqlTokenize(text);
+    const prevSig = k => {
+      for (k--; k >= 0; k--) {
+        if (tokens[k].type !== 'ws' && tokens[k].type !== 'comment') return k;
+      }
+      return -1;
+    };
+
+    // Token containing the caret (start < caret <= end; tokens are contiguous)
+    let curIdx = -1;
+    for (let k = 0; k < tokens.length; k++) {
+      if (tokens[k].start < caret && caret <= tokens[k].end) { curIdx = k; break; }
+    }
+    const cur = curIdx >= 0 ? tokens[curIdx] : null;
+    if (cur && (cur.type === 'string' || cur.type === 'comment' || cur.type === 'number')) return null;
+
+    // Replacement range, typed prefix, and the significant token before it
+    let start = caret, end = caret, prefix = '', inBrackets = false;
+    let anchorIdx = -1;
+    if (cur && (cur.type === 'word' || cur.type === 'keyword')) {
+      start = cur.start; end = cur.end;
+      prefix = text.slice(cur.start, caret);
+      anchorIdx = prevSig(curIdx);
+    } else if (cur && cur.type === 'bracket') {
+      start = cur.start; end = cur.end;
+      const closed = cur.text.length >= 2 && cur.text.endsWith(']');
+      prefix = text.slice(cur.start + 1, Math.min(caret, closed ? cur.end - 1 : cur.end));
+      inBrackets = true;
+      anchorIdx = prevSig(curIdx);
+    } else if (cur && cur.type === 'op') {
+      anchorIdx = curIdx;
+    } else if (cur) { // whitespace
+      anchorIdx = prevSig(curIdx);
+    }
+    const anchor = anchorIdx >= 0 ? tokens[anchorIdx] : null;
+
+    // Current statement = tokens between the top-level semicolons around the caret
+    let lo = 0, hi = text.length;
+    for (const t of tokens) {
+      if (t.type !== 'op' || t.text !== ';') continue;
+      if (t.end <= start) lo = t.end;
+      else if (t.start >= start && t.start < hi) hi = t.start;
+    }
+    const sig = tokens.filter(t =>
+      t.start >= lo && t.start < hi && t.type !== 'ws' && t.type !== 'comment');
+
+    const stripBrackets = s =>
+      s[0] === '[' ? (s.length >= 2 && s.endsWith(']') ? s.slice(1, -1) : s.slice(1)) : s;
+
+    // Tables mentioned in this statement, and FROM/JOIN alias → table map
+    const aliases = {};
+    const mentioned = [];
+    for (let k = 0; k < sig.length; k++) {
+      const t = sig[k];
+      if (t.type === 'word' || t.type === 'bracket') {
+        const canon = lowerToTable[stripBrackets(t.text).toLowerCase()];
+        if (canon && mentioned.indexOf(canon) === -1) mentioned.push(canon);
+      }
+      if (t.type === 'keyword' && (t.text.toUpperCase() === 'FROM' || t.text.toUpperCase() === 'JOIN')) {
+        const ref = sig[k + 1];
+        if (ref && (ref.type === 'word' || ref.type === 'bracket')) {
+          const canon = lowerToTable[stripBrackets(ref.text).toLowerCase()];
+          let ai = k + 2;
+          if (sig[ai] && sig[ai].type === 'keyword' && sig[ai].text.toUpperCase() === 'AS') ai++;
+          if (canon && sig[ai] && sig[ai].type === 'word') aliases[sig[ai].text.toLowerCase()] = canon;
+        }
+      }
+    }
+
+    const plainName = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+    const quoteName = name =>
+      (inBrackets || !plainName.test(name) || _sqlKeywords.has(name.toUpperCase()))
+        ? '[' + name + ']' : name;
+    const p = prefix.toLowerCase();
+    const matches = name => name.toLowerCase().indexOf(p) === 0;
+    const result = items => ({ start, end, prefix, items });
+    const columnItems = colTables => {
+      const seen = new Set();
+      const items = [];
+      for (const tn of colTables) {
+        for (const c of (schema[tn] || [])) {
+          if (!matches(c) || seen.has(c)) continue;
+          seen.add(c);
+          items.push({ label: c, insert: quoteName(c), kind: 'column' });
+        }
+      }
+      return items;
+    };
+    const tableItems = () => tableNames
+      .filter(matches)
+      .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))
+      .map(n => ({ label: n, insert: quoteName(n), kind: 'table' }));
+    const keywordItems = () => _sqlKeywordList
+      .filter(matches)
+      .map(w => ({ label: w, insert: w, kind: 'keyword' }));
+
+    // Qualified column: <table-or-alias> . <prefix>
+    if (anchor && anchor.type === 'op' && anchor.text === '.') {
+      const qIdx = prevSig(anchorIdx);
+      const q = qIdx >= 0 ? tokens[qIdx] : null;
+      if (q && (q.type === 'word' || q.type === 'bracket')) {
+        const key = stripBrackets(q.text).toLowerCase();
+        const canon = aliases[key] || lowerToTable[key];
+        return result(canon ? columnItems([canon]) : []);
+      }
+      return result([]);
+    }
+
+    // Table position: right after FROM/JOIN/INTO/UPDATE/TABLE
+    let tablePos = false;
+    if (anchor && anchor.type === 'keyword') {
+      const u = anchor.text.toUpperCase();
+      if (u === 'FROM' || u === 'JOIN' || u === 'UPDATE' || u === 'TABLE') tablePos = true;
+      else if (u === 'INTO') {
+        // SELECT ... INTO names a NEW table; INSERT INTO targets an existing one
+        if (sig[0] && sig[0].type === 'keyword' && sig[0].text.toUpperCase() === 'SELECT') {
+          return result([]);
+        }
+        tablePos = true;
+      }
+    }
+    // Comma continuing a FROM list: FROM a, b, <prefix>
+    if (!tablePos && anchor && anchor.type === 'op' && anchor.text === ',') {
+      let k = anchorIdx;
+      while (true) {
+        k = prevSig(k);
+        if (k < 0) break;
+        const t = tokens[k];
+        if (t.type === 'keyword') {
+          if (t.text.toUpperCase() === 'AS') continue;
+          tablePos = t.text.toUpperCase() === 'FROM';
+          break;
+        }
+        if (t.type === 'word' || t.type === 'bracket' || (t.type === 'op' && t.text === ',')) continue;
+        break;
+      }
+    }
+    if (tablePos) return result(tableItems());
+
+    // Default: columns of tables mentioned in this statement (the filter's own
+    // table first in filter mode), then table names (not in filter mode), then keywords
+    const colTables = filterTable
+      ? [filterTable].concat(mentioned.filter(n => n !== filterTable))
+      : mentioned;
+    let items = columnItems(colTables);
+    if (!filterTable) items = items.concat(tableItems());
+    return result(items.concat(keywordItems()));
+  }
+
+  // ---- Autocomplete dropdown ----
+  // One shared dropdown for all SQL-aware inputs (console, filter inputs).
+  // Purely a suggestion layer: it only modifies the input on an explicit
+  // accept, and its keydown handler intercepts nothing while closed.
+  const AC_MAX_ITEMS = 200;
+  let _acState = null; // { inputEl, getContext, items, selectedIdx, start, end }
+  let _acEl = null;
+  let _acAccepting = false;
+
+  function liveSQLSchema() {
+    const schema = {};
+    for (const name in tables) schema[name] = tables[name].columns;
+    return schema;
+  }
+
+  function ensureAcEl() {
+    if (_acEl) return _acEl;
+    _acEl = document.createElement('div');
+    _acEl.id = 'sql-autocomplete';
+    // Keep focus in the input so clicking an item doesn't blur-close first
+    _acEl.addEventListener('mousedown', e => e.preventDefault());
+    _acEl.addEventListener('click', e => {
+      const item = e.target.closest('.ac-item');
+      if (!item || !_acState) return;
+      _acState.selectedIdx = Number(item.dataset.idx);
+      acceptAutocomplete();
+    });
+    _acEl.addEventListener('mouseover', e => {
+      const item = e.target.closest('.ac-item');
+      if (item && _acState) setAcSelected(Number(item.dataset.idx), false);
+    });
+    document.body.appendChild(_acEl);
+    document.addEventListener('mousedown', e => {
+      if (_acState && !_acEl.contains(e.target) && e.target !== _acState.inputEl) closeAutocomplete();
+    });
+    window.addEventListener('resize', closeAutocomplete);
+    return _acEl;
+  }
+
+  function closeAutocomplete() {
+    if (!_acState) return;
+    _acState = null;
+    if (_acEl) _acEl.style.display = 'none';
+  }
+
+  function setAcSelected(idx, scroll) {
+    if (!_acState) return;
+    _acState.selectedIdx = idx;
+    const nodes = _acEl.querySelectorAll('.ac-item');
+    nodes.forEach((n, i) => n.classList.toggle('selected', i === idx));
+    if (scroll && nodes[idx]) nodes[idx].scrollIntoView({ block: 'nearest' });
+  }
+
+  function acceptAutocomplete() {
+    const st = _acState;
+    closeAutocomplete();
+    if (!st) return;
+    const item = st.items[st.selectedIdx];
+    if (!item) return;
+    // setRangeText keeps the browser's native undo history for the input
+    st.inputEl.setRangeText(item.insert, st.start, st.end, 'end');
+    _acAccepting = true;
+    try {
+      st.inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+    } finally {
+      _acAccepting = false;
+    }
+  }
+
+  function tryOpenAutocomplete(inputEl, getContext, explicit) {
+    let ctx = null;
+    try {
+      ctx = getContext(inputEl.value, inputEl.selectionStart);
+    } catch (_) {
+      ctx = null; // any bug degrades to "no suggestions", never a broken input
+    }
+    const caret = inputEl.selectionStart;
+    const chBefore = caret > 0 ? inputEl.value[caret - 1] : '';
+    let wanted = ctx && ctx.items.length > 0 &&
+      (explicit || ctx.prefix.length >= 1 || chBefore === '.' || chBefore === '[');
+    // A single suggestion identical to what's already typed is noise
+    if (wanted && !explicit && ctx.items.length === 1 &&
+        (ctx.items[0].label === ctx.prefix ||
+         ctx.items[0].insert === inputEl.value.slice(ctx.start, ctx.end))) {
+      wanted = false;
+    }
+    if (!wanted) {
+      if (_acState && _acState.inputEl === inputEl) closeAutocomplete();
+      return;
+    }
+    _acState = {
+      inputEl, getContext,
+      items: ctx.items.slice(0, AC_MAX_ITEMS),
+      selectedIdx: 0,
+      start: ctx.start, end: ctx.end,
+    };
+    renderAutocomplete(ctx.prefix);
+    positionAutocomplete(inputEl);
+  }
+
+  function renderAutocomplete(prefix) {
+    const el = ensureAcEl();
+    const plen = prefix.length;
+    const kindLetter = { column: 'C', table: 'T', keyword: 'K' };
+    el.innerHTML = _acState.items.map((it, i) =>
+      '<div class="ac-item ac-' + it.kind + (i === 0 ? ' selected' : '') + '" data-idx="' + i + '">' +
+        '<span class="ac-kind">' + kindLetter[it.kind] + '</span>' +
+        '<span class="ac-label"><b>' + escHtml(it.label.slice(0, plen)) + '</b>' +
+        escHtml(it.label.slice(plen)) + '</span>' +
+      '</div>').join('');
+    el.style.display = 'block';
+  }
+
+  // Caret viewport coordinates via a detached mirror of the input's text
+  // metrics (same overlay-mirror principle as the syntax highlight)
+  function acCaretViewportPos(inputEl) {
+    const caret = inputEl.selectionStart;
+    const cs = getComputedStyle(inputEl);
+    const div = document.createElement('div');
+    for (const p of ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing',
+      'wordSpacing', 'textTransform', 'textIndent', 'lineHeight', 'tabSize',
+      'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft']) {
+      div.style[p] = cs[p];
+    }
+    div.style.position = 'fixed';
+    div.style.top = '0';
+    div.style.left = '-9999px';
+    div.style.visibility = 'hidden';
+    div.style.boxSizing = 'border-box';
+    if (inputEl.tagName === 'TEXTAREA') {
+      div.style.whiteSpace = 'pre-wrap';
+      div.style.wordWrap = 'break-word';
+      div.style.width = inputEl.clientWidth + 'px';
+    } else {
+      div.style.whiteSpace = 'pre';
+    }
+    div.textContent = inputEl.value.slice(0, caret);
+    const marker = document.createElement('span');
+    marker.textContent = '\u200b';
+    div.appendChild(marker);
+    document.body.appendChild(div);
+    const rect = inputEl.getBoundingClientRect();
+    const bl = parseFloat(cs.borderLeftWidth) || 0;
+    const bt = parseFloat(cs.borderTopWidth) || 0;
+    const lineH = marker.offsetHeight;
+    const x = rect.left + bl + marker.offsetLeft - inputEl.scrollLeft;
+    const y = rect.top + bt + marker.offsetTop + lineH - inputEl.scrollTop;
+    div.remove();
+    return { x, y, lineH };
+  }
+
+  function positionAutocomplete(inputEl) {
+    const el = ensureAcEl();
+    const pos = acCaretViewportPos(inputEl);
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    let x = Math.max(8, Math.min(pos.x, window.innerWidth - w - 8));
+    let y = pos.y + 2;
+    if (y + h > window.innerHeight - 8) y = pos.y - pos.lineH - h - 2; // flip above the caret line
+    if (y < 8) y = 8;
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
+  }
+
+  function attachAutocomplete(inputEl, getContext) {
+    inputEl.addEventListener('keydown', (e) => {
+      const open = _acState && _acState.inputEl === inputEl;
+      if (!open) {
+        if (e.key === ' ' && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
+          e.preventDefault();
+          tryOpenAutocomplete(inputEl, getContext, true);
+        }
+        return; // closed dropdown intercepts nothing
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        closeAutocomplete(); // never block query execution — fall through
+        return;
+      }
+      switch (e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          setAcSelected((_acState.selectedIdx + 1) % _acState.items.length, true);
+          return;
+        case 'ArrowUp':
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          setAcSelected((_acState.selectedIdx - 1 + _acState.items.length) % _acState.items.length, true);
+          return;
+        case 'Tab':
+        case 'Enter':
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          acceptAutocomplete();
+          return;
+        case 'Escape':
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          closeAutocomplete();
+          return;
+      }
+    });
+    inputEl.addEventListener('input', () => {
+      if (_acAccepting) return;
+      const open = _acState && _acState.inputEl === inputEl;
+      const caret = inputEl.selectionStart;
+      const chBefore = caret > 0 ? inputEl.value[caret - 1] : '';
+      if (!open && !/[A-Za-z0-9_.[]/.test(chBefore)) return;
+      tryOpenAutocomplete(inputEl, getContext, false);
+    });
+    inputEl.addEventListener('blur', () => {
+      if (_acState && _acState.inputEl === inputEl) closeAutocomplete();
+    });
+    inputEl.addEventListener('click', () => {
+      if (_acState && _acState.inputEl === inputEl) closeAutocomplete();
+    });
+    inputEl.addEventListener('scroll', () => {
+      if (_acState && _acState.inputEl === inputEl) positionAutocomplete(inputEl);
+    });
   }
 
   function setupSQLHighlight() {
@@ -6031,6 +6445,8 @@ const app = (() => {
       overlay.scrollLeft = input.scrollLeft;
     });
     update();
+    attachAutocomplete(input, (text, caret) =>
+      sqlCompletionContext(text, caret, { schema: liveSQLSchema() }));
   }
 
   function autoQuoteSQL(sql) {
@@ -6645,7 +7061,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.46 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.47 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `, true);
@@ -6713,7 +7129,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <li><strong>Sort:</strong> Click the sort badge (triangle icon) in a column header to sort ascending &rarr; descending &rarr; unsorted.</li>
 <li><strong>Multi-column sort:</strong> Shift+click additional sort badges. Numbers inside triangle badges indicate sort priority.</li>
 <li><strong>Filter:</strong> Type a SQL <code>WHERE</code> clause in the filter bar (without the <code>WHERE</code> keyword). For example: <code>age > 30 AND name LIKE '%Smith%'</code></li>
-<li>The filter supports all SQLite expressions including <code>REGEXP</code> (see below).</li>
+<li>The filter supports all SQLite expressions including <code>REGEXP</code> (see below). Autocompletion suggests the table&rsquo;s column names and SQL keywords as you type &mdash; see the SQL Console section.</li>
 <li><strong>Column autofilter:</strong> Click the funnel icon on any column header to open a dropdown with checkboxes for each unique value. Use the search box to narrow the list. Uncheck values and click Apply to hide matching rows. Multiple column filters AND together and combine with the WHERE filter bar. The funnel fills teal when a filter is active. Click Clear to remove a column&rsquo;s filter. Click the Filtered chip in the status bar to clear all column autofilters and the WHERE filter at once.</li>
 <li><strong>Status chips:</strong> <strong>Sorted</strong> and <strong>Filtered</strong> chips are always shown in the status bar center. <strong>Linking</strong> only appears when the table is a link source, <strong>Linked</strong> only when it is a link target, and <strong>Formatted</strong> only when a plugin has matching column transform rules. <strong>Sorted</strong> and <strong>Filtered</strong> chips clear the sort or filters when clicked (chip becomes inactive). <strong>Linked</strong> (on target tables receiving link filters) and <strong>Formatted</strong> chips toggle suspend/resume &mdash; suspended features show the chip with strikethrough. A <strong>Linking</strong> chip appears on the source table driving link filters; click to suspend/resume outbound linking. Keyboard shortcuts: <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>1</code> (clear sort), <code>2</code> (clear filters), <code>3</code> (toggle link), <code>4</code> (toggle format).</li>
 <li><strong>Column badges:</strong> The sort badge (orange triangle) and filter button (funnel icon) are rendered inline inside the column header as equal-sized clickable buttons. Both the sort triangle outline and funnel outline light up only when hovering their own button. Click the sort badge to sort; click the filter button to open the autofilter. The sort badge shows a filled triangle when sorted or a faint outline when unsorted. The filter button shows a faint funnel outline when inactive or a filled teal funnel when a filter is active. Small linking (coral red dot), link (green dot), and format (pink dot) badges appear centered over the bottom border of column headers &mdash; each badge type only renders when the table is relevant for that feature (link source, link target, or has matching transforms respectively). Active badges are filled, inactive badges show faint outlines. The linking badge appears on columns used for outbound linking; the link badge appears on columns receiving link filters. For transitive links, badges show a depth number (2 for secondary, 3 for tertiary, etc.). Badge colors match the status bar chips.</li>
@@ -6721,6 +7137,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 <h4>SQL Console</h4>
 <p>The SQL Console at the bottom runs queries against all open tables using SQLite syntax. Press <code>Ctrl+Enter</code> / <code>&#8984;+Enter</code> to execute. The console and filter inputs feature SQL syntax highlighting for keywords, strings, numbers, comments, and bracket-quoted identifiers.</p>
+<p><strong>Autocompletion:</strong> As you type, a dropdown suggests table names (after <code>FROM</code>, <code>JOIN</code>, <code>INSERT INTO</code>, etc.), column names (after <code>tablename.</code> or a query alias, plus columns of any table referenced in the statement), and SQL keywords. <code>Tab</code> or <code>Enter</code> accepts the highlighted suggestion, <code>&uarr;</code>/<code>&darr;</code> navigate, <code>Escape</code> dismisses, and <code>Ctrl+Space</code> opens the dropdown manually. Names that need quoting (spaces, special characters, keyword collisions) are inserted bracket-quoted automatically. Suggestions never appear inside string literals or comments, and while the dropdown is closed no keys are intercepted. The same autocompletion works in every table&rsquo;s filter bar, where that table&rsquo;s own columns are suggested first.</p>
 <p>Tables are referenced by the name shown in their window title bar. Names are sanitized to <code>[a-zA-Z0-9_]</code> characters.</p>
 <p>Query results open in new windows and are automatically registered as queryable tables &mdash; you can run further SQL queries or use the filter bar on any result set.</p>
 
@@ -6816,6 +7233,8 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>H</code>/<code>J</code>/<code>K</code>/<code>L</code> (cell selected, not editing)</td><td>Nudge the active window 5 px left / down / up / right</td></tr>
 <tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>1</code>/<code>2</code>/<code>3</code>/<code>4</code></td><td>Clear Sort / Clear Filters / Toggle Link / Toggle Format</td></tr>
 <tr><td><code>Ctrl+Enter</code></td><td>Execute SQL query</td></tr>
+<tr><td><code>Ctrl+Space</code> (SQL console or filter input)</td><td>Open the autocomplete dropdown</td></tr>
+<tr><td><code>Tab</code>/<code>Enter</code>, <code>&uarr;</code>/<code>&darr;</code>, <code>Escape</code> (autocomplete open)</td><td>Accept / navigate / dismiss suggestions</td></tr>
 <tr><td><code>Enter</code></td><td>Send AI prompt</td></tr>
 <tr><td><code>Shift+Enter</code></td><td>Newline in AI prompt</td></tr>
 <tr><td><code>Up</code> / <code>Down</code></td><td>AI prompt history</td></tr>
@@ -9599,6 +10018,7 @@ choose(value, 'A', 'Active', 'I', 'Inactive')
       _test: {
         sanitizeTableName, sanitizeColumnName, sanitizeColumns,
         getUniqueTableName, extractIntoClause,
+        sqlTokenize, sqlHighlightHTML, sqlCompletionContext,
         get tables() { return tables; },
         get windows() { return windows; },
         get db() { return db; },
