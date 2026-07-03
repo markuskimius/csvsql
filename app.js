@@ -1951,6 +1951,7 @@ const app = (() => {
 
       handle.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
+        closeAutoFilter();
         resizing = true;
         startX = e.clientX;
         startY = e.clientY;
@@ -2018,47 +2019,6 @@ const app = (() => {
     const dock = dockContainers[idx];
     dock.el.remove();
     dockContainers.splice(idx, 1);
-  }
-
-  function dockWindowIntoLeaf(win, leaf, dock) {
-    win.dockId = dock.id;
-    win.dockLeaf = leaf;
-    win.el.classList.add('docked');
-
-    const body = win.el.querySelector('.win-body');
-    const statusbar = win.el.querySelector('.win-statusbar');
-    if (body) leaf.contentEl.appendChild(body);
-    if (statusbar) leaf.contentEl.appendChild(statusbar);
-  }
-
-  function undockWindowFromLeaf(win) {
-    const leaf = win.dockLeaf;
-    const dock = dockContainers.find(d => d.id === win.dockId);
-
-    const body = leaf.contentEl.querySelector('.win-body');
-    const statusbar = leaf.contentEl.querySelector('.win-statusbar');
-
-    if (leaf.activeTab === win.id) {
-      if (body) win.el.insertBefore(body, win.el.querySelector('.win-statusbar') || win.el.querySelector('.resize-handle'));
-      if (statusbar) win.el.insertBefore(statusbar, win.el.querySelector('.resize-handle'));
-    } else {
-      const hiddenBody = Array.from(leaf.contentEl.querySelectorAll('.win-body')).find(b => b.dataset.winId == win.id);
-      const hiddenStatus = Array.from(leaf.contentEl.querySelectorAll('.win-statusbar')).find(s => s.dataset.winId == win.id);
-      if (hiddenBody) win.el.insertBefore(hiddenBody, win.el.querySelector('.resize-handle'));
-      if (hiddenStatus) win.el.insertBefore(hiddenStatus, win.el.querySelector('.resize-handle'));
-    }
-
-    win.el.classList.remove('docked');
-    win.dockId = null;
-    win.dockLeaf = null;
-
-    if (dock) {
-      win.el.style.left = (parseInt(dock.el.style.left) + 20) + 'px';
-      win.el.style.top = (parseInt(dock.el.style.top) + 20) + 'px';
-      win.el.style.width = Math.max(280, Math.round(parseInt(dock.el.style.width) * 0.6)) + 'px';
-      win.el.style.height = Math.max(160, Math.round(parseInt(dock.el.style.height) * 0.6)) + 'px';
-      win.el.style.zIndex = ++nextZIndex;
-    }
   }
 
   function activateTab(leaf, winId, dock) {
@@ -2546,6 +2506,7 @@ const app = (() => {
 
     splitterEl.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return;
+      closeAutoFilter();
       dragging = true;
       origRatio = splitNode.ratio;
       startPos = splitNode.direction === 'horizontal' ? e.clientX : e.clientY;
@@ -2768,6 +2729,8 @@ const app = (() => {
 
     removeTabFromLeaf(winId, leaf, dock);
     win.el.classList.remove('docked');
+    win.maximized = false;
+    win.prevBounds = null;
     if (dock.el) {
       win.el.style.left = (parseInt(dock.el.style.left) + 20) + 'px';
       win.el.style.top = (parseInt(dock.el.style.top) + 20) + 'px';
@@ -6383,17 +6346,11 @@ const app = (() => {
     // Close windows for dropped tables (skip unsaved-changes prompt since SQL already dropped them)
     for (const id of toClose) {
       const win = windows.find(w => w.id === id);
-      if (win) {
-        delete tables[win.tableName];
-        win.el.remove();
-        windows.splice(windows.indexOf(win), 1);
-        if (activeWinId === id) {
-          activeWinId = windows.length ? windows[windows.length - 1].id : null;
-          if (activeWinId) focusWindow(activeWinId);
-        }
-      }
+      if (!win) continue;
+      const t = tables[win.tableName];
+      if (t) t.modified = false;
+      closeWindow(id);
     }
-    if (toClose.length) updateWindowsList();
   }
 
   function clearConsole() {
@@ -6688,7 +6645,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.45 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.46 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `, true);
