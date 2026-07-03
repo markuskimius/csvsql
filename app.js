@@ -1013,6 +1013,12 @@ const app = (() => {
     return winObj;
   }
 
+  function raiseDialogs() {
+    windows.forEach(w => {
+      if (w.isDialog && !w.backdropEl) w.el.style.zIndex = ++nextZIndex;
+    });
+  }
+
   function focusWindow(id) {
     activeWinId = id;
     windows.forEach(w => w.el.classList.toggle('active', w.id === id));
@@ -1032,6 +1038,7 @@ const app = (() => {
         win.el.style.zIndex = ++nextZIndex;
         dockContainers.forEach(d => d.el.classList.remove('active'));
       }
+      if (!win.isDialog) raiseDialogs();
     }
   }
 
@@ -1706,6 +1713,7 @@ const app = (() => {
       u.obj.maximized = false;
       u.el.style.zIndex = ++nextZIndex;
     });
+    raiseDialogs();
   }
 
   function minimizeAll() {
@@ -1921,6 +1929,7 @@ const app = (() => {
       else {
         dockContainers.forEach(d => d.el.classList.toggle('active', d.id === dock.id));
         dock.el.style.zIndex = ++nextZIndex;
+        raiseDialogs();
       }
     });
 
@@ -2963,7 +2972,7 @@ const app = (() => {
 
   function getLayoutUnits() {
     const units = [];
-    windows.filter(w => !w.dockId && !w.el.classList.contains('minimized')).forEach(w => {
+    windows.filter(w => !w.dockId && !w.isDialog && !w.el.classList.contains('minimized')).forEach(w => {
       units.push({ type: 'window', obj: w, el: w.el });
     });
     dockContainers.filter(d => !d.el.classList.contains('minimized')).forEach(d => {
@@ -6625,7 +6634,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.42 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.43 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `, true);
@@ -6750,7 +6759,7 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <li><strong>Close:</strong> Click the close button. <code>Ctrl</code>/<code>&#8984;</code>+click closes all windows.</li>
 <li><strong>Layout:</strong> Use the Windows menu to tile, grid, or cascade all windows.</li>
 <li><strong>Proportional scaling:</strong> Windows reposition and resize proportionally when the browser window or console panel is resized.</li>
-<li><strong>Dialog boxes:</strong> Prompts (New Table, Save As, Insert Column, Open URL) and AI Settings open as modal dialog boxes &mdash; the workspace dims behind them and they block the other windows until you confirm, press <code>Esc</code>, or click outside to dismiss. All dialog boxes &mdash; including these, the Column Manager, and the About windows &mdash; are draggable and resizable, but do not snap to window edges.</li>
+<li><strong>Dialog boxes:</strong> Prompts (New Table, Save As, Insert Column, Open URL) and AI Settings open as modal dialog boxes &mdash; the workspace dims behind them and they block the other windows until you confirm, press <code>Esc</code>, or click outside to dismiss. All dialog boxes &mdash; including these, the Column Manager, and the About windows &mdash; are draggable and resizable, but do not snap to window edges. Non-modal dialogs (Column Manager, Plugin About) always stay on top of regular windows, even when you click or focus other windows, and are excluded from layout operations (tile, grid, cascade).</li>
 </ul>
 
 <h4>Tabbing and Docking</h4>

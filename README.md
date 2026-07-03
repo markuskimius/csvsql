@@ -185,7 +185,7 @@ The AI receives column statistics and sample rows, then writes SQL queries to ge
 - **Close** — Click the close button. Ctrl/Cmd+click closes all windows
 - **Layout** — Use the Windows menu to Tile Horizontally, Tile Vertically, Grid, or Cascade
 - **Proportional scaling** — Windows reposition and resize proportionally when the browser window or console panel is resized
-- **Dialog boxes** — Prompts (New Table, Save As, Insert Column, Open URL) and AI Settings open as modal dialog boxes: the workspace dims behind them and they block other windows until you confirm, press Esc, or click outside to dismiss. All dialog boxes — including these, the Column Manager, and the About windows — are draggable and resizable but do not snap to window edges
+- **Dialog boxes** — Prompts (New Table, Save As, Insert Column, Open URL) and AI Settings open as modal dialog boxes: the workspace dims behind them and they block other windows until you confirm, press Esc, or click outside to dismiss. All dialog boxes — including these, the Column Manager, and the About windows — are draggable and resizable but do not snap to window edges. Non-modal dialogs (Column Manager, Plugin About) always stay on top of regular windows, even when you click or focus other windows, and are excluded from layout operations (tile, grid, cascade)
 
 ### Tabbing and Docking
 
