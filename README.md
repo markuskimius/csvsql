@@ -2,6 +2,8 @@
 
 A browser-based CSV database application. Open CSV, Excel, and compressed files as database tables, run SQL queries, edit data inline, and save — all in a multi-window interface with no server, build step, or internet connection required. Fully self-contained with all dependencies bundled locally.
 
+**Private by design** — your data never leaves your device. Files are parsed, edited, and queried entirely in the browser; there is no backend, telemetry, or analytics. The only network activity is user-initiated: Open URL downloads the file you ask for, and the optional AI assistant (local WebLLM/Ollama by default) contacts a cloud provider only if you explicitly configure Claude, OpenAI, Gemini, or Grok with your own API key.
+
 **[Try the live version](https://app.cbreak.org/csvsql/)**
 
 <!-- Screenshots and video demos — add your own assets to a screenshots/ directory -->
@@ -10,17 +12,19 @@ A browser-based CSV database application. Open CSV, Excel, and compressed files 
 ## Features
 
 - **Multiple file formats** — CSV, TSV, PSV, Excel (.xlsx/.xls), Gzip (.csv.gz), and ZIP archives
-- **SQL queries** — Full SQLite syntax from the built-in console, including joins, subqueries, aggregates, UNION, CASE, and REGEXP. Query results are queryable tables too
+- **SQL queries** — Full SQLite syntax from the built-in console, including joins, subqueries, aggregates, UNION, CASE, and REGEXP. Query results are queryable tables too. Up/Down arrows at the start/end of the input recall query history (last 100 queries, persisted across reloads)
 - **SQL syntax highlighting** — Keywords, strings, numbers, comments, and identifiers are color-coded in the SQL console and filter inputs
 - **SQL autocompletion** — Context-aware suggestions for table names, column names, and keywords in the SQL console and filter inputs. Tab/Enter accepts, Ctrl+Space opens manually; names needing quoting are inserted bracket-quoted
-- **Inline editing** — Click a cell to select it; press i, F2, or Ctrl/Cmd+U to edit; or Ctrl/Cmd+click a cell to edit directly. Tab/Shift+Tab/Enter navigate between cells while staying in edit mode. Enter returns to the column where editing started. Up/Down arrow commits and exits edit mode. Long text scrolls within the cell to keep the cursor visible. Escape to revert
+- **Inline editing** — Double-click a cell to edit it. Or click a cell to select it and press i, F2, or Ctrl/Cmd+U; Ctrl/Cmd+click also edits directly. Tab/Shift+Tab/Enter navigate between cells while staying in edit mode. Enter returns to the column where editing started. Up/Down arrow commits and exits edit mode. Long text scrolls within the cell to keep the cursor visible. Escape to revert
 - **Sort and filter** — Click the sort badge (triangle icon) in column headers to sort (multi-column with Shift+click on sort badges). Filter with SQL WHERE expressions including REGEXP. Excel-style column autofilter dropdowns with searchable checkboxes for point-and-click filtering. Status chips in the status bar show active features. Click Sorted or Filtered to clear; click Linked or Formatted to suspend/resume
 - **Multi-window workspace** — Draggable, resizable subwindows with edge snapping. Tile, Grid, or Cascade layouts. Tabbing and docking support for IDE-style split layouts
 - **Row and column management** — Right-click a row number to insert below or delete. Right-click a column header to insert a column to the right or delete. Right-click the `#` corner cell to insert a row or column when the table is empty. Ctrl/Cmd+click a column header to rename inline (duplicate names are rejected with a red border). Full undo/redo for all structural operations. Resize any column by dragging column borders — including the row-number column (double-click to auto-fit based on all rows, not just visible ones). When multiple columns are selected, double-click auto-fits all selected columns and drag-resize sets all selected columns to the same width
 - **Column Manager** — Open via Edit > Manage Columns (Ctrl/Cmd+Shift+M) or right-click a column header. Searchable vertical list of all columns with multi-select (Shift+click, Ctrl/Cmd+click). Drag to reorder within the list or drop onto table headers. Alt+Up/Down to move selected columns. Double-click a column to scroll the table to it. All reorders batch into a single undo entry when the manager closes. Esc closes from anywhere
 - **Cell selection** — Click a cell to highlight its row, column, and row number. Click a column header to select the entire column. Move the selection with arrow keys or vim-style h/j/k/l, extend to a rectangle with Shift+arrow (or Shift+H/J/K/L), Shift+click, or click-and-drag. Click a row number to select the entire row (drag or Shift+click for multiple rows). Ctrl+A selects all cells; Esc deselects all. Clicking the `#` corner cell toggles between select all and select none. With no cell selected, any arrow key focuses the cell in the middle of the view. Ctrl+←/→ moves the header-selected column
-- **Clipboard** — Cut (Ctrl+X), Copy (Ctrl+C), and Paste (Ctrl+V) work on selected cells. Data is copied as tab-separated values. When a plugin display transform is active, copy uses formatted values; when formatting is disabled, raw values are copied. Copying with Select All or row selection includes the header row. Copy and cut work from any focus context (column header, titlebar, etc.)
-- **Undo / Redo** — Ctrl+Z undoes cell edits, paste, cut, row insert/delete, column insert/delete, column rename, column reorder, and column resize. Ctrl+Shift+Z redoes. Multi-cell paste and cut undo as a single step. Works from anywhere in the window — no cell focus required
+- **Clipboard** — Cut (Ctrl+X), Copy (Ctrl+C), and Paste (Ctrl+V) work on selected cells. A toast notification confirms each operation with the number of cells affected. Data is copied as tab-separated values. When a plugin display transform is active, copy uses formatted values; when formatting is disabled, raw values are copied. Copying with Select All or row selection includes the header row. Copy and cut work from any focus context (column header, titlebar, etc.)
+- **Undo / Redo** — Ctrl+Z undoes cell edits, paste, cut, replace, row insert/delete, column insert/delete, column rename, column reorder, and column resize. Ctrl+Shift+Z or Ctrl+Y redoes. A toast notification describes what was undone or redone. Multi-cell paste and cut undo as a single step. Works from anywhere in the window — no cell focus required
+- **Find & Replace** — Ctrl+F opens a find dialog for the active table. All matches are highlighted with next/previous navigation that scrolls matches into view; options for match case and entire-cell matching. Replace one match at a time, or Replace All as a single undo entry. Respects active filters and sort
+- **Selection statistics** — Selecting two or more cells shows Count, Sum, Avg, Min, and Max in the status bar (numeric stats computed over the numeric cells in the selection)
 - **SELECT INTO** — Create new tables from query results (`SELECT ... INTO tablename ...`)
 - **CREATE TABLE** — New tables created via SQL auto-open as editable windows
 - **Drag and drop** — Drop files directly onto the window to open them
@@ -28,7 +32,7 @@ A browser-based CSV database application. Open CSV, Excel, and compressed files 
 - **Save** — Write directly back to the original file (Chrome/Edge) or download. Save As supports CSV, TSV, PSV, Excel, Gzip, and ZIP formats
 - **Frozen row-number column** — The `#` column stays pinned on the left edge when scrolling horizontally, so you always know which row you're looking at. Column headers use opaque backgrounds so scrolling data never shows through — including when a column is selected
 - **Virtual scrolling** — Handles large datasets efficiently
-- **AI analysis** *(experimental)* — Natural language data analysis with automatic SQL query execution, inline charts, formatted tables, and PDF report generation. Supports WebLLM (in-browser), Ollama (local), Claude, and OpenAI
+- **AI analysis** *(experimental)* — Natural language data analysis with automatic SQL query execution, inline charts, formatted tables, and PDF report generation. Supports WebLLM (in-browser), Ollama (local), Claude, OpenAI, Gemini, and Grok
 
 ## Installation
 
@@ -166,6 +170,8 @@ The AI tab lets you analyze data using natural language. The AI automatically wr
 | Ollama | Local | Install from [ollama.com](https://ollama.com), run `ollama pull llama3.2` |
 | Claude | Cloud | API key from [console.anthropic.com](https://console.anthropic.com) |
 | OpenAI | Cloud | API key from [platform.openai.com](https://platform.openai.com) |
+| Gemini | Cloud | API key from [aistudio.google.com](https://aistudio.google.com/apikey) |
+| Grok (xAI) | Cloud | API key from [console.x.ai](https://console.x.ai) |
 
 Type a question and press **Enter** to send. Use **Shift+Enter** for multiline prompts and **Up/Down** arrows for prompt history. Click the gear icon to configure provider, model, and API keys.
 

@@ -38,6 +38,12 @@ test.describe('Table Editing', () => {
     expect(after.rows[0][col]).toBe('EDITED_VALUE');
   });
 
+  test('double-click enters edit mode', async ({ page }) => {
+    const cell = page.locator('.subwindow table tbody td.data-cell').first();
+    await cell.dblclick();
+    await expect(cell).toHaveAttribute('contenteditable', 'true');
+  });
+
   test('Ctrl+U also enters edit mode', async ({ page }) => {
     const cell = page.locator('.subwindow table tbody td.data-cell').first();
     await cell.click();

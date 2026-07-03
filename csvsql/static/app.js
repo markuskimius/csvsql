@@ -15,6 +15,7 @@ const app = (() => {
   let _activeAutoFilter = null;            // { win, col, el } — currently open autofilter dropdown
   let _activePluginAboutWin = null;        // window object for the currently open plugin about window
   let _activeColManagerWin = null;         // window object for the currently open column manager
+  let _activeFindWin = null;               // window object for the currently open find & replace dialog
   let _touchHeaderDrag = null;             // header 1.5-tap drag (→ reorder column)
   let _touchCellDrag = null;               // cell second-tap interaction (→ double-tap edit or 1.5-tap multi-select)
   let _touchWinDrag = null;                // titlebar 1.5-tap drag (→ move window)
@@ -86,9 +87,17 @@ const app = (() => {
   function fixShortcutLabels() {
     if (navigator.platform.includes('Mac') || navigator.userAgent.includes('Mac')) {
       document.querySelectorAll('.shortcut').forEach(el => {
-        el.textContent = el.textContent.replace('Ctrl+', '\u2318').replace('Shift+', '\u21E7');
+        el.textContent = el.textContent.replace(/Ctrl\+/g, '\u2318').replace(/Shift\+/g, '\u21E7');
       });
     }
+  }
+
+  // Platform-aware shortcut text for toast messages ("Ctrl+Z" -> "\u2318Z" on Mac)
+  function shortcutLabel(s) {
+    if (navigator.platform.includes('Mac') || navigator.userAgent.includes('Mac')) {
+      return s.replace(/Ctrl\+/g, '\u2318').replace(/Shift\+/g, '\u21E7');
+    }
+    return s;
   }
 
   // ---- File Menu ----
@@ -1085,6 +1094,10 @@ const app = (() => {
       closeColManager();
     }
 
+    if (_activeFindWin && _activeFindWin._findTargetWinId === id) {
+      closeFindReplace();
+    }
+
     if (win.tableName && tables[win.tableName]) {
       const t = tables[win.tableName];
       if (!win.isQuery && t.modified) {
@@ -1614,7 +1627,13 @@ const app = (() => {
   }
 
   function getActiveDataWindow() {
-    return windows.find(w => w.id === activeWinId) || null;
+    const win = windows.find(w => w.id === activeWinId) || null;
+    // When the Find & Replace dialog is active, table operations (undo/redo,
+    // copy, menu state) target the window the dialog is searching
+    if (win && _activeFindWin && win.id === _activeFindWin.id) {
+      return windows.find(w => w.id === _activeFindWin._findTargetWinId) || null;
+    }
+    return win;
   }
 
   function getDisplayFilename(t) {
@@ -3701,6 +3720,16 @@ const app = (() => {
       else selectAllCells(win);
     });
 
+    // Double-click a data cell to edit it
+    table.addEventListener('dblclick', (e) => {
+      const td = e.target.closest && e.target.closest('td.data-cell');
+      if (!td || !table.contains(td)) return;
+      if (td.getAttribute('contenteditable') === 'true') return;
+      win._editStartColIdx = parseInt(td.dataset.colIdx, 10);
+      td.focus();
+      enterEditMode(td);
+    });
+
     // Row selection via row-number cell click/drag
     let rowDragState = null;
     const onRowDragMove = (ev) => {
@@ -3977,6 +4006,7 @@ const app = (() => {
         if (k === 'v' && !e.shiftKey) { e.preventDefault(); pasteAtAnchor(win); return; }
         if (k === 'z' && !e.shiftKey) { e.preventDefault(); undoTable(win.tableName, win); return; }
         if (k === 'z' && e.shiftKey) { e.preventDefault(); redoTable(win.tableName, win); return; }
+        if (k === 'y' && !e.shiftKey) { e.preventDefault(); redoTable(win.tableName, win); return; }
         if (k === 'a' && !e.shiftKey) { e.preventDefault(); selectAllCells(win); return; }
       }
 
@@ -4122,7 +4152,8 @@ const app = (() => {
       ? Object.keys(_columnTransformCache[win.tableName]) : [];
     const hasTransforms = transformedCols.length > 0;
     const anyFilters = hasColumnFilters || hasWhereFilter;
-    statusLeft.textContent = `${displayRows.length} of ${rows.length} rows`;
+    win._statusBase = `${displayRows.length} of ${rows.length} rows`;
+    updateSelectionStats(win);
     statusRight.textContent = `${columns.length} columns`;
 
     // Status center: toggle chips
@@ -4350,7 +4381,14 @@ const app = (() => {
     }
   }
 
-  function copySelectedCells(win) {
+  // "12 cells (3 rows × 4 columns)" / "1 cell" — for clipboard toasts
+  function describeCellCount(count, nRows, nCols) {
+    if (count === 1) return '1 cell';
+    return `${count} cells (${nRows} row${nRows === 1 ? '' : 's'} × ${nCols} column${nCols === 1 ? '' : 's'})`;
+  }
+
+  function copySelectedCells(win, opts) {
+    const silent = !!(opts && opts.silent);
     if (!win.selectedCells || win.selectedCells.size === 0) return;
     const t = tables[win.tableName];
     if (!t) return;
@@ -4380,19 +4418,29 @@ const app = (() => {
       curRow.push(String(useTransform ? getDisplayValue(win.tableName, col, row) : raw));
     }
     if (curRow.length) rows.push(curRow);
+    const nRows = rows.length;
+    const nCols = Math.max(...rows.map(r => r.length));
     if (win._copyWithHeader) {
       const selCols = [...new Set(cells.map(c => c.col))].sort((a, b) => colOrder.get(a) - colOrder.get(b));
       rows.unshift(selCols);
     }
     const tsv = rows.map(r => r.join('\t')).join('\n');
-    try { navigator.clipboard.writeText(tsv); } catch (_) {}
+    const summary = describeCellCount(cells.length, nRows, nCols) + (win._copyWithHeader ? ' with header' : '');
+    try {
+      navigator.clipboard.writeText(tsv).then(
+        () => { if (!silent) showToast('Copied ' + summary, 'success'); },
+        () => { if (!silent) showToast('Copy failed — clipboard unavailable', 'error'); }
+      );
+    } catch (_) {
+      if (!silent) showToast('Copy failed — clipboard unavailable', 'error');
+    }
   }
 
   function cutSelectedCells(win) {
     if (!win.selectedCells || win.selectedCells.size === 0) return;
     const t = tables[win.tableName];
     if (!t) return;
-    copySelectedCells(win);
+    copySelectedCells(win, { silent: true });
     const changes = [];
     if (!t._dirtyCells) t._dirtyCells = [];
     for (const key of win.selectedCells) {
@@ -4412,6 +4460,7 @@ const app = (() => {
     if (!t._undoStack) t._undoStack = [];
     t._undoStack.push({ type: 'cut', changes });
     t._redoStack = [];
+    showToast(`Cut ${changes.length} cell${changes.length === 1 ? '' : 's'} — ${shortcutLabel('Ctrl+Z')} to undo`, 'success');
     markModified(win.tableName);
     debouncedSync(win.tableName);
     windows.filter(w => w.tableName === win.tableName).forEach(w => {
@@ -4421,7 +4470,61 @@ const app = (() => {
     refocusAnchorCell(win);
   }
 
+  // ---- Selection statistics (status bar) ----
+
+  function formatStatNum(n) {
+    if (!isFinite(n)) return String(n);
+    const r = Number(n.toPrecision(12));
+    return r.toLocaleString('en-US', { maximumFractionDigits: 6 });
+  }
+
+  // Show Count/Sum/Avg/Min/Max for multi-cell selections in the status bar's
+  // left segment (appended to the row-count text stored in win._statusBase).
+  // Count = non-empty cells; Sum/Avg/Min/Max computed over numeric cells only.
+  function updateSelectionStats(win) {
+    if (!win.statusbarEl) return;
+    const statusLeft = win.statusbarEl.querySelector('.status-left');
+    if (!statusLeft) return;
+    const t = tables[win.tableName];
+    const sel = win.selectedCells;
+    let stats = '';
+    if (t && sel && sel.size >= 2) {
+      const rowMap = new Map(t.rows.map(r => [r._rownum, r]));
+      let count = 0, numCount = 0, sum = 0, min = Infinity, max = -Infinity;
+      for (const key of sel) {
+        const sep = key.indexOf(':');
+        const row = rowMap.get(parseInt(key.slice(0, sep), 10));
+        if (!row) continue;
+        const raw = String(row[key.slice(sep + 1)] ?? '').trim();
+        if (raw === '') continue;
+        count++;
+        const n = Number(raw);
+        if (isFinite(n)) {
+          numCount++;
+          sum += n;
+          if (n < min) min = n;
+          if (n > max) max = n;
+        }
+      }
+      const parts = [`Count: ${count}`];
+      if (numCount > 0) {
+        parts.push(`Sum: ${formatStatNum(sum)}`, `Avg: ${formatStatNum(sum / numCount)}`,
+          `Min: ${formatStatNum(min)}`, `Max: ${formatStatNum(max)}`);
+      }
+      stats = parts.join('   ');
+    }
+    statusLeft.textContent = win._statusBase || '';
+    if (stats) {
+      const span = document.createElement('span');
+      span.className = 'status-stats';
+      span.textContent = stats;
+      span.title = stats;
+      statusLeft.appendChild(span);
+    }
+  }
+
   function refocusAnchorCell(win) {
+    updateSelectionStats(win);
     if (!win.anchorCell || !win._displayRows || !win._columns) return;
     const di = win._displayRows.findIndex(r => r._rownum === win.anchorCell.rownum);
     const ci = win._columns.indexOf(win.anchorCell.col);
@@ -4505,7 +4608,10 @@ const app = (() => {
     const t = tables[win.tableName];
     if (!t) return;
     let text;
-    try { text = await navigator.clipboard.readText(); } catch (_) { return; }
+    try { text = await navigator.clipboard.readText(); } catch (_) {
+      showToast('Paste failed — clipboard unavailable', 'error');
+      return;
+    }
     if (!text) return;
     if (!tables[win.tableName] || !win._displayRows) return;
     const lines = text.replace(/\n$/, '').split('\n');
@@ -4540,6 +4646,9 @@ const app = (() => {
     debouncedSync(win.tableName);
     const endDi = Math.min(startDi + pasteData.length - 1, win._displayRows.length - 1);
     const endCi = Math.min(startCi + Math.max(...pasteData.map(r => r.length)) - 1, win._columns.length - 1);
+    const pRows = endDi - startDi + 1;
+    const pCols = endCi - startCi + 1;
+    showToast(`Pasted ${describeCellCount(pRows * pCols, pRows, pCols)} — ${shortcutLabel('Ctrl+Z')} to undo`, 'success');
     win.selectedCells = new Set();
     for (let di = startDi; di <= endDi; di++) {
       const rn = win._displayRows[di]._rownum;
@@ -4698,6 +4807,20 @@ const app = (() => {
     }
   }
 
+  // "paste" -> "Paste", "deleteColumn" -> "Delete Column" — shared by the Edit menu and undo/redo toasts
+  function undoActionLabel(entry) {
+    return entry ? entry.type.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase()).trim() : '';
+  }
+
+  // "Paste (12 cells)" for cell-level entries, "Delete Column" for structural ones
+  function undoActionSummary(entry) {
+    const label = undoActionLabel(entry);
+    if (entry.changes && entry.changes.length > 0) {
+      return `${label} (${entry.changes.length} cell${entry.changes.length === 1 ? '' : 's'})`;
+    }
+    return label;
+  }
+
   function undoTable(tableName, win) {
     const t = tables[tableName];
     if (!t) return;
@@ -4705,6 +4828,7 @@ const app = (() => {
     const entry = t._undoStack.pop();
     if (!t._redoStack) t._redoStack = [];
     t._redoStack.push(entry);
+    showToast(`Undid ${undoActionSummary(entry)} — ${shortcutLabel('Ctrl+Shift+Z')} or ${shortcutLabel('Ctrl+Y')} to redo`, 'success');
     if (entry.rowUndo || entry.columnUndo) {
       undoStructural(tableName, entry);
       return;
@@ -4733,6 +4857,7 @@ const app = (() => {
     const entry = t._redoStack.pop();
     if (!t._undoStack) t._undoStack = [];
     t._undoStack.push(entry);
+    showToast(`Redid ${undoActionSummary(entry)} — ${shortcutLabel('Ctrl+Z')} to undo`, 'success');
     if (entry.rowUndo || entry.columnUndo) {
       redoStructural(tableName, entry);
       return;
@@ -4817,10 +4942,12 @@ const app = (() => {
     applyCellHighlights(win, true);
   }
 
-  function focusCellAt(win, displayIdx, colIdx) {
+  // Scroll a (displayIdx, colIdx) cell into view (virtual-scroll aware) and
+  // return its freshly rendered <td> (or null). Does NOT focus the cell.
+  function scrollCellIntoView(win, displayIdx, colIdx) {
     const container = win._container;
     const thead = win._table?.querySelector('thead');
-    if (!container) return;
+    if (!container) return null;
     const theadH = thead ? thead.offsetHeight : 0;
     const cellTop = displayIdx * ROW_HEIGHT;
     const cellBottom = cellTop + ROW_HEIGHT;
@@ -4831,12 +4958,25 @@ const app = (() => {
     } else if (cellBottom > viewBottom) {
       container.scrollTop = cellBottom - (container.clientHeight - theadH);
     }
-    // Force render of the target cell before focusing
+    // Force render of the target cell
     win._renderStart = -1; win._renderEnd = -1;
     renderVisibleRows(win);
     const tr = win._tbody.querySelector(`tr[data-display-idx="${displayIdx}"]`);
-    if (!tr) return;
-    const td = tr.children[colIdx + 1]; // +1 for row-num column
+    const td = tr ? tr.children[colIdx + 1] : null; // +1 for row-num column
+    if (td) {
+      // Horizontal: account for the sticky row-number column on the left edge
+      const rowNumW = win.rowNumWidth || 50;
+      if (td.offsetLeft - rowNumW < container.scrollLeft) {
+        container.scrollLeft = Math.max(0, td.offsetLeft - rowNumW);
+      } else if (td.offsetLeft + td.offsetWidth > container.scrollLeft + container.clientWidth) {
+        container.scrollLeft = td.offsetLeft + td.offsetWidth - container.clientWidth;
+      }
+    }
+    return td;
+  }
+
+  function focusCellAt(win, displayIdx, colIdx) {
+    const td = scrollCellIntoView(win, displayIdx, colIdx);
     if (!td) return;
     win._programmaticFocus = true;
     td.focus();
@@ -4914,14 +5054,18 @@ const app = (() => {
         const ci = parseInt(td.dataset.colIdx, 10);
         if (isNaN(ci)) continue;
         const name = win._columns[ci];
+        const key = `${row._rownum}:${name}`;
         td.classList.toggle('col-highlight', hiCols.has(name));
-        td.classList.toggle('cell-selected', selected.has(`${row._rownum}:${name}`));
+        td.classList.toggle('cell-selected', selected.has(key));
+        td.classList.toggle('cell-find-match', !!(win._findMatches && win._findMatches.has(key)));
+        td.classList.toggle('cell-find-current', win._findCurrentKey === key);
       }
     }
     if (_linkCache.length > 0 && selectionDriven) {
       if (selected.size > 0 && !win.disableLinkSource) applyLinkFilters(win);
       else if (win.id === _activeLinkSourceId) clearLinkFilters(win);
     }
+    if (selectionDriven) updateSelectionStats(win);
   }
 
   function rebuildTable(win) {
@@ -5795,6 +5939,19 @@ const app = (() => {
     if (arr.length > MAX_HISTORY) arr.shift();
   }
 
+  // SQL query history — persisted in localStorage (unlike the in-memory AI prompt history)
+  let _sqlHistory = [];
+  try {
+    const saved = JSON.parse(localStorage.getItem('csvsql_sql_history') || '[]');
+    if (Array.isArray(saved)) _sqlHistory = saved.filter(v => typeof v === 'string').slice(-MAX_HISTORY);
+  } catch (_) {}
+  let _sqlHistoryIdx = _sqlHistory.length;
+  let _sqlHistoryDraft = '';
+
+  function persistSQLHistory() {
+    try { localStorage.setItem('csvsql_sql_history', JSON.stringify(_sqlHistory)); } catch (_) {}
+  }
+
   function handleHistoryKey(e, history, getIdx, setIdx, getDraft, setDraft) {
     const el = e.target;
     if (e.key === 'ArrowUp') {
@@ -5829,7 +5986,16 @@ const app = (() => {
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         executeQuery();
+        return;
       }
+      // Up/Down at the start/end of the input recalls query history — but not
+      // while the autocomplete dropdown is open (it owns the arrow keys)
+      if (_acState && _acState.inputEl === e.target) return;
+      const before = e.target.value;
+      handleHistoryKey(e, _sqlHistory,
+        () => _sqlHistoryIdx, v => _sqlHistoryIdx = v,
+        () => _sqlHistoryDraft, v => _sqlHistoryDraft = v);
+      if (e.target.value !== before) _syncSQLHighlight();
     });
 
     document.getElementById('ai-input').addEventListener('keydown', (e) => {
@@ -5852,6 +6018,13 @@ const app = (() => {
         const win = getActiveDataWindow();
         if (!win || win.anchorCell) return;
         if (focusMiddleCell(win)) e.preventDefault();
+        return;
+      }
+      if (e.key === 'Escape' && _activeFindWin) {
+        const tgt = e.target;
+        if (tgt && tgt.matches && tgt.matches('input, textarea, [contenteditable="true"], td.data-cell') && !tgt.closest('.find-form')) return;
+        e.preventDefault();
+        closeFindReplace();
         return;
       }
       if (e.key === 'Escape' && _activeColManagerWin) {
@@ -5925,6 +6098,27 @@ const app = (() => {
           e.preventDefault();
           if (e.shiftKey) redoTable(win.tableName, win);
           else undoTable(win.tableName, win);
+          return;
+        }
+      }
+      if (e.key.toLowerCase() === 'y' && !e.shiftKey) {
+        const tgt = e.target;
+        if (tgt && tgt.matches && tgt.matches('input, textarea, [contenteditable="true"], td.data-cell')) return;
+        const win = getActiveDataWindow();
+        if (win && win.tableName) {
+          e.preventDefault();
+          redoTable(win.tableName, win);
+          return;
+        }
+      }
+      if (e.key.toLowerCase() === 'f' && !e.shiftKey) {
+        const tgt = e.target;
+        // td.data-cell deliberately NOT excluded — Ctrl+F should work with a cell focused
+        if (tgt && tgt.matches && tgt.matches('input, textarea, [contenteditable="true"]')) return;
+        const win = getActiveDataWindow();
+        if (win && win.tableName) {
+          e.preventDefault();
+          showFindReplace(win.id);
           return;
         }
       }
@@ -6467,12 +6661,22 @@ const app = (() => {
     });
   }
 
+  // Refreshes the console's syntax-highlight overlay after a programmatic value
+  // change (e.g. history recall) that doesn't fire an input event. Assigned in
+  // setupSQLHighlight; no-op before init.
+  let _syncSQLHighlight = () => {};
+
   function setupSQLHighlight() {
     const input = document.getElementById('sql-input');
     const overlay = document.getElementById('sql-highlight');
     function update() {
       overlay.innerHTML = sqlHighlightHTML(input.value) + '\n';
     }
+    _syncSQLHighlight = () => {
+      update();
+      overlay.scrollTop = input.scrollTop;
+      overlay.scrollLeft = input.scrollLeft;
+    };
     input.addEventListener('input', update);
     input.addEventListener('scroll', () => {
       overlay.scrollTop = input.scrollTop;
@@ -6587,8 +6791,15 @@ const app = (() => {
 
   function executeQuery() {
     const input = document.getElementById('sql-input');
-    const sql = autoQuoteSQL(input.value.trim());
+    const rawSQL = input.value.trim();
+    const sql = autoQuoteSQL(rawSQL);
     if (!sql) return;
+
+    // Record the query as the user typed it (pre-auto-quoting)
+    pushHistory(_sqlHistory, rawSQL);
+    persistSQLHistory();
+    _sqlHistoryIdx = _sqlHistory.length;
+    _sqlHistoryDraft = '';
 
     flushAllSyncs();
 
@@ -6911,6 +7122,10 @@ const app = (() => {
       const win = getActiveDataWindow();
       if (win && win.tableName) showColManager(win.id);
     });
+    document.getElementById('btn-find').addEventListener('click', () => {
+      const win = getActiveDataWindow();
+      if (win && win.tableName) showFindReplace(win.id);
+    });
 
     function updateMenuState() {
       const hasActive = !!activeWinId;
@@ -6928,13 +7143,12 @@ const app = (() => {
       document.getElementById('btn-save-as').disabled = !t;
       const undoEntry = t && t._undoStack && t._undoStack.length > 0 ? t._undoStack[t._undoStack.length - 1] : null;
       const redoEntry = t && t._redoStack && t._redoStack.length > 0 ? t._redoStack[t._redoStack.length - 1] : null;
-      const actionLabel = (e) => e ? e.type.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase()).trim() : '';
       const btnUndo = document.getElementById('btn-undo');
       const btnRedo = document.getElementById('btn-redo');
       btnUndo.disabled = !undoEntry;
       btnRedo.disabled = !redoEntry;
-      btnUndo.firstChild.textContent = undoEntry ? `Undo ${actionLabel(undoEntry)}` : 'Undo';
-      btnRedo.firstChild.textContent = redoEntry ? `Redo ${actionLabel(redoEntry)}` : 'Redo';
+      btnUndo.firstChild.textContent = undoEntry ? `Undo ${undoActionLabel(undoEntry)}` : 'Undo';
+      btnRedo.firstChild.textContent = redoEntry ? `Redo ${undoActionLabel(redoEntry)}` : 'Redo';
       const hasSel = !!(win && win.selectedCells && win.selectedCells.size > 0);
       document.getElementById('btn-cut').disabled = !hasSel;
       document.getElementById('btn-copy').disabled = !hasSel;
@@ -6942,6 +7156,7 @@ const app = (() => {
       document.getElementById('btn-select-all').disabled = !(win && win.tableName && tables[win.tableName]);
       document.getElementById('btn-select-none').disabled = !hasSel;
       document.getElementById('btn-col-manager').disabled = !(win && win.tableName && tables[win.tableName]);
+      document.getElementById('btn-find').disabled = !(win && win.tableName && tables[win.tableName]);
     }
 
     function openItem(item) {
@@ -7095,7 +7310,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.48 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.49 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `, true);
@@ -7106,6 +7321,9 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <h4>Overview</h4>
 <p>CSVSQL treats CSV and other data files as database tables. Open files, edit cells, run SQL queries, and save &mdash; all in the browser with no server required.</p>
 <p>Install from PyPI with <code>pip install csvsql</code>, then run <code>csvsql</code> to start. If <code>csvsql</code> conflicts with another command on your system, use <code>csvsqlw</code> instead &mdash; it&rsquo;s an identical alias.</p>
+
+<h4>Privacy</h4>
+<p>Your data never leaves your device. Files are parsed, edited, and queried entirely in your browser; there is no backend, no telemetry, and no analytics, and CSVSQL never uploads your data to any server. The only network activity the app ever performs is at your explicit request: <strong>File &rarr; Open URL</strong> downloads a file from the URL you enter, and the optional AI assistant &mdash; which runs locally by default (WebLLM, Ollama) &mdash; sends your prompts and query results to a cloud provider only if you deliberately configure one (Claude, OpenAI, Gemini, or Grok) with your own API key.</p>
 
 <h4>Opening Files</h4>
 <p>Use <strong>File &rarr; Open</strong> (<code>Ctrl+O</code> / <code>&#8984;O</code>), <strong>File &rarr; Open URL</strong>, or drag and drop files onto the window. Hold <strong>Shift</strong> while opening or dropping to load files without headers &mdash; columns will be named A, B, C, &hellip; Z, AA, AB, etc.</p>
@@ -7136,11 +7354,13 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 <h4>Editing</h4>
 <ul>
-<li><strong>Edit cells:</strong> Click a cell to select it; press <code>i</code>, <code>F2</code>, or <code>Ctrl</code>/<code>&#8984;</code>+<code>U</code> to enter edit mode, or <code>Ctrl</code>/<code>&#8984;</code>+click a cell to edit it directly. <code>Tab</code>/<code>Shift+Tab</code> moves between cells and <code>Enter</code> moves down to the column where editing started &mdash; all three stay in edit mode (Enter exits edit mode on the last row). <code>Up</code>/<code>Down</code> arrow commits and moves to the adjacent row, exiting edit mode. Long text scrolls within the cell to keep the cursor visible. <code>Escape</code> reverts the edit.</li>
+<li><strong>Edit cells:</strong> Double-click a cell to edit it directly. Or click a cell to select it and press <code>i</code>, <code>F2</code>, or <code>Ctrl</code>/<code>&#8984;</code>+<code>U</code> to enter edit mode; <code>Ctrl</code>/<code>&#8984;</code>+click also edits directly. <code>Tab</code>/<code>Shift+Tab</code> moves between cells and <code>Enter</code> moves down to the column where editing started &mdash; all three stay in edit mode (Enter exits edit mode on the last row). <code>Up</code>/<code>Down</code> arrow commits and moves to the adjacent row, exiting edit mode. Long text scrolls within the cell to keep the cursor visible. <code>Escape</code> reverts the edit.</li>
 <li><strong>Navigate in select mode:</strong> Arrow keys or <code>h</code>/<code>j</code>/<code>k</code>/<code>l</code> move the selection. <code>Tab</code>/<code>Shift+Tab</code> move right/left. <code>Enter</code> moves down. <code>Escape</code> clears the selection.</li>
 <li><strong>Highlight row &amp; column:</strong> Clicking a cell highlights its row and column. Click a column header to select the entire column (with header row included for copy). Move the selection with arrow keys or vim-style <code>h</code>/<code>j</code>/<code>k</code>/<code>l</code>; extend to a rectangle of cells with <code>Shift</code>+arrow (or <code>Shift</code>+<code>H</code>/<code>J</code>/<code>K</code>/<code>L</code>), <code>Shift</code>+click on another cell, or click-and-drag across cells &mdash; every selected cell's row and column is highlighted so you can see what lines up with what. Click a row number to select an entire row; drag across row numbers or <code>Shift</code>+click another row number to select a range. <code>Ctrl</code>/<code>&#8984;</code>+<code>A</code> selects all cells; <code>Esc</code> deselects all. Clicking the <code>#</code> corner cell toggles between select all and select none. Pressing an arrow key with no cell selected focuses the cell in the middle of the current view.</li>
 <li><strong>Cut / Copy / Paste:</strong> Select cells and use <code>Ctrl</code>/<code>&#8984;</code>+<code>X</code>, <code>Ctrl</code>/<code>&#8984;</code>+<code>C</code>, <code>Ctrl</code>/<code>&#8984;</code>+<code>V</code>. Data is copied as tab-separated values. When a plugin display transform is active, copy uses the formatted display values; when formatting is disabled, copy uses raw values. Select All and row selection copies include the column header row. Copy and cut work from any focus context (column header, titlebar, etc.), not just when a data cell is focused. In edit mode, these shortcuts pass through to native browser behavior for text within the cell.</li>
-<li><strong>Undo / Redo:</strong> <code>Ctrl</code>/<code>&#8984;</code>+<code>Z</code> to undo, <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>Z</code> to redo. Undoes cell edits, paste, cut, row insert/delete, column insert/delete, column rename, column reorder, and column resize. Multi-cell paste and cut undo as a single step. Also available from the Edit menu.</li>
+<li><strong>Undo / Redo:</strong> <code>Ctrl</code>/<code>&#8984;</code>+<code>Z</code> to undo, <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>Z</code> or <code>Ctrl</code>/<code>&#8984;</code>+<code>Y</code> to redo. A toast notification confirms each undo/redo (and each copy, cut, and paste) with what was affected. Undoes cell edits, paste, cut, row insert/delete, column insert/delete, column rename, column reorder, and column resize. Multi-cell paste and cut undo as a single step. Also available from the Edit menu.</li>
+<li><strong>Find &amp; Replace:</strong> <code>Ctrl</code>/<code>&#8984;</code>+<code>F</code> (or <strong>Edit &rarr; Find &amp; Replace&hellip;</strong>) opens a non-modal dialog targeting the active table. All matches are highlighted; <code>Enter</code>/<code>Shift+Enter</code> (or the Prev/Next buttons) step between them, scrolling each match into view. Options: <em>Match case</em> and <em>Entire cell</em>. <strong>Replace</strong> replaces the current match; <strong>Replace All</strong> replaces every match as a single undo entry. Search respects the window&rsquo;s active filters and sort, and matches raw cell values (not plugin-formatted display values). <code>Escape</code> closes the dialog.</li>
+<li><strong>Selection statistics:</strong> When two or more cells are selected, the status bar shows <em>Count</em> (non-empty cells) plus <em>Sum</em>, <em>Avg</em>, <em>Min</em>, and <em>Max</em> computed over the numeric cells in the selection.</li>
 <li><strong>Rows:</strong> Right-click a row number to insert below or delete. Right-click the <code>#</code> corner cell to insert a row at the beginning.</li>
 <li><strong>Columns:</strong> Right-click a column header to insert a column to the right or delete. Right-click the <code>#</code> corner cell to insert a column at the beginning. <code>Ctrl</code>/<code>&#8984;</code>+click a column header to rename inline &mdash; duplicate names are rejected with a red border on the input.</li>
 <li><strong>Select a column:</strong> Click a column header to select the entire column. Click the sort badge (triangle) to sort. Selection is the target for <code>Ctrl</code>/<code>&#8984;</code>+<code>&larr;</code>/<code>&rarr;</code> column reorder.</li>
@@ -7172,6 +7392,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 <h4>SQL Console</h4>
 <p>The SQL Console at the bottom runs queries against all open tables using SQLite syntax. Press <code>Ctrl+Enter</code> / <code>&#8984;+Enter</code> to execute. The console and filter inputs feature SQL syntax highlighting for keywords, strings, numbers, comments, and bracket-quoted identifiers.</p>
+<p><strong>Query history:</strong> Press <code>&uarr;</code> with the cursor at the very start of the input (or <code>&darr;</code> at the very end) to step through previously executed queries; <code>&darr;</code> past the newest entry restores whatever you were typing. History holds the last 100 queries, skips duplicates, and persists across page reloads. While the autocomplete dropdown is open, the arrow keys navigate the dropdown instead.</p>
 <p><strong>Autocompletion:</strong> As you type, a dropdown suggests table names (after <code>FROM</code>, <code>JOIN</code>, <code>INSERT INTO</code>, etc.), column names (after <code>tablename.</code> or a query alias, plus columns of any table referenced in the statement), and SQL keywords. <code>Tab</code> or <code>Enter</code> accepts the highlighted suggestion, <code>&uarr;</code>/<code>&darr;</code> navigate, <code>Escape</code> dismisses, and <code>Ctrl+Space</code> opens the dropdown manually. Names that need quoting (spaces, special characters, keyword collisions) are inserted bracket-quoted automatically. Suggestions never appear inside string literals or comments, and while the dropdown is closed no keys are intercepted. The same autocompletion works in every table&rsquo;s filter bar, where that table&rsquo;s own columns are suggested first.</p>
 <p>Tables are referenced by the name shown in their window title bar. Names are sanitized to <code>[a-zA-Z0-9_]</code> characters.</p>
 <p>Query results open in new windows and are automatically registered as queryable tables &mdash; you can run further SQL queries or use the filter bar on any result set.</p>
@@ -7246,7 +7467,7 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <tr><td><code>Ctrl+N</code> / <code>&#8984;N</code></td><td>New table</td></tr>
 <tr><td><code>Ctrl+W</code> / <code>&#8984;W</code></td><td>Close window</td></tr>
 <tr><td><code>Ctrl+&larr;</code> / <code>Ctrl+&rarr;</code> (or <code>&#8984;</code>+arrow)</td><td>Move selected header column, or cell-selection's columns, left / right</td></tr>
-<tr><td><code>i</code>, <code>F2</code>, or <code>Ctrl</code>/<code>&#8984;</code>+<code>U</code></td><td>Enter edit mode on the selected cell</td></tr>
+<tr><td><code>i</code>, <code>F2</code>, <code>Ctrl</code>/<code>&#8984;</code>+<code>U</code>, or double-click</td><td>Enter edit mode on the selected cell</td></tr>
 <tr><td><code>/</code> (cell selected, not editing)</td><td>Jump to the window's filter input</td></tr>
 <tr><td><code>Escape</code> (in filter input)</td><td>Return focus to the selected cell</td></tr>
 <tr><td>Arrow keys (no cell selected)</td><td>Focus the cell in the middle of the visible table</td></tr>
@@ -7261,7 +7482,8 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>C</code></td><td>Copy selected cells</td></tr>
 <tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>V</code></td><td>Paste at selected cell</td></tr>
 <tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>Z</code></td><td>Undo</td></tr>
-<tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>Z</code></td><td>Redo</td></tr>
+<tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>Z</code> or <code>Ctrl</code>/<code>&#8984;</code>+<code>Y</code></td><td>Redo</td></tr>
+<tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>F</code></td><td>Find &amp; Replace</td></tr>
 <tr><td><code>Tab</code>/<code>Shift+Tab</code> (editing)</td><td>Move to next / previous cell (stays in edit mode)</td></tr>
 <tr><td><code>Enter</code> (editing)</td><td>Move down to the column where editing started (stays in edit mode; exits on last row)</td></tr>
 <tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>L</code>/<code>H</code> (cell selected, not editing)</td><td>Switch to next / previous table window</td></tr>
@@ -7277,12 +7499,14 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 
 <h4>AI Analysis <em>(experimental)</em></h4>
 <p>The AI tab in the console panel lets you analyze your data using natural language. The AI has full SQL access to your data &mdash; it writes and executes queries automatically to answer your questions with exact results, regardless of dataset size. You can also chat with the AI without any tables loaded.</p>
-<p><strong>Four provider options:</strong></p>
+<p><strong>Six provider options:</strong></p>
 <ul>
 <li><strong>WebLLM (default):</strong> Runs entirely in the browser via WebGPU. Requires Chrome/Edge 113+. No install, no API key, no data leaves your machine.</li>
 <li><strong>Ollama:</strong> Local AI server. Install from <a href="https://ollama.com">ollama.com</a>, then run <code>ollama pull llama3.2</code>. Larger models than WebLLM, still fully local.</li>
 <li><strong>Claude (Anthropic):</strong> Cloud provider. Requires an API key from <a href="https://console.anthropic.com">console.anthropic.com</a>. Best reasoning quality.</li>
 <li><strong>OpenAI:</strong> Cloud provider. Requires an API key from <a href="https://platform.openai.com">platform.openai.com</a>.</li>
+<li><strong>Gemini (Google):</strong> Cloud provider. Requires an API key from <a href="https://aistudio.google.com/apikey">aistudio.google.com</a>. Generous free tier.</li>
+<li><strong>Grok (xAI):</strong> Cloud provider. Requires an API key from <a href="https://console.x.ai">console.x.ai</a>.</li>
 </ul>
 <p><strong>Usage:</strong> Switch to the AI tab, select one or more tables, type your question, and press <code>Enter</code> or click Run. Use <code>Shift+Enter</code> for multiline prompts. Press <code>Up</code>/<code>Down</code> arrow to recall previous prompts.</p>
 <p><strong>How it works:</strong> The AI receives column statistics and sample rows for context, then writes SQL queries in <code>\`\`\`sql</code> code blocks. These queries are executed automatically against the full dataset, and the results are fed back to the AI for analysis. This loop repeats (up to 5 rounds) until the AI has enough data to answer.</p>
@@ -7369,6 +7593,15 @@ value || 'N/A'                                   Default for empty</pre>
   // Ensure keys exist for older saved settings
   if (!('claudeApiKey' in aiSettings)) aiSettings.claudeApiKey = '';
   if (!('openaiApiKey' in aiSettings)) aiSettings.openaiApiKey = '';
+  if (!('geminiApiKey' in aiSettings)) aiSettings.geminiApiKey = '';
+  if (!('grokApiKey' in aiSettings)) aiSettings.grokApiKey = '';
+  // Migrate saved model IDs that have since been retired by the provider
+  const _retiredModels = {
+    'claude-opus-4-20250514': 'claude-opus-4-8',
+    'claude-sonnet-4-20250514': 'claude-sonnet-5',
+    'claude-haiku-4-20250414': 'claude-haiku-4-5',
+  };
+  if (_retiredModels[aiSettings.model]) aiSettings.model = _retiredModels[aiSettings.model];
 
   function saveAISettings() {
     localStorage.setItem('csvsql_ai_settings', JSON.stringify(aiSettings));
@@ -7451,7 +7684,7 @@ value || 'N/A'                                   Default for empty</pre>
       if (aiSettings.claudeApiKey) {
         _aiProvider = 'claude';
         if (!aiSettings.model) {
-          aiSettings.model = 'claude-opus-4-20250514';
+          aiSettings.model = 'claude-opus-4-8';
           saveAISettings();
         }
         badge.textContent = 'Claude: ' + aiSettings.model;
@@ -7463,10 +7696,34 @@ value || 'N/A'                                   Default for empty</pre>
       if (aiSettings.openaiApiKey) {
         _aiProvider = 'openai';
         if (!aiSettings.model) {
-          aiSettings.model = 'o3';
+          aiSettings.model = 'gpt-5.1';
           saveAISettings();
         }
         badge.textContent = 'OpenAI: ' + aiSettings.model;
+        return;
+      }
+    }
+
+    if (aiSettings.provider === 'gemini') {
+      if (aiSettings.geminiApiKey) {
+        _aiProvider = 'gemini';
+        if (!aiSettings.model) {
+          aiSettings.model = 'gemini-2.5-flash';
+          saveAISettings();
+        }
+        badge.textContent = 'Gemini: ' + aiSettings.model;
+        return;
+      }
+    }
+
+    if (aiSettings.provider === 'grok') {
+      if (aiSettings.grokApiKey) {
+        _aiProvider = 'grok';
+        if (!aiSettings.model) {
+          aiSettings.model = 'grok-4';
+          saveAISettings();
+        }
+        badge.textContent = 'Grok: ' + aiSettings.model;
         return;
       }
     }
@@ -7493,8 +7750,8 @@ value || 'N/A'                                   Default for empty</pre>
     if (!resp || resp.innerHTML.includes('ai-setup-help')) return;
     resp.innerHTML = `<div class="ai-setup-help">
 <strong>No AI provider detected.</strong> Options:<br><br>
-<strong>Option 1: Claude or OpenAI (cloud)</strong><br>
-Click the gear icon, select Claude or OpenAI, and enter your API key.<br>
+<strong>Option 1: Cloud provider (Claude, OpenAI, Gemini, or Grok)</strong><br>
+Click the gear icon, select a provider, and enter your API key.<br>
 Best reasoning quality for data analysis.<br><br>
 <strong>Option 2: Ollama (local)</strong><br>
 1. Install from <a href="https://ollama.com" target="_blank">ollama.com</a><br>
@@ -7510,7 +7767,7 @@ Smaller models, runs entirely in the browser — no install needed.<br>
   // Budget for data context chars. The AI also has SQL query access to the full
   // dataset, so this budget is for column stats + sample rows to orient the model.
   function getDataCharBudget() {
-    if (_aiProvider === 'claude' || _aiProvider === 'openai') return 500000;
+    if (_aiProvider === 'claude' || _aiProvider === 'openai' || _aiProvider === 'gemini' || _aiProvider === 'grok') return 500000;
     if (_aiProvider === 'webllm') return 20000; // 16K token context; leave room for system prompt, conversation, and response
     return 100000; // ollama
   }
@@ -8131,6 +8388,10 @@ ${_aiImageContext()}`;
           await generateClaude(messages, onChunk, signal);
         } else if (_aiProvider === 'openai') {
           await generateOpenAI(messages, onChunk, signal);
+        } else if (_aiProvider === 'gemini') {
+          await generateGemini(messages, onChunk, signal);
+        } else if (_aiProvider === 'grok') {
+          await generateGrok(messages, onChunk, signal);
         }
 
         _aiConversation.push({ role: 'assistant', content: fullText });
@@ -8355,13 +8616,14 @@ ${_aiImageContext()}`;
     }
   }
 
-  // OpenAI streaming
-  async function generateOpenAI(messages, onChunk, signal) {
-    const r = await fetch('https://api.openai.com/v1/chat/completions', {
+  // OpenAI-compatible streaming (OpenAI, Google Gemini, and xAI Grok all speak
+  // the chat-completions protocol; only the endpoint URL and API key differ)
+  async function generateOpenAICompat(url, apiKey, label, messages, onChunk, signal) {
+    const r = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + aiSettings.openaiApiKey,
+        'Authorization': 'Bearer ' + apiKey,
       },
       body: JSON.stringify({
         model: aiSettings.model,
@@ -8372,7 +8634,7 @@ ${_aiImageContext()}`;
     });
     if (!r.ok) {
       const errText = await r.text().catch(() => r.statusText);
-      throw new Error(`OpenAI error: ${r.status} ${errText}`);
+      throw new Error(`${label} error: ${r.status} ${errText}`);
     }
     const reader = r.body.getReader();
     const decoder = new TextDecoder();
@@ -8396,6 +8658,21 @@ ${_aiImageContext()}`;
     }
   }
 
+  function generateOpenAI(messages, onChunk, signal) {
+    return generateOpenAICompat('https://api.openai.com/v1/chat/completions',
+      aiSettings.openaiApiKey, 'OpenAI', messages, onChunk, signal);
+  }
+
+  function generateGemini(messages, onChunk, signal) {
+    return generateOpenAICompat('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+      aiSettings.geminiApiKey, 'Gemini', messages, onChunk, signal);
+  }
+
+  function generateGrok(messages, onChunk, signal) {
+    return generateOpenAICompat('https://api.x.ai/v1/chat/completions',
+      aiSettings.grokApiKey, 'Grok', messages, onChunk, signal);
+  }
+
   // AI Settings modal
   function showAISettings() {
     const modelList = aiSettings.model ? aiSettings.model : '';
@@ -8409,6 +8686,8 @@ ${_aiImageContext()}`;
           <option value="auto" ${aiSettings.provider === 'auto' ? 'selected' : ''}>Auto-detect</option>
           <option value="claude" ${aiSettings.provider === 'claude' ? 'selected' : ''}>Claude (Anthropic)</option>
           <option value="openai" ${aiSettings.provider === 'openai' ? 'selected' : ''}>OpenAI</option>
+          <option value="gemini" ${aiSettings.provider === 'gemini' ? 'selected' : ''}>Gemini (Google)</option>
+          <option value="grok" ${aiSettings.provider === 'grok' ? 'selected' : ''}>Grok (xAI)</option>
           <option value="ollama" ${aiSettings.provider === 'ollama' ? 'selected' : ''}>Ollama</option>
           <option value="webllm" ${aiSettings.provider === 'webllm' ? 'selected' : ''}>WebLLM (in-browser)</option>
         </select>
@@ -8428,6 +8707,20 @@ ${_aiImageContext()}`;
           <div style="display:flex;gap:6px;margin-bottom:10px;">
             <input type="password" id="ai-set-openai-key" value="${escHtml(aiSettings.openaiApiKey)}" placeholder="sk-..." style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit;font-size:13px;outline:none;">
             <button class="ai-key-toggle" data-target="ai-set-openai-key" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:4px;cursor:pointer;font-size:12px;">Show</button>
+          </div>
+        </div>
+        <div id="ai-set-gemini-fields">
+          <label style="font-size:12px;display:block;margin-bottom:4px;">Gemini API Key</label>
+          <div style="display:flex;gap:6px;margin-bottom:10px;">
+            <input type="password" id="ai-set-gemini-key" value="${escHtml(aiSettings.geminiApiKey)}" placeholder="AIza..." style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit;font-size:13px;outline:none;">
+            <button class="ai-key-toggle" data-target="ai-set-gemini-key" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:4px;cursor:pointer;font-size:12px;">Show</button>
+          </div>
+        </div>
+        <div id="ai-set-grok-fields">
+          <label style="font-size:12px;display:block;margin-bottom:4px;">xAI API Key</label>
+          <div style="display:flex;gap:6px;margin-bottom:10px;">
+            <input type="password" id="ai-set-grok-key" value="${escHtml(aiSettings.grokApiKey)}" placeholder="xai-..." style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit;font-size:13px;outline:none;">
+            <button class="ai-key-toggle" data-target="ai-set-grok-key" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:4px;cursor:pointer;font-size:12px;">Show</button>
           </div>
         </div>
         <label style="font-size:12px;display:block;margin-bottom:4px;">Model</label>
@@ -8451,6 +8744,8 @@ ${_aiImageContext()}`;
     const ollamaFields = body.querySelector('#ai-set-ollama-fields');
     const claudeFields = body.querySelector('#ai-set-claude-fields');
     const openaiFields = body.querySelector('#ai-set-openai-fields');
+    const geminiFields = body.querySelector('#ai-set-gemini-fields');
+    const grokFields = body.querySelector('#ai-set-grok-fields');
 
     // Show/hide toggle for API key fields
     body.querySelectorAll('.ai-key-toggle').forEach(btn => {
@@ -8466,6 +8761,8 @@ ${_aiImageContext()}`;
       ollamaFields.style.display = (p === 'ollama' || p === 'auto') ? '' : 'none';
       claudeFields.style.display = (p === 'claude') ? '' : 'none';
       openaiFields.style.display = (p === 'openai') ? '' : 'none';
+      geminiFields.style.display = (p === 'gemini') ? '' : 'none';
+      grokFields.style.display = (p === 'grok') ? '' : 'none';
     }
 
     async function refreshModels() {
@@ -8475,9 +8772,12 @@ ${_aiImageContext()}`;
 
       if (provider === 'claude') {
         const claudeModels = [
-          'claude-opus-4-20250514',
-          'claude-sonnet-4-20250514',
-          'claude-haiku-4-20250414',
+          'claude-opus-4-8',
+          'claude-opus-4-7',
+          'claude-opus-4-6',
+          'claude-sonnet-5',
+          'claude-sonnet-4-6',
+          'claude-haiku-4-5',
         ];
         modelSel.innerHTML = claudeModels.map(m =>
           `<option value="${escHtml(m)}" ${m === aiSettings.model ? 'selected' : ''}>${escHtml(m)}</option>`
@@ -8486,12 +8786,36 @@ ${_aiImageContext()}`;
       }
       if (provider === 'openai') {
         const openaiModels = [
-          'o3', 'o3-mini',
-          'o4-mini',
-          'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano',
-          'gpt-4o', 'gpt-4o-mini',
+          'gpt-5.1', 'gpt-5',
+          'gpt-5-mini', 'gpt-5-nano',
+          'gpt-4.1', 'gpt-4o',
         ];
         modelSel.innerHTML = openaiModels.map(m =>
+          `<option value="${escHtml(m)}" ${m === aiSettings.model ? 'selected' : ''}>${escHtml(m)}</option>`
+        ).join('');
+        return;
+      }
+      if (provider === 'gemini') {
+        const geminiModels = [
+          'gemini-3-pro-preview',
+          'gemini-2.5-pro',
+          'gemini-2.5-flash',
+          'gemini-2.5-flash-lite',
+        ];
+        modelSel.innerHTML = geminiModels.map(m =>
+          `<option value="${escHtml(m)}" ${m === aiSettings.model ? 'selected' : ''}>${escHtml(m)}</option>`
+        ).join('');
+        return;
+      }
+      if (provider === 'grok') {
+        const grokModels = [
+          'grok-4',
+          'grok-4-fast-reasoning',
+          'grok-4-fast-non-reasoning',
+          'grok-3',
+          'grok-3-mini',
+        ];
+        modelSel.innerHTML = grokModels.map(m =>
           `<option value="${escHtml(m)}" ${m === aiSettings.model ? 'selected' : ''}>${escHtml(m)}</option>`
         ).join('');
         return;
@@ -8554,6 +8878,8 @@ ${_aiImageContext()}`;
         aiSettings.ollamaUrl = urlInput.value.replace(/\/+$/, '');
         aiSettings.claudeApiKey = (body.querySelector('#ai-set-claude-key').value || '').trim();
         aiSettings.openaiApiKey = (body.querySelector('#ai-set-openai-key').value || '').trim();
+        aiSettings.geminiApiKey = (body.querySelector('#ai-set-gemini-key').value || '').trim();
+        aiSettings.grokApiKey = (body.querySelector('#ai-set-grok-key').value || '').trim();
         aiSettings.model = modelSel.value;
         saveAISettings();
         _webllmEngine = null; // Reset engine on settings change
@@ -9555,6 +9881,218 @@ ${_aiImageContext()}`;
     }
   }
 
+  // ---- Find & Replace ----
+
+  function escapeRegExp(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function closeFindReplace() {
+    if (!_activeFindWin) return;
+    const w = _activeFindWin;
+    _activeFindWin = null;
+    closeWindow(w.id);
+  }
+
+  function clearFindHighlights(tw) {
+    if (!tw) return;
+    tw._findMatches = null;
+    tw._findCurrentKey = null;
+    if (tw._tbody) applyCellHighlights(tw, false);
+  }
+
+  function showFindReplace(targetWinId) {
+    const targetWin = windows.find(w => w.id === targetWinId);
+    if (!targetWin || !targetWin.tableName || !tables[targetWin.tableName]) return;
+
+    if (_activeFindWin) {
+      if (_activeFindWin._findTargetWinId === targetWinId) {
+        focusWindow(_activeFindWin.id);
+        const inp = _activeFindWin.bodyEl.querySelector('.find-input');
+        if (inp) { inp.focus(); inp.select(); }
+        return;
+      }
+      closeFindReplace();
+    }
+
+    const win = createSubwindow('Find & Replace — ' + targetWin.tableName, (winObj, body) => {
+      body.innerHTML = `
+        <div class="dialog-form find-form">
+          <input class="find-input" placeholder="Find…" spellcheck="false">
+          <input class="find-replace-input" placeholder="Replace with…" spellcheck="false">
+          <div class="find-opts">
+            <label><input type="checkbox" class="find-case"> Match case</label>
+            <label><input type="checkbox" class="find-whole"> Entire cell</label>
+            <span class="find-count"></span>
+          </div>
+          <div class="modal-buttons find-buttons">
+            <button class="find-prev" title="Shift+Enter">&#9650;&#xFE0E; Prev</button>
+            <button class="find-next" title="Enter">&#9660;&#xFE0E; Next</button>
+            <button class="find-replace-one">Replace</button>
+            <button class="find-replace-all primary">Replace All</button>
+          </div>
+        </div>`;
+
+      const findInput = body.querySelector('.find-input');
+      const replInput = body.querySelector('.find-replace-input');
+      const caseCb = body.querySelector('.find-case');
+      const wholeCb = body.querySelector('.find-whole');
+      const countEl = body.querySelector('.find-count');
+
+      let matches = [];  // match keys ("rownum:col") in display order
+      let curIdx = -1;
+
+      const target = () => windows.find(w => w.id === targetWinId);
+
+      function updateCount() {
+        if (!findInput.value) countEl.textContent = '';
+        else if (matches.length === 0) countEl.textContent = 'No matches';
+        else countEl.textContent = curIdx >= 0 ? `${curIdx + 1} of ${matches.length}` : `${matches.length} matches`;
+      }
+
+      // Search the target window's displayed rows/columns (respects filters and sort).
+      // Matches raw cell values, not plugin display transforms.
+      function computeMatches() {
+        const tw = target();
+        matches = [];
+        curIdx = -1;
+        if (!tw || !tw._displayRows || !tables[tw.tableName]) { updateCount(); return; }
+        const q = findInput.value;
+        if (q) {
+          const cs = caseCb.checked;
+          const whole = wholeCb.checked;
+          const needle = cs ? q : q.toLowerCase();
+          for (const row of tw._displayRows) {
+            for (const col of tw._columns) {
+              const raw = String(row[col] ?? '');
+              const hay = cs ? raw : raw.toLowerCase();
+              if (whole ? hay === needle : hay.includes(needle)) matches.push(`${row._rownum}:${col}`);
+            }
+          }
+        }
+        tw._findMatches = new Set(matches);
+        tw._findCurrentKey = null;
+        applyCellHighlights(tw, false);
+        updateCount();
+      }
+
+      function gotoMatch(idx) {
+        const tw = target();
+        if (!tw || matches.length === 0) { updateCount(); return; }
+        curIdx = ((idx % matches.length) + matches.length) % matches.length;
+        const key = matches[curIdx];
+        tw._findCurrentKey = key;
+        const sep = key.indexOf(':');
+        const rownum = parseInt(key.slice(0, sep), 10);
+        const di = tw._displayRows.findIndex(r => r._rownum === rownum);
+        const ci = tw._columns.indexOf(key.slice(sep + 1));
+        if (di >= 0 && ci >= 0) scrollCellIntoView(tw, di, ci);
+        applyCellHighlights(tw, false);
+        updateCount();
+      }
+
+      function cellReplaceValue(raw) {
+        const q = findInput.value;
+        const rep = replInput.value;
+        if (wholeCb.checked) return rep;
+        if (caseCb.checked) return raw.split(q).join(rep);
+        return raw.replace(new RegExp(escapeRegExp(q), 'gi'), rep);
+      }
+
+      // Apply replacements to the given match keys as a single undo entry
+      function applyReplaceChanges(tw, keys) {
+        const t = tables[tw.tableName];
+        if (!t) return 0;
+        const rowMap = new Map(t.rows.map(r => [r._rownum, r]));
+        const changes = [];
+        if (!t._dirtyCells) t._dirtyCells = [];
+        for (const key of keys) {
+          const sep = key.indexOf(':');
+          const row = rowMap.get(parseInt(key.slice(0, sep), 10));
+          const col = key.slice(sep + 1);
+          if (!row || !t.columns.includes(col)) continue;
+          const oldValue = String(row[col] ?? '');
+          const newValue = cellReplaceValue(oldValue);
+          if (newValue === oldValue) continue;
+          row[col] = newValue;
+          changes.push({ rownum: row._rownum, col, oldValue, newValue });
+          t._dirtyCells.push({ rownum: row._rownum, col, value: newValue });
+        }
+        if (changes.length === 0) return 0;
+        if (!t._undoStack) t._undoStack = [];
+        t._undoStack.push({ type: 'replace', changes });
+        t._redoStack = [];
+        markModified(tw.tableName);
+        debouncedSync(tw.tableName);
+        windows.filter(w => w.tableName === tw.tableName).forEach(w => {
+          w._renderStart = -1; w._renderEnd = -1;
+          renderVisibleRows(w);
+        });
+        return changes.length;
+      }
+
+      function replaceCurrent() {
+        const tw = target();
+        if (!tw || !findInput.value) return;
+        if (matches.length === 0) { computeMatches(); if (matches.length === 0) return; }
+        if (curIdx < 0) { gotoMatch(0); return; }  // first press selects the first match
+        const idx = curIdx;
+        applyReplaceChanges(tw, [matches[curIdx]]);
+        computeMatches();
+        if (matches.length > 0) gotoMatch(Math.min(idx, matches.length - 1));
+      }
+
+      function replaceAll() {
+        const tw = target();
+        if (!tw || !findInput.value) return;
+        computeMatches();
+        if (matches.length === 0) return;
+        const n = applyReplaceChanges(tw, matches);
+        computeMatches();
+        if (n > 0) showToast(`Replaced in ${n} cell${n === 1 ? '' : 's'} — ${shortcutLabel('Ctrl+Z')} to undo`, 'success');
+      }
+
+      let findDebounce = null;
+      const research = () => { computeMatches(); if (matches.length > 0) gotoMatch(0); };
+      findInput.addEventListener('input', () => {
+        clearTimeout(findDebounce);
+        findDebounce = setTimeout(research, 150);
+      });
+      caseCb.addEventListener('change', research);
+      wholeCb.addEventListener('change', research);
+
+      findInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          if (matches.length === 0) computeMatches();
+          gotoMatch(e.shiftKey ? curIdx - 1 : curIdx + 1);
+        }
+      });
+      replInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); replaceCurrent(); }
+      });
+      body.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeFindReplace(); }
+      });
+
+      body.querySelector('.find-prev').addEventListener('click', () => gotoMatch(curIdx - 1));
+      body.querySelector('.find-next').addEventListener('click', () => gotoMatch(curIdx + 1));
+      body.querySelector('.find-replace-one').addEventListener('click', replaceCurrent);
+      body.querySelector('.find-replace-all').addEventListener('click', replaceAll);
+
+      winObj._findTargetWinId = targetWinId;
+      findInput.focus();
+    }, {
+      width: 380, height: 240, dockable: false, dialog: true,
+      onClose: () => {
+        if (_activeFindWin && _activeFindWin._findTargetWinId === targetWinId) _activeFindWin = null;
+        clearFindHighlights(windows.find(w => w.id === targetWinId));
+      },
+    });
+
+    _activeFindWin = win;
+  }
+
   function closeColManager() {
     if (!_activeColManagerWin) return;
     clearColManagerDimming();
@@ -10087,6 +10625,9 @@ choose(value, 'A', 'Active', 'I', 'Inactive')
         updateTableWidth, selectAllCells, selectNoneCells, selectColumns, copySelectedCells,
         showColManager, closeColManager, finalizeColManager,
         get _activeColManagerWin() { return _activeColManagerWin; },
+        showFindReplace, closeFindReplace, updateSelectionStats,
+        get _activeFindWin() { return _activeFindWin; },
+        closeWindow,
         showAISettings, showAbout, showManual, showPrompt,
       }
     } : {}),

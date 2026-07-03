@@ -768,4 +768,40 @@ test.describe('Copy, Paste, Undo, Redo', () => {
     expect(lines[1]).toBe('ALICE JOHNSON');
     expect(lines[2]).toBe('BOB SMITH');
   });
+
+  test('copy shows a toast with cell counts', async ({ page }) => {
+    const firstCell = page.locator('.subwindow table tbody td.data-cell').first();
+    await firstCell.click();
+    await page.keyboard.press('Control+c');
+    await expect(page.locator('.toast', { hasText: 'Copied 1 cell' })).toBeVisible();
+    await page.evaluate(() => document.querySelectorAll('.toast').forEach(t => t.remove()));
+    await page.keyboard.press('Shift+ArrowRight');
+    await page.keyboard.press('Shift+ArrowDown');
+    await page.keyboard.press('Control+c');
+    await expect(page.locator('.toast', { hasText: 'Copied 4 cells (2 rows × 2 columns)' })).toBeVisible();
+  });
+
+  test('paste, cut, undo, and redo show descriptive toasts; Ctrl+Y redoes', async ({ page }) => {
+    await page.evaluate(() => navigator.clipboard.writeText('X1\tX2'));
+    const firstCell = page.locator('.subwindow table tbody td.data-cell').first();
+    await firstCell.click();
+    await page.keyboard.press('Control+v');
+    await expect(page.locator('.toast', { hasText: /Pasted 2 cells \(1 row × 2 columns\) — .+ to undo/ })).toBeVisible();
+    await page.evaluate(() => document.querySelectorAll('.toast').forEach(t => t.remove()));
+
+    await page.keyboard.press('Control+z');
+    await expect(page.locator('.toast', { hasText: /Undid Paste \(2 cells\) — .+ to redo/ })).toBeVisible();
+    await page.evaluate(() => document.querySelectorAll('.toast').forEach(t => t.remove()));
+
+    await page.keyboard.press('Control+y');
+    await expect(page.locator('.toast', { hasText: /Redid Paste \(2 cells\) — .+ to undo/ })).toBeVisible();
+    let data = await getTableData(page, 'sample1');
+    expect(data.rows[0].name).toBe('X1');
+    await page.evaluate(() => document.querySelectorAll('.toast').forEach(t => t.remove()));
+
+    await page.keyboard.press('Control+x');
+    await expect(page.locator('.toast', { hasText: /Cut 2 cells — .+ to undo/ })).toBeVisible();
+    data = await getTableData(page, 'sample1');
+    expect(data.rows[0].name).toBe('');
+  });
 });
