@@ -194,8 +194,7 @@ Windows can be combined into tabbed groups and split layouts for an IDE-style wo
 - **Tab windows** — Hold Shift and drag a window onto another window's title bar to merge them into a tab group. Click tabs to switch between windows
 - **Split dock** — Hold Shift and drag a window onto the body area of another window. Drop zones are divided diagonally — drop on the top, right, bottom, or left region to split that direction
 - **Reorder tabs** — Drag a tab left or right within the tab bar to rearrange it
-- **Move tabs** — Hold Shift and drag a tab to move it to another window or dock pane. A ghost preview shows where the window will land. Dropping on empty space moves the window to the drop location
-- **Undock** — Hold Shift and drag a tab outside its dock container to detach it as a standalone window. The undocked window retains the pane's size
+- **Move/undock tabs** — Drag a tab away from the tab bar (vertically) to detach it. A ghost preview appears — drop on another window's tab bar to insert at a specific tab position (a vertical indicator shows where), on its body to split, or on empty space to place as a standalone window. Shift+drag skips reorder and enters ghost mode immediately
 - **Splitter** — Drag the divider between split panes to resize. Double-click to reset to 50/50
 - **Maximize** — Double-click a tab or the empty tab bar area to maximize/restore the dock container. Dragging the tab bar of a maximized dock restores it to its previous size and moves it
 - **Rename** — Ctrl/Cmd+click a tab to rename the table

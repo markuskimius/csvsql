@@ -2193,6 +2193,7 @@ const app = (() => {
   }
 
   function setupTabDragFromMousedown(startEvent, tabEl, winId, leaf, dock) {
+    const TAB_UNDOCK_THRESHOLD = 30;
     const startX = startEvent.clientX;
     const startY = startEvent.clientY;
     let origDockX = parseInt(dock.el.style.left);
@@ -2203,28 +2204,32 @@ const app = (() => {
     let ghostEl = null;
     let ghostOffsetX = 0, ghostOffsetY = 0, leafW = 0, leafH = 0;
 
+    function startUndock() {
+      undocking = true;
+      const leafRect = leaf.el.getBoundingClientRect();
+      ghostOffsetX = startX - leafRect.left;
+      ghostOffsetY = startY - leafRect.top;
+      leafW = leafRect.width;
+      leafH = leafRect.height;
+      ghostEl = document.createElement('div');
+      ghostEl.className = 'subwindow';
+      ghostEl.style.position = 'fixed';
+      ghostEl.style.width = leafW + 'px';
+      ghostEl.style.height = leafH + 'px';
+      ghostEl.style.opacity = '0.7';
+      ghostEl.style.pointerEvents = 'none';
+      ghostEl.style.zIndex = '999999';
+      ghostEl.innerHTML = `<div class="win-titlebar"><span class="win-title">${escHtml(getWindowTitle(windows.find(w => w.id === winId)))}</span></div>`;
+      document.body.appendChild(ghostEl);
+    }
+
     const onMove = (e) => {
       const dx = e.clientX - startX;
       const dy = e.clientY - startY;
 
       if (!movingDock && !undocking && !reordering && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) {
         if (e.shiftKey) {
-          undocking = true;
-          const leafRect = leaf.el.getBoundingClientRect();
-          ghostOffsetX = startX - leafRect.left;
-          ghostOffsetY = startY - leafRect.top;
-          leafW = leafRect.width;
-          leafH = leafRect.height;
-          ghostEl = document.createElement('div');
-          ghostEl.className = 'subwindow';
-          ghostEl.style.position = 'fixed';
-          ghostEl.style.width = leafW + 'px';
-          ghostEl.style.height = leafH + 'px';
-          ghostEl.style.opacity = '0.7';
-          ghostEl.style.pointerEvents = 'none';
-          ghostEl.style.zIndex = '999999';
-          ghostEl.innerHTML = `<div class="win-titlebar"><span class="win-title">${escHtml(getWindowTitle(windows.find(w => w.id === winId)))}</span></div>`;
-          document.body.appendChild(ghostEl);
+          startUndock();
         } else if (leaf.tabs.length > 1) {
           reordering = true;
           const freshTab = leaf.tabBarEl.querySelector(`.dock-tab[data-win-id="${winId}"]`);
@@ -2232,6 +2237,17 @@ const app = (() => {
         } else {
           movingDock = true;
         }
+      }
+
+      if (!undocking && (reordering || movingDock) && Math.abs(dy) > TAB_UNDOCK_THRESHOLD) {
+        if (reordering) {
+          const tabs = leaf.tabBarEl.querySelectorAll('.dock-tab');
+          tabs.forEach(t => t.classList.remove('dock-tab-dragging', 'dock-tab-drop-left', 'dock-tab-drop-right'));
+          reordering = false;
+        }
+        movingDock = false;
+        hideSnapGuides();
+        startUndock();
       }
 
       if (movingDock) {
@@ -2632,14 +2648,18 @@ const app = (() => {
     updateWindowsList();
   }
 
-  function dockWindowAsTab(winId, leaf, dock) {
+  function dockWindowAsTab(winId, leaf, dock, atIndex) {
     const win = windows.find(w => w.id === winId);
     if (!win) return;
 
     win.el.classList.add('docked');
     win.dockId = dock.id;
     win.dockLeaf = leaf;
-    leaf.tabs.push(winId);
+    if (atIndex !== undefined && atIndex >= 0 && atIndex < leaf.tabs.length) {
+      leaf.tabs.splice(atIndex, 0, winId);
+    } else {
+      leaf.tabs.push(winId);
+    }
 
     activateTab(leaf, winId, dock);
     focusWindow(winId);
@@ -2823,7 +2843,21 @@ const app = (() => {
         const leafRect = leaf.el.getBoundingClientRect();
         const tbH = leaf.tabBarEl && leaf.tabBarEl.offsetParent !== null ? leaf.tabBarEl.offsetHeight : 0;
         const zone = getDropZone(clientX, clientY, leafRect, tbH);
-        return { type: 'leaf', leaf, dock, zone, rect: leafRect };
+        const result = { type: 'leaf', leaf, dock, zone, rect: leafRect };
+        if (zone === 'center' && leaf.tabBarEl) {
+          const dtabs = leaf.tabBarEl.querySelectorAll('.dock-tab');
+          let tabIndex = leaf.tabs.length;
+          for (const dt of dtabs) {
+            const tr = dt.getBoundingClientRect();
+            if (clientX < tr.left + tr.width / 2) {
+              const ti = leaf.tabs.indexOf(parseInt(dt.dataset.winId));
+              tabIndex = ti >= 0 ? ti : leaf.tabs.length;
+              break;
+            }
+          }
+          result.tabIndex = tabIndex;
+        }
+        return result;
       }
     }
 
@@ -2902,6 +2936,23 @@ const app = (() => {
     zoneEl.style.position = 'absolute';
     if (target.zone === 'center') {
       zoneEl.style.inset = '0';
+      if (target.tabIndex !== undefined && target.type === 'leaf' && target.leaf.tabBarEl) {
+        const dtabs = target.leaf.tabBarEl.querySelectorAll('.dock-tab');
+        let lineX;
+        if (dtabs.length === 0) {
+          lineX = target.leaf.tabBarEl.getBoundingClientRect().left + 4;
+        } else if (target.tabIndex >= dtabs.length) {
+          lineX = dtabs[dtabs.length - 1].getBoundingClientRect().right;
+        } else {
+          lineX = dtabs[target.tabIndex].getBoundingClientRect().left;
+        }
+        const indicator = document.createElement('div');
+        indicator.className = 'dock-drop-tab-indicator';
+        indicator.style.left = (lineX - rect.left) + 'px';
+        indicator.style.top = '0';
+        indicator.style.height = tbH + 'px';
+        overlay.appendChild(indicator);
+      }
     } else if (target.zone === 'top') {
       zoneEl.style.left = '0'; zoneEl.style.right = '0';
       zoneEl.style.top = tbH + 'px'; zoneEl.style.height = (bodyH / 2) + 'px';
@@ -2942,7 +2993,7 @@ const app = (() => {
         if (sameDock) {
           if (target.zone === 'center') {
             sourceWin.el.classList.add('docked');
-            dockWindowAsTab(sourceWinId, target.leaf, target.dock);
+            dockWindowAsTab(sourceWinId, target.leaf, target.dock, target.tabIndex);
           } else {
             sourceWin.el.classList.add('docked');
             dockWindowAsSplit(sourceWinId, target.leaf, target.dock, target.zone);
@@ -2962,7 +3013,7 @@ const app = (() => {
     } else if (target.type === 'leaf') {
       if (target.zone === 'center') {
         sourceWin.el.classList.add('docked');
-        dockWindowAsTab(sourceWinId, target.leaf, target.dock);
+        dockWindowAsTab(sourceWinId, target.leaf, target.dock, target.tabIndex);
       } else {
         sourceWin.el.classList.add('docked');
         dockWindowAsSplit(sourceWinId, target.leaf, target.dock, target.zone);
@@ -6634,7 +6685,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.43 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.44 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `, true);
@@ -6768,8 +6819,7 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <li><strong>Tab windows:</strong> Hold <code>Shift</code> and drag a window onto another window's title bar to merge them into a tab group. Click tabs to switch between windows.</li>
 <li><strong>Split dock:</strong> Hold <code>Shift</code> and drag a window onto the body area of another window. Drop zones are divided diagonally &mdash; drop on the top, right, bottom, or left region to split that direction.</li>
 <li><strong>Reorder tabs:</strong> Drag a tab left or right within the tab bar to rearrange it.</li>
-<li><strong>Move tabs:</strong> Hold <code>Shift</code> and drag a tab to move it to another window or dock pane. A ghost preview shows where the window will land. Dropping on empty space moves the window to the drop location.</li>
-<li><strong>Undock:</strong> Hold <code>Shift</code> and drag a tab outside its dock container to detach it as a standalone window. The undocked window retains the pane's size.</li>
+<li><strong>Move/undock tabs:</strong> Drag a tab away from the tab bar (vertically) to detach it. A ghost preview appears &mdash; drop on another window's tab bar to insert at a specific tab position (a vertical indicator shows where), on its body to split, or on empty space to place as a standalone window. <code>Shift</code>+drag skips reorder and enters ghost mode immediately.</li>
 <li><strong>Splitter:</strong> Drag the divider between split panes to resize. Double-click to reset to 50/50.</li>
 <li><strong>Maximize:</strong> Double-click a tab or the empty tab bar area to maximize/restore the dock container. Dragging the tab bar of a maximized dock restores it to its previous size and moves it.</li>
 <li><strong>Rename:</strong> <code>Ctrl</code>/<code>&#8984;</code>+click a tab to rename the table.</li>

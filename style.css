@@ -1281,6 +1281,13 @@ body {
 .dock-drop-zone.active {
   background: rgba(124, 111, 247, 0.2);
 }
+.dock-drop-tab-indicator {
+  position: absolute;
+  width: 2px;
+  background: var(--accent-hover);
+  pointer-events: none;
+  z-index: 1;
+}
 
 /* ---- Docked Window (hidden) ---- */
 .subwindow.docked { display: none !important; }
