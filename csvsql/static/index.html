@@ -77,7 +77,18 @@
   </div>
 
   <div id="workspace">
-    <div id="window-area"></div>
+    <div id="window-area">
+      <!-- section (not div) so it doesn't shift .subwindow div:nth-of-type indices -->
+      <section id="empty-state">
+        <div class="empty-state-title">CSVSQL</div>
+        <p class="empty-state-text">Open a CSV, TSV, or Excel file to get started &mdash; or drop files anywhere in this window.</p>
+        <div class="empty-state-actions">
+          <button class="primary" onclick="app.openFile(event.shiftKey)">Open File&hellip;</button>
+          <button onclick="app.loadExampleData()">Try Example Data</button>
+        </div>
+        <p class="empty-state-hint">Every file becomes a SQL table &mdash; query and join them in the console below.</p>
+      </section>
+    </div>
   </div>
 
   <div id="console-panel">

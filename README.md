@@ -67,7 +67,7 @@ python3 -m http.server 8000
 
 ### Opening Files
 
-Use **File > Open** (Ctrl+O / Cmd+O), **File > Open URL**, or drag and drop files onto the window.
+Use **File > Open** (Ctrl+O / Cmd+O), **File > Open URL**, or drag and drop files onto the window. When no windows are open, the workspace shows a welcome screen with an **Open File…** button and a **Try Example Data** button that loads three small sample tables (customers, orders, products) you can query and join right away.
 
 | Format | Extensions | Notes |
 |--------|-----------|-------|

@@ -378,6 +378,38 @@ const app = (() => {
     });
   }
 
+  // Bundled sample tables (mirrors example/*.csv) — embedded so "Try Example Data"
+  // works offline and when index.html is opened via file://
+  const EXAMPLE_DATA = [
+    ['customers.csv',
+     'id,name,email,city,signup_date,is_active\n' +
+     '1,Alice Johnson,alice@example.com,Portland,2024-01-15,true\n' +
+     '2,Bob Smith,bob@example.com,Seattle,2024-03-22,true\n' +
+     '3,Carol Williams,carol@example.com,Portland,2024-06-01,false\n' +
+     '4,David Brown,david@example.com,Chicago,2024-07-10,true\n' +
+     '5,Eve Davis,eve@example.com,Seattle,2024-09-05,false\n'],
+    ['orders.csv',
+     'order_id,customer_id,product_id,total,order_date\n' +
+     '101,1,501,49.99,2025-01-10\n' +
+     '102,1,502,129.50,2025-02-14\n' +
+     '103,2,501,49.99,2025-02-20\n' +
+     '104,3,503,89.00,2025-03-05\n' +
+     '105,4,502,129.50,2025-03-18\n' +
+     '106,2,503,89.00,2025-04-01\n' +
+     '107,5,501,49.99,2025-04-12\n'],
+    ['products.csv',
+     'id,name,price,category,is_active\n' +
+     '501,Widget,49.99,Accessories,true\n' +
+     '502,Gadget Pro,129.50,Electronics,true\n' +
+     '503,Starter Kit,89.00,Bundles,false\n'],
+  ];
+
+  function loadExampleData() {
+    for (const [name, text] of EXAMPLE_DATA) {
+      loadDelimitedFile(new File([text], name, { type: 'text/csv' }), null, null, true);
+    }
+  }
+
   function loadExcelFile(file, fileHandle, compression, hasHeader) {
     setStatus(`Loading ${file.name}...`, 'working');
     const t0 = performance.now();
@@ -1613,6 +1645,8 @@ const app = (() => {
   }
 
   function updateWindowsList() {
+    const emptyState = document.getElementById('empty-state');
+    if (emptyState) emptyState.classList.toggle('hidden', windows.length > 0);
     const list = document.getElementById('windows-list');
     list.innerHTML = '';
     if (windows.length === 0 && dockContainers.length === 0) {
@@ -7061,7 +7095,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.47 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.48 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `, true);
@@ -7075,6 +7109,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 <h4>Opening Files</h4>
 <p>Use <strong>File &rarr; Open</strong> (<code>Ctrl+O</code> / <code>&#8984;O</code>), <strong>File &rarr; Open URL</strong>, or drag and drop files onto the window. Hold <strong>Shift</strong> while opening or dropping to load files without headers &mdash; columns will be named A, B, C, &hellip; Z, AA, AB, etc.</p>
+<p>When no windows are open, the workspace shows a welcome screen with an <strong>Open File&hellip;</strong> button and a <strong>Try Example Data</strong> button that loads three small sample tables (customers, orders, products) to experiment with.</p>
 
 <table>
 <tr><th>Format</th><th>Extensions</th><th>Notes</th></tr>
@@ -9996,6 +10031,7 @@ choose(value, 'A', 'Active', 'I', 'Inactive')
     init,
     openFile,
     openURL,
+    loadExampleData,
     saveActiveTable,
     saveActiveTableAs,
     newTable,

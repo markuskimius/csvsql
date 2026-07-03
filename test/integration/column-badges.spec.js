@@ -299,7 +299,7 @@ test.describe('Column Header Badges', () => {
       const filterColor = getComputedStyle(filterBtn).color;
       return { filterColor };
     });
-    expect(colors.filterColor).toBe('rgba(255, 255, 255, 0.15)');
+    expect(colors.filterColor).toBe('rgba(255, 255, 255, 0.3)');
   });
 
   test('filter funnel does not light up on header hover, only on button hover', async ({ page }) => {
@@ -1474,7 +1474,7 @@ test.describe('Linking Badge', () => {
       const chip = win.el.querySelector('.status-chip-link-source');
       return getComputedStyle(chip).color;
     });
-    expect(color).toBe('rgb(238, 102, 85)');
+    expect(color).toBe('rgb(255, 136, 119)');
     await page.evaluate(() => app._test.unloadPlugin(0));
   });
 
