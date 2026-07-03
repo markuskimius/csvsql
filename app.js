@@ -1560,6 +1560,9 @@ const app = (() => {
       updateWindowTitle(uniqueName);
       updateWindowsList();
       setStatus(`Renamed "${oldName}" to "${uniqueName}"`, 'success');
+      delete _columnTransformCache[oldName];
+      rebuildTransformCacheForTable(uniqueName);
+      windows.filter(w => w.tableName === uniqueName).forEach(w => rebuildTable(w));
     }
 
     let done = false;
@@ -6685,7 +6688,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.44 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.45 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `, true);
@@ -6889,7 +6892,7 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 
 <p><strong>Loading &amp; unloading:</strong> Use <strong>Plugins &rarr; Load Plugin</strong> to open a <code>.json</code> plugin file, or drag and drop a <code>.json</code> file onto the app. A toast notification confirms success or shows errors. Loaded plugins appear in the Plugins menu with an &times; button to unload them &mdash; the menu stays open so you can unload multiple plugins without reopening it. Click a plugin&rsquo;s name to open an About dialog showing its metadata, column rules, and an Unload button. Plugins persist across page reloads.</p>
 
-<p><strong>How matching works:</strong> Each plugin has table entries with a <code>table</code> regex matched against table names, and column rules with a <code>match</code> regex matched against column names. Multiple plugins can be loaded simultaneously and stack on the same table &mdash; each column is governed by the <em>last-loaded</em> plugin with a matching rule. Unloading a plugin reveals any earlier plugin&rsquo;s rule that was shadowed.</p>
+<p><strong>How matching works:</strong> Each plugin has table entries with a <code>table</code> regex matched against table names, and column rules with a <code>match</code> regex matched against column names. Multiple plugins can be loaded simultaneously and stack on the same table &mdash; each column is governed by the <em>last-loaded</em> plugin with a matching rule. Unloading a plugin reveals any earlier plugin&rsquo;s rule that was shadowed. Renaming a table re-evaluates plugin rules against the new name, so transforms activate (or deactivate) automatically.</p>
 
 <p><strong>Plugin config format:</strong> Two formats are supported. The legacy format has <code>table</code> and <code>columns</code> at the top level. The multi-table format uses a <code>tables</code> array:</p>
 <pre>{
@@ -9658,7 +9661,7 @@ choose(value, 'A', 'Active', 'I', 'Inactive')
         rebuildTable, rerenderAllWindows,
         undoTable, redoTable,
         insertRow, insertColumn, deleteRow, deleteColumn,
-        renameColumn, startColumnRename,
+        renameColumn, startColumnRename, startInlineRename,
         get activeWinId() { return activeWinId; },
         focusWindow, getActiveDataWindow,
         get dockContainers() { return dockContainers; },

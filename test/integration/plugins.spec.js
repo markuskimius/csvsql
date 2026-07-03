@@ -1,5 +1,5 @@
 const { test, expect } = require('@playwright/test');
-const { openApp, uploadFile, waitForWindow, getTableData } = require('../helpers');
+const { openApp, uploadFile, waitForWindow, getTableData, executeSQL } = require('../helpers');
 const path = require('path');
 
 test.describe('Plugin system', () => {
@@ -4432,5 +4432,294 @@ test.describe('Chip toggle link re-entrancy guard', () => {
     expect(after.sourceId).toBe(after.ordersId);
     expect(after.custRows).toBe(1);
     expect(after.hasLinkingChip).toBe(true);
+  });
+});
+
+test.describe('Table rename and plugin transforms', () => {
+  test.beforeEach(async ({ page }) => {
+    await openApp(page);
+    await uploadFile(page, 'sample1.csv');
+    await waitForWindow(page, 'sample1');
+  });
+
+  async function loadPluginAndRender(page, config) {
+    await page.evaluate((cfg) => {
+      const errors = app._test.validatePlugin(cfg);
+      if (errors.length) throw new Error(errors.join(', '));
+      const compiled = app._test.compilePlugin(cfg);
+      cfg._compiled = compiled;
+      app._test.plugins.push(cfg);
+      app._test.rebuildTransformCache();
+      app._test.rerenderAllWindows();
+    }, config);
+  }
+
+  async function renameTable(page, oldName, newName) {
+    await page.evaluate((name) => {
+      const win = app._test.windows.find(w => w.tableName === name);
+      if (!win) throw new Error(`Window not found for table "${name}"`);
+      app._test.startInlineRename(win);
+    }, oldName);
+    const input = page.locator('.win-titlebar .inline-rename');
+    await expect(input).toBeVisible();
+    await input.fill(newName);
+    await input.press('Enter');
+    await page.waitForTimeout(100);
+  }
+
+  test('renaming table to match plugin pattern activates transforms', async ({ page }) => {
+    await loadPluginAndRender(page, {
+      name: 'target-plugin',
+      tables: [{ table: '^renamed$', columns: [{ match: '^name$', display: '"[" + value + "]"' }] }],
+    });
+
+    const before = await page.evaluate(() => {
+      return app._test.getDisplayValue('sample1', 'name', app._test.tables['sample1'].rows[0]);
+    });
+    expect(before).toBe('Alice Johnson');
+
+    await renameTable(page, 'sample1', 'renamed');
+
+    const after = await page.evaluate(() => {
+      return app._test.getDisplayValue('renamed', 'name', app._test.tables['renamed'].rows[0]);
+    });
+    expect(after).toBe('[Alice Johnson]');
+  });
+
+  test('renaming table away from plugin pattern deactivates transforms', async ({ page }) => {
+    await loadPluginAndRender(page, {
+      name: 'sample-plugin',
+      tables: [{ table: '^sample1$', columns: [{ match: '^name$', display: '"[" + value + "]"' }] }],
+    });
+
+    const before = await page.evaluate(() => {
+      return app._test.getDisplayValue('sample1', 'name', app._test.tables['sample1'].rows[0]);
+    });
+    expect(before).toBe('[Alice Johnson]');
+
+    await renameTable(page, 'sample1', 'other');
+
+    const after = await page.evaluate(() => {
+      return app._test.getDisplayValue('other', 'name', app._test.tables['other'].rows[0]);
+    });
+    expect(after).toBe('Alice Johnson');
+  });
+
+  test('transform cache entry for old name is removed after rename', async ({ page }) => {
+    await loadPluginAndRender(page, {
+      name: 'sample-plugin',
+      tables: [{ table: '^sample1$', columns: [{ match: '^name$', display: '"X"' }] }],
+    });
+
+    const hasBefore = await page.evaluate(() => !!app._test._columnTransformCache['sample1']);
+    expect(hasBefore).toBe(true);
+
+    await renameTable(page, 'sample1', 'other');
+
+    const result = await page.evaluate(() => ({
+      hasOld: !!app._test._columnTransformCache['sample1'],
+      hasNew: !!app._test._columnTransformCache['other'],
+    }));
+    expect(result.hasOld).toBe(false);
+    expect(result.hasNew).toBe(false);
+  });
+
+  test('transform cache entry created for new name when plugin matches', async ({ page }) => {
+    await loadPluginAndRender(page, {
+      name: 'target-plugin',
+      tables: [{ table: '^renamed$', columns: [{ match: '^name$', display: '"X"' }] }],
+    });
+
+    const hasBefore = await page.evaluate(() => !!app._test._columnTransformCache['sample1']);
+    expect(hasBefore).toBe(false);
+
+    await renameTable(page, 'sample1', 'renamed');
+
+    const hasAfter = await page.evaluate(() => !!app._test._columnTransformCache['renamed']);
+    expect(hasAfter).toBe(true);
+  });
+
+  test('cells render with formatted values after rename to matching name', async ({ page }) => {
+    await loadPluginAndRender(page, {
+      name: 'target-plugin',
+      tables: [{ table: '^renamed$', columns: [{ match: '^name$', display: '"[" + value + "]"' }] }],
+    });
+
+    await renameTable(page, 'sample1', 'renamed');
+
+    const cellText = await page.evaluate(() => {
+      const win = app._test.windows.find(w => w.tableName === 'renamed');
+      const td = win._table.querySelector('tbody tr:not(.virtual-pad) td.data-cell');
+      return td.textContent;
+    });
+    expect(cellText).toBe('[Alice Johnson]');
+  });
+
+  test('cells render with raw values after rename away from matching name', async ({ page }) => {
+    await loadPluginAndRender(page, {
+      name: 'sample-plugin',
+      tables: [{ table: '^sample1$', columns: [{ match: '^name$', display: '"[" + value + "]"' }] }],
+    });
+
+    const cellBefore = await page.evaluate(() => {
+      const win = app._test.windows.find(w => w.tableName === 'sample1');
+      const td = win._table.querySelector('tbody tr:not(.virtual-pad) td.data-cell');
+      return td.textContent;
+    });
+    expect(cellBefore).toBe('[Alice Johnson]');
+
+    await renameTable(page, 'sample1', 'other');
+
+    const cellAfter = await page.evaluate(() => {
+      const win = app._test.windows.find(w => w.tableName === 'other');
+      const td = win._table.querySelector('tbody tr:not(.virtual-pad) td.data-cell');
+      return td.textContent;
+    });
+    expect(cellAfter).toBe('Alice Johnson');
+  });
+
+  test('Formatted chip appears after rename to matching name', async ({ page }) => {
+    await loadPluginAndRender(page, {
+      name: 'target-plugin',
+      tables: [{ table: '^renamed$', columns: [{ match: '^name$', display: '"X"' }] }],
+    });
+
+    const chipBefore = await page.evaluate(() => {
+      const win = app._test.windows.find(w => w.tableName === 'sample1');
+      const chip = win.statusbarEl.querySelector('.status-chip-format');
+      return chip !== null;
+    });
+    expect(chipBefore).toBe(false);
+
+    await renameTable(page, 'sample1', 'renamed');
+
+    const chipAfter = await page.evaluate(() => {
+      const win = app._test.windows.find(w => w.tableName === 'renamed');
+      const chip = win.statusbarEl.querySelector('.status-chip-format:not(.chip-inactive)');
+      return chip !== null;
+    });
+    expect(chipAfter).toBe(true);
+  });
+
+  test('Formatted chip becomes inactive after rename away from matching name', async ({ page }) => {
+    await loadPluginAndRender(page, {
+      name: 'sample-plugin',
+      tables: [{ table: '^sample1$', columns: [{ match: '^name$', display: '"X"' }] }],
+    });
+
+    const chipBefore = await page.evaluate(() => {
+      const win = app._test.windows.find(w => w.tableName === 'sample1');
+      const chip = win.statusbarEl.querySelector('.status-chip-format:not(.chip-inactive)');
+      return chip !== null;
+    });
+    expect(chipBefore).toBe(true);
+
+    await renameTable(page, 'sample1', 'other');
+
+    const chipAfter = await page.evaluate(() => {
+      const win = app._test.windows.find(w => w.tableName === 'other');
+      const chip = win.statusbarEl.querySelector('.status-chip-format:not(.chip-inactive)');
+      return chip !== null;
+    });
+    expect(chipAfter).toBe(false);
+  });
+
+  test('col-transformed class appears on headers after rename to matching name', async ({ page }) => {
+    await loadPluginAndRender(page, {
+      name: 'target-plugin',
+      tables: [{ table: '^renamed$', columns: [{ match: '^name$', display: '"X"' }] }],
+    });
+
+    const before = await page.evaluate(() => {
+      const win = app._test.windows.find(w => w.tableName === 'sample1');
+      const th = win._table.querySelector('thead th[data-col-idx="0"]');
+      return th.classList.contains('col-transformed');
+    });
+    expect(before).toBe(false);
+
+    await renameTable(page, 'sample1', 'renamed');
+
+    const after = await page.evaluate(() => {
+      const win = app._test.windows.find(w => w.tableName === 'renamed');
+      const th = win._table.querySelector('thead th[data-col-idx="0"]');
+      return th.classList.contains('col-transformed');
+    });
+    expect(after).toBe(true);
+  });
+
+  test('format dot badges appear after rename to matching name', async ({ page }) => {
+    await loadPluginAndRender(page, {
+      name: 'target-plugin',
+      tables: [{ table: '^renamed$', columns: [{ match: '^name$', display: '"X"' }] }],
+    });
+
+    await renameTable(page, 'sample1', 'renamed');
+
+    const after = await page.evaluate(() => {
+      const win = app._test.windows.find(w => w.tableName === 'renamed');
+      const badge = win._table.querySelector('thead th[data-col-idx="0"] .col-badge-format:not(.badge-faint)');
+      return badge !== null;
+    });
+    expect(after).toBe(true);
+  });
+
+  test('rename with regex plugin pattern triggers transform correctly', async ({ page }) => {
+    await loadPluginAndRender(page, {
+      name: 'regex-plugin',
+      tables: [{ table: '.*order.*', columns: [{ match: '^name$', display: 'upper(value)' }] }],
+    });
+
+    await renameTable(page, 'sample1', 'my_orders');
+
+    const result = await page.evaluate(() => ({
+      hasCache: !!app._test._columnTransformCache['my_orders'],
+      display: app._test.getDisplayValue('my_orders', 'name', app._test.tables['my_orders'].rows[0]),
+    }));
+    expect(result.hasCache).toBe(true);
+    expect(result.display).toBe('ALICE JOHNSON');
+  });
+
+  test('query result table gets transforms after rename to matching name', async ({ page }) => {
+    await loadPluginAndRender(page, {
+      name: 'target-plugin',
+      tables: [{ table: '^orders$', columns: [{ match: '^name$', display: '"[" + value + "]"' }] }],
+    });
+
+    await renameTable(page, 'sample1', 'orders');
+
+    const result = await page.evaluate(() => {
+      const win = app._test.windows.find(w => w.tableName === 'orders');
+      const td = win._table.querySelector('tbody tr:not(.virtual-pad) td.data-cell');
+      return {
+        cellText: td ? td.textContent : null,
+        hasTransform: app._test.tableHasTransforms('orders'),
+      };
+    });
+    expect(result.cellText).toBe('[Alice Johnson]');
+    expect(result.hasTransform).toBe(true);
+  });
+
+  test('renaming to same name is a no-op, transforms unchanged', async ({ page }) => {
+    await loadPluginAndRender(page, {
+      name: 'sample-plugin',
+      tables: [{ table: '^sample1$', columns: [{ match: '^name$', display: '"[" + value + "]"' }] }],
+    });
+
+    await page.evaluate(() => {
+      const win = app._test.windows.find(w => w.tableName === 'sample1');
+      app._test.startInlineRename(win);
+    });
+    const input = page.locator('.win-titlebar .inline-rename');
+    await expect(input).toBeVisible();
+    await input.fill('sample1');
+    await input.press('Enter');
+    await page.waitForTimeout(100);
+
+    const result = await page.evaluate(() => ({
+      hasCache: !!app._test._columnTransformCache['sample1'],
+      display: app._test.getDisplayValue('sample1', 'name', app._test.tables['sample1'].rows[0]),
+    }));
+    expect(result.hasCache).toBe(true);
+    expect(result.display).toBe('[Alice Johnson]');
   });
 });

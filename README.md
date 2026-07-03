@@ -206,7 +206,7 @@ Windows can be combined into tabbed groups and split layouts for an IDE-style wo
 
 Plugins customize how cell values are displayed. A plugin is a JSON file that maps table and column name patterns (regex) to display expressions in the CSVSQL expression language — a safe, sandboxed language with no JavaScript execution.
 
-Multiple plugins can be loaded simultaneously and stack on the same table — each column is governed by the last-loaded plugin with a matching rule.
+Multiple plugins can be loaded simultaneously and stack on the same table — each column is governed by the last-loaded plugin with a matching rule. Renaming a table re-evaluates plugin rules against the new name, so transforms activate or deactivate automatically.
 
 **Loading:** Use **Plugins > Load Plugin** in the menu, or drag and drop a `.json` file onto the app. A toast notification confirms success or shows errors. Plugins persist across page reloads.
 
