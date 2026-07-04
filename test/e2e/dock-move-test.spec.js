@@ -49,6 +49,101 @@ test('vertical split: move bottom to right fills full height', async ({ page }) 
   expect(result.splitFillsRoot).toBe(true);
 });
 
+test('same-dock move: tab from two-tab leaf to other leaf keeps source pane visible', async ({ page }) => {
+  await openApp(page);
+  await uploadFile(page, 'sample1.csv');
+  await waitForWindow(page, 'sample1');
+  await executeSQL(page, "SELECT * INTO [t2] FROM [sample1]");
+  await waitForWindow(page, 't2');
+  await executeSQL(page, "SELECT * INTO [t3] FROM [sample1]");
+  await waitForWindow(page, 't3');
+
+  const result = await page.evaluate(() => {
+    const w = app._test.windows;
+    // dock: leaf(w0) | leaf(w1), then w2 as second tab in w0's leaf (active)
+    app._test.mergeWindowsAsSplit(w[0].id, w[1].id, 'right');
+    const dock = app._test.dockContainers[0];
+    const sourceLeaf = w[0].dockLeaf;
+    w[2].el.classList.add('docked');
+    app._test.dockWindowAsTab(w[2].id, sourceLeaf, dock);
+
+    // move w2 to the other leaf of the SAME dock as a tab
+    // (mirrors executeDock's same-dock 'center' branch)
+    const targetLeaf = w[1].dockLeaf;
+    app._test.removeTabFromLeaf(w[2].id, sourceLeaf, dock, true);
+    app._test.dockWindowAsTab(w[2].id, targetLeaf, dock);
+    app._test.cleanupAfterTabRemoval(sourceLeaf, dock);
+
+    const srcBodies = Array.from(sourceLeaf.contentEl.querySelectorAll('.win-body'));
+    const tgtBodies = Array.from(targetLeaf.contentEl.querySelectorAll('.win-body'));
+    return {
+      sourceTabs: sourceLeaf.tabs.slice(),
+      sourceActive: sourceLeaf.activeTab,
+      sourceTabBarTabs: sourceLeaf.tabBarEl.querySelectorAll('.dock-tab').length,
+      visibleInSource: srcBodies.filter(b => b.style.display !== 'none').length,
+      targetTabs: targetLeaf.tabs.slice(),
+      targetActive: targetLeaf.activeTab,
+      visibleInTarget: tgtBodies.filter(b => b.style.display !== 'none').length,
+      w0: w[0].id, w2: w[2].id,
+    };
+  });
+
+  expect(result.sourceTabs).toEqual([result.w0]);
+  expect(result.sourceActive).toBe(result.w0);
+  expect(result.sourceTabBarTabs).toBe(1);
+  // the remaining tab's body must be visible — not a blank pane
+  expect(result.visibleInSource).toBe(1);
+  // the moved tab is active and visible in the target leaf
+  expect(result.targetTabs).toContain(result.w2);
+  expect(result.targetActive).toBe(result.w2);
+  expect(result.visibleInTarget).toBe(1);
+});
+
+test('same-dock move: tab from three-tab leaf keeps source pane visible', async ({ page }) => {
+  await openApp(page);
+  await uploadFile(page, 'sample1.csv');
+  await waitForWindow(page, 'sample1');
+  await executeSQL(page, "SELECT * INTO [t2] FROM [sample1]");
+  await waitForWindow(page, 't2');
+  await executeSQL(page, "SELECT * INTO [t3] FROM [sample1]");
+  await waitForWindow(page, 't3');
+  await executeSQL(page, "SELECT * INTO [t4] FROM [sample1]");
+  await waitForWindow(page, 't4');
+
+  const result = await page.evaluate(() => {
+    const w = app._test.windows;
+    // dock: leaf(w0) | leaf(w1), then w2 and w3 as extra tabs in w0's leaf
+    app._test.mergeWindowsAsSplit(w[0].id, w[1].id, 'right');
+    const dock = app._test.dockContainers[0];
+    const sourceLeaf = w[0].dockLeaf;
+    w[2].el.classList.add('docked');
+    app._test.dockWindowAsTab(w[2].id, sourceLeaf, dock);
+    w[3].el.classList.add('docked');
+    app._test.dockWindowAsTab(w[3].id, sourceLeaf, dock); // active: w3
+
+    // move w3 (active) to the other leaf
+    const targetLeaf = w[1].dockLeaf;
+    app._test.removeTabFromLeaf(w[3].id, sourceLeaf, dock, true);
+    app._test.dockWindowAsTab(w[3].id, targetLeaf, dock);
+    app._test.cleanupAfterTabRemoval(sourceLeaf, dock);
+
+    const srcBodies = Array.from(sourceLeaf.contentEl.querySelectorAll('.win-body'));
+    return {
+      sourceTabs: sourceLeaf.tabs.slice(),
+      sourceActive: sourceLeaf.activeTab,
+      visibleInSource: srcBodies.filter(b => b.style.display !== 'none').length,
+      hiddenInSource: srcBodies.filter(b => b.style.display === 'none').length,
+      w0: w[0].id, w2: w[2].id,
+    };
+  });
+
+  expect(result.sourceTabs).toEqual([result.w0, result.w2]);
+  // one of the two remaining tabs is active and visible, the other hidden
+  expect([result.w0, result.w2]).toContain(result.sourceActive);
+  expect(result.visibleInSource).toBe(1);
+  expect(result.hiddenInSource).toBe(1);
+});
+
 test('same-dock move: right, down, right', async ({ page }) => {
   await openApp(page);
   await uploadFile(page, 'sample1.csv');

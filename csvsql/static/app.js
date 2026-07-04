@@ -2749,7 +2749,9 @@ const app = (() => {
     if (leaf.tabs.length === 0) {
       collapseLeaf(leaf, dock);
     } else {
-      renderTabBar(leaf, dock);
+      // The deferred removal path skips activateTab, so the remaining
+      // active tab's body may still be hidden — re-activate to unhide it
+      activateTab(leaf, leaf.activeTab, dock);
       if (shouldDissolveDock(dock)) {
         dissolveDock(dock);
       }
@@ -7578,7 +7580,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.52 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.53 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `, true);
