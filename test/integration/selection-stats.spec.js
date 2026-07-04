@@ -14,8 +14,9 @@ test.describe('Selection statistics', () => {
   test('no stats for a single-cell selection', async ({ page }) => {
     await page.locator('.subwindow table tbody td.data-cell').first().click();
     await expect(statsEl(page)).toHaveCount(0);
-    // Row-count text is intact
+    // Row-count and column-count texts are intact
     await expect(page.locator('.subwindow .win-statusbar .status-left')).toContainText('10 of 10 rows');
+    await expect(page.locator('.subwindow .win-statusbar .status-right')).toContainText('3 columns');
   });
 
   test('numeric selection shows Count, Sum, Avg, Min, Max', async ({ page }) => {
@@ -29,7 +30,10 @@ test.describe('Selection statistics', () => {
     await expect(stats).toContainText('Avg:');
     await expect(stats).toContainText('Min:');
     await expect(stats).toContainText('Max:');
-    // Row-count text still present alongside the stats
+    // Stats live in the right segment, replacing the column count
+    await expect(page.locator('.subwindow .win-statusbar .status-right .status-stats')).toHaveCount(1);
+    await expect(page.locator('.subwindow .win-statusbar .status-right')).not.toContainText('columns');
+    // Row-count text still present on the left
     await expect(page.locator('.subwindow .win-statusbar .status-left')).toContainText('10 of 10 rows');
   });
 
@@ -49,12 +53,29 @@ test.describe('Selection statistics', () => {
     await expect(stats).toContainText('Sum:');      // member_since column is numeric
   });
 
-  test('clearing the selection removes the stats', async ({ page }) => {
+  test('clearing the selection removes the stats and restores the column count', async ({ page }) => {
     await page.locator('.subwindow table tbody td.data-cell').first().click();
     await page.keyboard.press('Shift+ArrowDown');
     await expect(statsEl(page)).toHaveCount(1);
     await page.keyboard.press('Escape'); // select mode Esc clears the selection
     await expect(statsEl(page)).toHaveCount(0);
+    await expect(page.locator('.subwindow .win-statusbar .status-right')).toContainText('3 columns');
+  });
+
+  test('status chips stay centered when stats appear', async ({ page }) => {
+    const chipCenter = async () => {
+      const bar = await page.locator('.subwindow .win-statusbar').boundingBox();
+      const chips = await page.locator('.subwindow .win-statusbar .status-center').boundingBox();
+      return (chips.x + chips.width / 2) - (bar.x + bar.width / 2);
+    };
+    const before = await chipCenter();
+    // Select-all produces a long stats string on the right
+    await page.locator('.subwindow table tbody td.data-cell').first().click();
+    await page.keyboard.press('Control+a');
+    await expect(statsEl(page)).toHaveCount(1);
+    const after = await chipCenter();
+    expect(Math.abs(before)).toBeLessThan(1.5);
+    expect(Math.abs(after)).toBeLessThan(1.5);
   });
 
   test('stats update after cut', async ({ page, context }) => {

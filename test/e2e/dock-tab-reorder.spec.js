@@ -443,38 +443,54 @@ test.describe('Dock Tab Reorder', () => {
   // =========================================================================
   test.describe('Single-tab leaf', () => {
 
-    test('dragging a single tab in a split moves the dock instead of reordering', async ({ page }) => {
+    test('dragging a single tab never moves the dock — it undocks the tab', async ({ page }) => {
       // Split one of the tabs out of the existing 3-tab dock into a side split
       // This creates a dock with a split: one leaf has 2 tabs, the other has 1 tab
-      await page.evaluate(() => {
+      const draggedId = await page.evaluate(() => {
         const dock = app._test.dockContainers[0];
         const leaf = dock.root;
         const winId = leaf.tabs[2];
         app._test.removeTabFromLeaf(winId, leaf, dock, true);
         app._test.dockWindowAsSplit(winId, dock.root, dock, 'right');
+        return winId;
       });
 
-      const origPos = await page.evaluate(() => {
+      const orig = await page.evaluate(() => {
         const dock = app._test.dockContainers[0];
-        return { left: parseInt(dock.el.style.left), top: parseInt(dock.el.style.top) };
+        const area = document.getElementById('window-area').getBoundingClientRect();
+        const rect = dock.el.getBoundingClientRect();
+        return {
+          left: parseInt(dock.el.style.left), top: parseInt(dock.el.style.top),
+          rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
+          area: { left: area.left, top: area.top, right: area.right, bottom: area.bottom },
+        };
       });
 
-      // Find the single-tab leaf's tab element
+      // Find the single-tab leaf's tab element and drag it onto empty space
       const tab = page.locator('.dock-tab-bar.single-tab .dock-tab');
       const tabBox = await tab.boundingBox();
+      // A drop point inside the window area but outside the dock
+      const dropX = orig.rect.right + 60 < orig.area.right ? orig.rect.right + 60 : orig.rect.left - 60;
+      const dropY = Math.min(orig.rect.bottom + 60, orig.area.bottom - 10);
 
       await page.mouse.move(tabBox.x + tabBox.width / 2, tabBox.y + tabBox.height / 2);
       await page.mouse.down({ button: 'left' });
-      await page.mouse.move(tabBox.x + tabBox.width / 2 + 50, tabBox.y + tabBox.height / 2 + 30, { steps: 5 });
+      await page.mouse.move(dropX, dropY, { steps: 8 });
       await page.mouse.up({ button: 'left' });
 
-      const newPos = await page.evaluate(() => {
+      const after = await page.evaluate((winId) => {
         const dock = app._test.dockContainers[0];
-        return { left: parseInt(dock.el.style.left), top: parseInt(dock.el.style.top) };
-      });
+        const win = app._test.windows.find(w => w.id === winId);
+        return {
+          left: parseInt(dock.el.style.left), top: parseInt(dock.el.style.top),
+          draggedDockId: win.dockId,
+        };
+      }, draggedId);
 
-      expect(newPos.left).toBeGreaterThan(origPos.left);
-      expect(newPos.top).toBeGreaterThan(origPos.top);
+      // The dock did not move; the tab undocked into a standalone window
+      expect(after.left).toBe(orig.left);
+      expect(after.top).toBe(orig.top);
+      expect(after.draggedDockId).toBe(null);
     });
   });
 

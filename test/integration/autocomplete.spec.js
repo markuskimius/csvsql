@@ -9,6 +9,13 @@ async function openSample(page) {
   await waitForWindow(page, 'sample1');
 }
 
+// The toolbar defaults to quick-search mode; SQL autocompletion only applies
+// to the WHERE filter, so switch to Filter mode first.
+async function openSampleFilterMode(page) {
+  await openSample(page);
+  await page.locator('.subwindow .toolbar-mode .mode-filter').click();
+}
+
 const dropdown = page => page.locator('#sql-autocomplete');
 const sqlInput = page => page.locator('#sql-input');
 const filterInput = page => page.locator('.filter-input');
@@ -105,7 +112,7 @@ test.describe('autocomplete — SQL console', () => {
 
 test.describe('autocomplete — filter input', () => {
   test('column prefix completes and the filter applies through the normal path', async ({ page }) => {
-    await openSample(page);
+    await openSampleFilterMode(page);
     await filterInput(page).pressSequentially('na');
     await expect(dropdown(page)).toBeVisible();
     await expect(dropdown(page).locator('.ac-item.selected')).toContainText('name');
@@ -118,7 +125,7 @@ test.describe('autocomplete — filter input', () => {
   });
 
   test('Ctrl+Space opens with own columns ranked first', async ({ page }) => {
-    await openSample(page);
+    await openSampleFilterMode(page);
     await filterInput(page).click();
     await page.keyboard.press('ControlOrMeta+Space');
     await expect(dropdown(page)).toBeVisible();
@@ -127,7 +134,7 @@ test.describe('autocomplete — filter input', () => {
   });
 
   test('first Escape closes the dropdown, second returns focus to the table', async ({ page }) => {
-    await openSample(page);
+    await openSampleFilterMode(page);
     await filterInput(page).pressSequentially('na');
     await expect(dropdown(page)).toBeVisible();
     await page.keyboard.press('Escape');
@@ -138,14 +145,14 @@ test.describe('autocomplete — filter input', () => {
   });
 
   test('Tab with the dropdown closed is not intercepted', async ({ page }) => {
-    await openSample(page);
+    await openSampleFilterMode(page);
     await filterInput(page).click();
     await page.keyboard.press('Tab');
     await expect(filterInput(page)).not.toBeFocused();
   });
 
   test('blur closes the dropdown', async ({ page }) => {
-    await openSample(page);
+    await openSampleFilterMode(page);
     await filterInput(page).pressSequentially('na');
     await expect(dropdown(page)).toBeVisible();
     await page.evaluate(() => document.querySelector('.filter-input').blur());
@@ -153,7 +160,7 @@ test.describe('autocomplete — filter input', () => {
   });
 
   test('clicking outside closes the dropdown without accepting', async ({ page }) => {
-    await openSample(page);
+    await openSampleFilterMode(page);
     await filterInput(page).pressSequentially('na');
     await expect(dropdown(page)).toBeVisible();
     await page.locator('.win-title').first().click();

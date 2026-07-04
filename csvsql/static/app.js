@@ -1000,6 +1000,8 @@ const app = (() => {
       prevBounds: null,
       sortCols: [],   // [{col, dir:'asc'|'desc'}, ...]
       filterText: '',
+      toolbarMode: 'search', // 'search' = quick search input (default), 'filter' = SQL WHERE input
+      searchText: '',        // quick-search query (highlights matches, does not filter rows)
       columnFilters: {},  // { colName: Set of allowed string values }
       linkFilters: {},    // { colName: Set of allowed string values } — set by cross-table links
       linkSourceCols: null, // Set of col names used for outbound linking (primary + transitive)
@@ -2212,9 +2214,6 @@ const app = (() => {
     const TAB_UNDOCK_THRESHOLD = 30;
     const startX = startEvent.clientX;
     const startY = startEvent.clientY;
-    let origDockX = parseInt(dock.el.style.left);
-    let origDockY = parseInt(dock.el.style.top);
-    let movingDock = false;
     let undocking = false;
     let reordering = false;
     let ghostEl = null;
@@ -2243,42 +2242,23 @@ const app = (() => {
       const dx = e.clientX - startX;
       const dy = e.clientY - startY;
 
-      if (!movingDock && !undocking && !reordering && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) {
-        if (e.shiftKey) {
+      if (!undocking && !reordering && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) {
+        if (e.shiftKey || leaf.tabs.length <= 1) {
+          // Dragging by a tab never moves the dock — a lone tab goes straight
+          // to ghost mode (drag the empty tab-bar area to move the dock)
           startUndock();
-        } else if (leaf.tabs.length > 1) {
+        } else {
           reordering = true;
           const freshTab = leaf.tabBarEl.querySelector(`.dock-tab[data-win-id="${winId}"]`);
           if (freshTab) freshTab.classList.add('dock-tab-dragging');
-        } else {
-          movingDock = true;
         }
       }
 
-      if (!undocking && (reordering || movingDock) && Math.abs(dy) > TAB_UNDOCK_THRESHOLD) {
-        if (reordering) {
-          const tabs = leaf.tabBarEl.querySelectorAll('.dock-tab');
-          tabs.forEach(t => t.classList.remove('dock-tab-dragging', 'dock-tab-drop-left', 'dock-tab-drop-right'));
-          reordering = false;
-        }
-        movingDock = false;
-        hideSnapGuides();
+      if (!undocking && reordering && Math.abs(dy) > TAB_UNDOCK_THRESHOLD) {
+        const tabs = leaf.tabBarEl.querySelectorAll('.dock-tab');
+        tabs.forEach(t => t.classList.remove('dock-tab-dragging', 'dock-tab-drop-left', 'dock-tab-drop-right'));
+        reordering = false;
         startUndock();
-      }
-
-      if (movingDock) {
-        const area = document.getElementById('window-area').getBoundingClientRect();
-        if (dock.maximized) origDockX = unmaximizeForDrag(dock, startX, area.left);
-        const cx = Math.max(area.left, Math.min(e.clientX, area.right));
-        const cy = Math.max(area.top, Math.min(e.clientY, area.bottom));
-        const areaW = area.right - area.left, areaH = area.bottom - area.top;
-        const dockW = dock.el.offsetWidth, dockH = dock.el.offsetHeight;
-        let left = Math.max(0, Math.min(origDockX + (cx - startX), areaW - dockW));
-        let top = Math.max(0, Math.min(origDockY + (cy - startY), areaH - dockH));
-        const snapped = snapPosition(dock, left, top, dockW, dockH, areaW, areaH);
-        dock.el.style.left = snapped.left + 'px';
-        dock.el.style.top = snapped.top + 'px';
-        showSnapGuides(snapped.guidesX, snapped.guidesY);
       }
 
       if (reordering) {
@@ -3071,12 +3051,18 @@ const app = (() => {
     const toolbar = document.createElement('div');
     toolbar.className = 'win-toolbar';
     toolbar.innerHTML = `
-      <label>Filter:</label>
-      <input type="text" class="filter-input" placeholder="WHERE clause, e.g. age > 30 AND name LIKE '%Smith%'" value="${escHtml(win.filterText)}" spellcheck="false">
+      <div class="toolbar-mode" role="group" aria-label="Search or filter mode">
+        <button type="button" class="mode-search" title="Quick search — highlight matching cells (press / in the table)">Search</button>
+        <button type="button" class="mode-filter" title="Filter rows with a SQL WHERE clause">Filter</button>
+      </div>
+      <input type="text" class="filter-input" spellcheck="false">
+      <span class="search-count" style="display: none"></span>
     `;
     body.appendChild(toolbar);
 
     const filterInput = toolbar.querySelector('.filter-input');
+    const modeFilterBtn = toolbar.querySelector('.mode-filter');
+    const modeSearchBtn = toolbar.querySelector('.mode-search');
 
     // Wrap filter input with highlight overlay
     const filterWrap = document.createElement('div');
@@ -3088,22 +3074,59 @@ const app = (() => {
     filterWrap.appendChild(filterOverlay);
     filterWrap.appendChild(filterInput);
     function updateFilterHighlight() {
-      filterOverlay.innerHTML = sqlHighlightHTML(filterInput.value);
+      // SQL syntax colors only apply to the WHERE filter; quick search is plain text
+      if (win.toolbarMode === 'search') filterOverlay.textContent = filterInput.value;
+      else filterOverlay.innerHTML = sqlHighlightHTML(filterInput.value);
     }
-    if (win.filterText) updateFilterHighlight();
     filterInput.addEventListener('scroll', () => {
       filterOverlay.scrollLeft = filterInput.scrollLeft;
     });
 
+    // Sync the toolbar DOM to win.toolbarMode: segment highlight, placeholder,
+    // input value (filterText vs searchText), error state, overlay, match count.
+    // Stored on the window object so mode switches from keyboard shortcuts and
+    // status-chip clears can refresh the toolbar without a rebuild.
+    function applyToolbarMode() {
+      const searching = win.toolbarMode === 'search';
+      modeFilterBtn.classList.toggle('active', !searching);
+      modeSearchBtn.classList.toggle('active', searching);
+      filterInput.placeholder = searching
+        ? 'Quick search — highlights matching cells'
+        : "WHERE clause, e.g. age > 30 AND name LIKE '%Smith%'";
+      filterInput.value = searching ? win.searchText : win.filterText;
+      if (!searching && win._filterError) {
+        filterInput.classList.add('filter-error');
+        filterInput.title = win._filterError;
+      } else {
+        filterInput.classList.remove('filter-error');
+        filterInput.title = '';
+      }
+      updateFilterHighlight();
+      updateSearchCount(win);
+    }
+    win._applyToolbarMode = applyToolbarMode;
+
+    modeFilterBtn.addEventListener('click', () => setToolbarMode(win, 'filter'));
+    modeSearchBtn.addEventListener('click', () => {
+      setToolbarMode(win, 'search');
+      filterInput.focus();
+    });
+    applyToolbarMode();
+
     // Attach before the Escape handler below so an open dropdown consumes
     // the first Escape and return-to-cell needs a second press
     attachAutocomplete(filterInput, (text, caret) =>
-      sqlCompletionContext(text, caret, { schema: liveSQLSchema(), filterTable: win.tableName }));
+      win.toolbarMode === 'search' ? null
+        : sqlCompletionContext(text, caret, { schema: liveSQLSchema(), filterTable: win.tableName }));
 
     let filterTimeout;
     filterInput.addEventListener('input', () => {
       updateFilterHighlight();
       clearTimeout(filterTimeout);
+      if (win.toolbarMode === 'search') {
+        filterTimeout = setTimeout(() => runQuickSearch(win, filterInput.value), 150);
+        return;
+      }
       filterTimeout = setTimeout(() => {
         win.filterText = filterInput.value;
         if (syncTimers[win.tableName]) {
@@ -3122,16 +3145,59 @@ const app = (() => {
       }, 200);
     });
 
-    // Escape returns focus from the filter to the selected cell (or middle cell).
+    // Search mode: Enter or Tab moves the cursor into the current (first)
+    // match cell and starts search navigation — Tab/Shift+Tab on the grid then
+    // step through matches, Escape there returns here.
+    // Escape in the input returns focus to the current match (search), or the
+    // selected cell / middle cell — and flips a temporary `/`-opened search
+    // back to Filter.
     filterInput.addEventListener('keydown', (e) => {
+      if (win.toolbarMode === 'search' && !e.ctrlKey && !e.metaKey && !e.altKey &&
+          (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey))) {
+        clearTimeout(filterTimeout);
+        // Flush a pending debounce so the latest text is what's searched
+        if (filterInput.value !== win.searchText) runQuickSearch(win, filterInput.value);
+        if (win._searchMatchList && win._searchMatchList.length > 0) {
+          e.preventDefault();
+          quickSearchGoto(win, 0, { select: true });
+          win._searchNavActive = true;
+        } else if (e.key === 'Enter') {
+          e.preventDefault();  // no matches: swallow Enter, let Tab move focus
+        }
+        return;
+      }
       if (e.key !== 'Escape') return;
       e.preventDefault();
-      const displayIdx = win.anchorCell
-        ? win._displayRows.findIndex(r => r._rownum === win.anchorCell.rownum)
-        : -1;
-      const colIdx = win.anchorCell ? win._columns.indexOf(win.anchorCell.col) : -1;
+      const searching = win.toolbarMode === 'search';
+      if (searching && win._searchTempRevert) setToolbarMode(win, 'filter');
+      let displayIdx = -1;
+      let colIdx = -1;
+      if (searching && win._searchMatchList && win._findCurrentKey) {
+        if (win._findCurrentKey.startsWith('h:')) {
+          // Current match is a header cell — focus it directly
+          focusQuickSearchMatch(win, win._findCurrentKey, true);
+          return;
+        }
+        // Land on the current match and select it so n/p continue from here
+        const sep = win._findCurrentKey.indexOf(':');
+        const rownum = parseInt(win._findCurrentKey.slice(0, sep), 10);
+        const col = win._findCurrentKey.slice(sep + 1);
+        displayIdx = win._displayRows.findIndex(r => r._rownum === rownum);
+        colIdx = win._columns.indexOf(col);
+        if (displayIdx >= 0 && colIdx >= 0) {
+          win.anchorCell = { rownum, col };
+          win.selectedCells = new Set([win._findCurrentKey]);
+          applyCellHighlights(win, true);
+        }
+      }
+      if (displayIdx < 0 || colIdx < 0) {
+        displayIdx = win.anchorCell
+          ? win._displayRows.findIndex(r => r._rownum === win.anchorCell.rownum)
+          : -1;
+        colIdx = win.anchorCell ? win._columns.indexOf(win.anchorCell.col) : -1;
+      }
       if (displayIdx >= 0 && colIdx >= 0) {
-        focusCellAt(win, displayIdx, colIdx);
+        focusCellAt(win, displayIdx, colIdx, { smooth: true });
       } else {
         focusMiddleCell(win);
       }
@@ -3215,6 +3281,12 @@ const app = (() => {
     // Store display rows for virtual scrolling
     win._displayRows = displayRows;
     win._columns = columns;
+    if (win.searchText) {
+      // Displayed rows changed — recompute quick-search matches (classes are
+      // re-applied by applyCellHighlights after the rows render)
+      computeQuickSearchMatches(win);
+      updateSearchCount(win);
+    }
     win._container = container;
 
     const table = document.createElement('table');
@@ -3272,6 +3344,7 @@ const app = (() => {
       colLabel.textContent = col;
       thInner.appendChild(colLabel);
       th.dataset.colIdx = colIdx;
+      th.tabIndex = -1;  // programmatic focus target for quick-search header matches
       const sortIdx = win.sortCols.findIndex(s => s.col === col);
       if (sortIdx !== -1) {
         th.classList.add('sorted');
@@ -3625,6 +3698,7 @@ const app = (() => {
       const td = e.target;
       if (td.tagName !== 'TD' || !td.classList.contains('data-cell')) return;
       if (win._programmaticFocus) return;
+      win._searchNavActive = false;
       const tr = td.parentElement;
       const di = parseInt(tr.dataset.displayIdx, 10);
       const ci = parseInt(td.dataset.colIdx, 10);
@@ -3896,6 +3970,39 @@ const app = (() => {
 
     table.addEventListener('keydown', (e) => {
       const td = e.target;
+      // Focused header cells (quick-search header matches) only participate in
+      // search keys: Tab/Shift+Tab and Escape in navigation mode, n/p always,
+      // Escape clears an active search. Anything else ends navigation.
+      if (td.tagName === 'TH' && td.dataset.colIdx !== undefined) {
+        const hasMatches = win._searchMatchList && win._searchMatchList.length > 0;
+        const plainMods = !e.ctrlKey && !e.metaKey && !e.altKey;
+        if (hasMatches && win._searchNavActive && plainMods && e.key === 'Tab') {
+          e.preventDefault();
+          quickSearchGoto(win, e.shiftKey ? -1 : 1, { select: true });
+          return;
+        }
+        if (hasMatches && win._searchNavActive && e.key === 'Escape') {
+          e.preventDefault();
+          win._searchNavActive = false;
+          const searchInput = win.bodyEl.querySelector('.filter-input');
+          if (searchInput) { searchInput.focus(); searchInput.select(); }
+          return;
+        }
+        if (hasMatches && plainMods && !e.shiftKey && (e.key === 'n' || e.key === 'p')) {
+          e.preventDefault();
+          quickSearchGoto(win, e.key === 'n' ? 1 : -1, { select: true });
+          return;
+        }
+        if (e.key === 'Escape' && win._searchMatchList) {
+          e.preventDefault();
+          clearQuickSearch(win);
+          return;
+        }
+        if (e.key !== 'Shift' && e.key !== 'Control' && e.key !== 'Meta' && e.key !== 'Alt') {
+          win._searchNavActive = false;
+        }
+        return;
+      }
       if (td.tagName !== 'TD' || !td.classList.contains('data-cell')) return;
       const tr = td.parentElement;
       const inEdit = td.getAttribute('contenteditable') === 'true';
@@ -3906,6 +4013,31 @@ const app = (() => {
         : e.key;
       const isArrow = navKey === 'ArrowUp' || navKey === 'ArrowDown' ||
                       navKey === 'ArrowLeft' || navKey === 'ArrowRight';
+
+      // Quick-search navigation mode (entered from the search input via
+      // Enter/Tab): Tab / Shift+Tab step through matches, Escape returns to
+      // the search box. Any other action key leaves navigation mode and falls
+      // through to the normal handlers below ("i"/F2/Ctrl+U edit, arrows
+      // move/extend the selection, etc.); n/p keep navigating as usual.
+      if (!inEdit && win._searchNavActive) {
+        const hasMatches = win._searchMatchList && win._searchMatchList.length > 0;
+        if (hasMatches && e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          e.preventDefault();
+          quickSearchGoto(win, e.shiftKey ? -1 : 1, { select: true });
+          return;
+        }
+        if (hasMatches && e.key === 'Escape') {
+          e.preventDefault();
+          win._searchNavActive = false;
+          const searchInput = win.bodyEl.querySelector('.filter-input');
+          if (searchInput) { searchInput.focus(); searchInput.select(); }
+          return;
+        }
+        if (e.key !== 'Shift' && e.key !== 'Control' && e.key !== 'Meta' && e.key !== 'Alt' &&
+            e.key !== 'n' && e.key !== 'p') {
+          win._searchNavActive = false;
+        }
+      }
 
       // F2, i, or Ctrl/Cmd+U: enter edit mode (select mode only)
       const noMods = !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
@@ -3918,14 +4050,21 @@ const app = (() => {
         return;
       }
 
-      // "/" in select mode → jump to this window's filter input
-      if (!inEdit && noMods && e.key === '/') {
-        const filterInput = win.bodyEl.querySelector('.filter-input');
-        if (filterInput) {
+      // "/" in select mode → quick search (Shift allowed: some keyboard
+      // layouts type "/" as a shifted key)
+      if (!inEdit && !e.ctrlKey && !e.metaKey && !e.altKey && e.key === '/') {
+        if (openQuickSearchInput(win)) {
           e.preventDefault();
-          filterInput.focus();
           return;
         }
+      }
+
+      // n / p in select mode step to the next / previous quick-search match
+      if (!inEdit && noMods && (e.key === 'n' || e.key === 'p') &&
+          win._searchMatchList && win._searchMatchList.length > 0) {
+        e.preventDefault();
+        quickSearchGoto(win, e.key === 'n' ? 1 : -1, { select: true });
+        return;
       }
 
       // Edit-mode up/down: commit edit and move to adjacent row
@@ -4064,6 +4203,10 @@ const app = (() => {
           win._programmaticFocus = true;
           td.focus();
           win._programmaticFocus = false;
+        } else if (win._searchMatchList) {
+          // First Escape clears the quick-search highlights (keeps selection
+          // and focus); the next Escape clears the selection as usual
+          clearQuickSearch(win);
         } else {
           td.blur();
           selectNoneCells(win);
@@ -4142,8 +4285,6 @@ const app = (() => {
     win._resizeObserver.observe(container);
 
     // Update statusbar
-    const statusLeft = win.statusbarEl.querySelector('.status-left');
-    const statusRight = win.statusbarEl.querySelector('.status-right');
     const hasColumnFilters = Object.keys(win.columnFilters).length > 0;
     const hasLinkFilters = Object.keys(win.linkFilters).length > 0;
     const hasWhereFilter = !!win.filterText;
@@ -4153,8 +4294,8 @@ const app = (() => {
     const hasTransforms = transformedCols.length > 0;
     const anyFilters = hasColumnFilters || hasWhereFilter;
     win._statusBase = `${displayRows.length} of ${rows.length} rows`;
+    win._statusRightBase = `${columns.length} columns`;
     updateSelectionStats(win);
-    statusRight.textContent = `${columns.length} columns`;
 
     // Status center: toggle chips
     const statusCenter = win.statusbarEl.querySelector('.status-center');
@@ -4186,8 +4327,8 @@ const app = (() => {
           win.columnFilters = {};
           win.filterText = '';
           win.disableFilter = false;
-          const filterInput = win.bodyEl.querySelector('.filter-input');
-          if (filterInput) filterInput.value = '';
+          win._filterError = null;
+          if (win._applyToolbarMode) win._applyToolbarMode();
         } },
     ];
     for (const chip of chips.filter(Boolean)) {
@@ -4479,12 +4620,14 @@ const app = (() => {
   }
 
   // Show Count/Sum/Avg/Min/Max for multi-cell selections in the status bar's
-  // left segment (appended to the row-count text stored in win._statusBase).
+  // right segment, replacing the column-count text (win._statusRightBase)
+  // while the selection is active.
   // Count = non-empty cells; Sum/Avg/Min/Max computed over numeric cells only.
   function updateSelectionStats(win) {
     if (!win.statusbarEl) return;
     const statusLeft = win.statusbarEl.querySelector('.status-left');
-    if (!statusLeft) return;
+    const statusRight = win.statusbarEl.querySelector('.status-right');
+    if (!statusLeft || !statusRight) return;
     const t = tables[win.tableName];
     const sel = win.selectedCells;
     let stats = '';
@@ -4515,11 +4658,14 @@ const app = (() => {
     }
     statusLeft.textContent = win._statusBase || '';
     if (stats) {
+      statusRight.textContent = '';
       const span = document.createElement('span');
       span.className = 'status-stats';
       span.textContent = stats;
       span.title = stats;
-      statusLeft.appendChild(span);
+      statusRight.appendChild(span);
+    } else {
+      statusRight.textContent = win._statusRightBase || '';
     }
   }
 
@@ -4944,7 +5090,46 @@ const app = (() => {
 
   // Scroll a (displayIdx, colIdx) cell into view (virtual-scroll aware) and
   // return its freshly rendered <td> (or null). Does NOT focus the cell.
-  function scrollCellIntoView(win, displayIdx, colIdx) {
+  // Smooth-scroll settings for programmatic match navigation (quick search,
+  // Find & Replace). Far jumps first teleport to within SCROLL_GLIDE_VIEWPORTS
+  // of the target so the glide duration stays constant.
+  const SCROLL_ANIM_MS = 180;
+  const SCROLL_GLIDE_VIEWPORTS = 1.5;
+
+  function prefersReducedMotion() {
+    return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  }
+
+  // Animate a container's scroll position with ease-out; a newer animation on
+  // the same window supersedes this one (its onDone never fires). The table's
+  // normal scroll listener renders rows as they come into view mid-glide.
+  function animateScroll(win, container, targetTop, targetLeft, onDone) {
+    if (win._scrollAnim) win._scrollAnim.superseded = true;
+    const fromTop = container.scrollTop;
+    const fromLeft = container.scrollLeft;
+    const dTop = targetTop - fromTop;
+    const dLeft = targetLeft - fromLeft;
+    if (dTop === 0 && dLeft === 0) { win._scrollAnim = null; onDone(); return; }
+    const anim = { superseded: false };
+    win._scrollAnim = anim;
+    const t0 = performance.now();
+    const step = (now) => {
+      if (anim.superseded) return;
+      const t = Math.min(1, (now - t0) / SCROLL_ANIM_MS);
+      const e = 1 - Math.pow(1 - t, 3);
+      container.scrollTop = fromTop + dTop * e;
+      container.scrollLeft = fromLeft + dLeft * e;
+      if (t < 1) requestAnimationFrame(step);
+      else { win._scrollAnim = null; onDone(); }
+    };
+    requestAnimationFrame(step);
+  }
+
+  // opts.smooth animates the scroll; opts.onArrive(td) fires once the target
+  // cell is in view and rendered — synchronously when no scrolling is needed.
+  // Returns the td immediately for instant scrolls, null while a smooth
+  // scroll is in flight.
+  function scrollCellIntoView(win, displayIdx, colIdx, opts) {
     const container = win._container;
     const thead = win._table?.querySelector('thead');
     if (!container) return null;
@@ -4953,34 +5138,77 @@ const app = (() => {
     const cellBottom = cellTop + ROW_HEIGHT;
     const viewTop = Math.max(0, container.scrollTop - theadH);
     const viewBottom = viewTop + container.clientHeight - theadH;
+    let targetTop = container.scrollTop;
     if (cellTop < viewTop) {
-      container.scrollTop = cellTop;
+      targetTop = cellTop;
     } else if (cellBottom > viewBottom) {
-      container.scrollTop = cellBottom - (container.clientHeight - theadH);
+      targetTop = cellBottom - (container.clientHeight - theadH);
     }
-    // Force render of the target cell
-    win._renderStart = -1; win._renderEnd = -1;
-    renderVisibleRows(win);
-    const tr = win._tbody.querySelector(`tr[data-display-idx="${displayIdx}"]`);
-    const td = tr ? tr.children[colIdx + 1] : null; // +1 for row-num column
-    if (td) {
-      // Horizontal: account for the sticky row-number column on the left edge
-      const rowNumW = win.rowNumWidth || 50;
-      if (td.offsetLeft - rowNumW < container.scrollLeft) {
-        container.scrollLeft = Math.max(0, td.offsetLeft - rowNumW);
-      } else if (td.offsetLeft + td.offsetWidth > container.scrollLeft + container.clientWidth) {
-        container.scrollLeft = td.offsetLeft + td.offsetWidth - container.clientWidth;
+
+    // Force-render the target row and fix up the horizontal position exactly
+    // (sticky row-number column on the left edge)
+    const finish = () => {
+      win._renderStart = -1; win._renderEnd = -1;
+      renderVisibleRows(win);
+      const tr = win._tbody.querySelector(`tr[data-display-idx="${displayIdx}"]`);
+      const td = tr ? tr.children[colIdx + 1] : null; // +1 for row-num column
+      if (td) {
+        const rowNumW = win.rowNumWidth || 50;
+        if (td.offsetLeft - rowNumW < container.scrollLeft) {
+          container.scrollLeft = Math.max(0, td.offsetLeft - rowNumW);
+        } else if (td.offsetLeft + td.offsetWidth > container.scrollLeft + container.clientWidth) {
+          container.scrollLeft = td.offsetLeft + td.offsetWidth - container.clientWidth;
+        }
+      }
+      if (opts && opts.onArrive) opts.onArrive(td);
+      return td;
+    };
+
+    if (!(opts && opts.smooth) || prefersReducedMotion()) {
+      container.scrollTop = targetTop;
+      return finish();
+    }
+
+    // Smooth path: the destination cell may not be in the DOM yet, so compute
+    // the horizontal target from the stored column widths
+    let targetLeft = container.scrollLeft;
+    const rowNumW = win.rowNumWidth || 50;
+    if (win.colWidths && win.colWidths.length > colIdx) {
+      let cellLeft = rowNumW;
+      for (let i = 0; i < colIdx; i++) cellLeft += win.colWidths[i];
+      const cellW = win.colWidths[colIdx];
+      if (cellLeft - rowNumW < targetLeft) {
+        targetLeft = Math.max(0, cellLeft - rowNumW);
+      } else if (cellLeft + cellW > targetLeft + container.clientWidth) {
+        targetLeft = cellLeft + cellW - container.clientWidth;
       }
     }
-    return td;
+
+    const viewH = Math.max(1, container.clientHeight);
+    if (Math.abs(targetTop - container.scrollTop) > (SCROLL_GLIDE_VIEWPORTS + 1) * viewH) {
+      container.scrollTop = targetTop + (container.scrollTop < targetTop ? -1 : 1) * SCROLL_GLIDE_VIEWPORTS * viewH;
+    }
+
+    animateScroll(win, container, targetTop, targetLeft, () => {
+      container.scrollTop = targetTop;
+      container.scrollLeft = targetLeft;
+      finish();
+    });
+    return null;
   }
 
-  function focusCellAt(win, displayIdx, colIdx) {
-    const td = scrollCellIntoView(win, displayIdx, colIdx);
-    if (!td) return;
-    win._programmaticFocus = true;
-    td.focus();
-    win._programmaticFocus = false;
+  function focusCellAt(win, displayIdx, colIdx, opts) {
+    const doFocus = (td) => {
+      if (!td) return;
+      win._programmaticFocus = true;
+      td.focus({ preventScroll: true });
+      win._programmaticFocus = false;
+    };
+    if (opts && opts.smooth) {
+      scrollCellIntoView(win, displayIdx, colIdx, { smooth: true, onArrive: doFocus });
+      return;
+    }
+    doFocus(scrollCellIntoView(win, displayIdx, colIdx));
   }
 
   function cycleTableWindow(currentWin, dir) {
@@ -5041,6 +5269,9 @@ const app = (() => {
         if (isNaN(ci)) continue;
         const name = win._columns[ci];
         th.classList.toggle('col-highlight', hiCols.has(name));
+        const hkey = `h:${name}`;
+        th.classList.toggle('cell-find-match', !!(win._findMatches && win._findMatches.has(hkey)));
+        th.classList.toggle('cell-find-current', win._findCurrentKey === hkey);
       }
     }
     for (const tr of tbody.querySelectorAll('tr')) {
@@ -6034,6 +6265,43 @@ const app = (() => {
         closeColManager();
         return;
       }
+      // Mid-glide safety net: while a smooth scroll animates between search
+      // matches, a re-render can momentarily drop focus to <body>. Keep the
+      // navigation keys working so rapid Tab/n/p presses aren't swallowed.
+      if (e.target === document.body && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const win = getActiveDataWindow();
+        if (win && win._searchNavActive && win._searchMatchList && win._searchMatchList.length > 0) {
+          if (e.key === 'Tab') {
+            e.preventDefault();
+            quickSearchGoto(win, e.shiftKey ? -1 : 1, { select: true });
+            return;
+          }
+          if (!e.shiftKey && (e.key === 'n' || e.key === 'p')) {
+            e.preventDefault();
+            quickSearchGoto(win, e.key === 'n' ? 1 : -1, { select: true });
+            return;
+          }
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            win._searchNavActive = false;
+            const searchInput = win.bodyEl.querySelector('.filter-input');
+            if (searchInput) { searchInput.focus(); searchInput.select(); }
+            return;
+          }
+        }
+      }
+      // "/" with the active window being a data window opens quick search even
+      // when no cell is focused (a focused data cell is handled by the
+      // per-table handler; Shift allowed for layouts that type "/" shifted)
+      if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const tgt = e.target;
+        if (tgt && tgt.matches && tgt.matches('input, textarea, [contenteditable="true"], td.data-cell')) return;
+        const win = getActiveDataWindow();
+        if (win && win.tableName && openQuickSearchInput(win)) {
+          e.preventDefault();
+          return;
+        }
+      }
       if (!(e.ctrlKey || e.metaKey)) return;
       if (e.shiftKey && (e.key === '1' || e.key === '2' || e.key === '3' || e.key === '4')) {
         const win = getActiveDataWindow();
@@ -6044,8 +6312,8 @@ const app = (() => {
             win.columnFilters = {};
             win.filterText = '';
             win.disableFilter = false;
-            const filterInput = win.bodyEl.querySelector('.filter-input');
-            if (filterInput) filterInput.value = '';
+            win._filterError = null;
+            if (win._applyToolbarMode) win._applyToolbarMode();
           }
           else if (e.key === '3') {
             win.disableLink = !win.disableLink;
@@ -7310,7 +7578,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.49 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.50 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `, true);
@@ -7355,12 +7623,12 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <h4>Editing</h4>
 <ul>
 <li><strong>Edit cells:</strong> Double-click a cell to edit it directly. Or click a cell to select it and press <code>i</code>, <code>F2</code>, or <code>Ctrl</code>/<code>&#8984;</code>+<code>U</code> to enter edit mode; <code>Ctrl</code>/<code>&#8984;</code>+click also edits directly. <code>Tab</code>/<code>Shift+Tab</code> moves between cells and <code>Enter</code> moves down to the column where editing started &mdash; all three stay in edit mode (Enter exits edit mode on the last row). <code>Up</code>/<code>Down</code> arrow commits and moves to the adjacent row, exiting edit mode. Long text scrolls within the cell to keep the cursor visible. <code>Escape</code> reverts the edit.</li>
-<li><strong>Navigate in select mode:</strong> Arrow keys or <code>h</code>/<code>j</code>/<code>k</code>/<code>l</code> move the selection. <code>Tab</code>/<code>Shift+Tab</code> move right/left. <code>Enter</code> moves down. <code>Escape</code> clears the selection.</li>
+<li><strong>Navigate in select mode:</strong> Arrow keys or <code>h</code>/<code>j</code>/<code>k</code>/<code>l</code> move the selection. <code>Tab</code>/<code>Shift+Tab</code> move right/left. <code>Enter</code> moves down. <code>Escape</code> clears quick-search highlights if active, otherwise the selection.</li>
 <li><strong>Highlight row &amp; column:</strong> Clicking a cell highlights its row and column. Click a column header to select the entire column (with header row included for copy). Move the selection with arrow keys or vim-style <code>h</code>/<code>j</code>/<code>k</code>/<code>l</code>; extend to a rectangle of cells with <code>Shift</code>+arrow (or <code>Shift</code>+<code>H</code>/<code>J</code>/<code>K</code>/<code>L</code>), <code>Shift</code>+click on another cell, or click-and-drag across cells &mdash; every selected cell's row and column is highlighted so you can see what lines up with what. Click a row number to select an entire row; drag across row numbers or <code>Shift</code>+click another row number to select a range. <code>Ctrl</code>/<code>&#8984;</code>+<code>A</code> selects all cells; <code>Esc</code> deselects all. Clicking the <code>#</code> corner cell toggles between select all and select none. Pressing an arrow key with no cell selected focuses the cell in the middle of the current view.</li>
 <li><strong>Cut / Copy / Paste:</strong> Select cells and use <code>Ctrl</code>/<code>&#8984;</code>+<code>X</code>, <code>Ctrl</code>/<code>&#8984;</code>+<code>C</code>, <code>Ctrl</code>/<code>&#8984;</code>+<code>V</code>. Data is copied as tab-separated values. When a plugin display transform is active, copy uses the formatted display values; when formatting is disabled, copy uses raw values. Select All and row selection copies include the column header row. Copy and cut work from any focus context (column header, titlebar, etc.), not just when a data cell is focused. In edit mode, these shortcuts pass through to native browser behavior for text within the cell.</li>
 <li><strong>Undo / Redo:</strong> <code>Ctrl</code>/<code>&#8984;</code>+<code>Z</code> to undo, <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>Z</code> or <code>Ctrl</code>/<code>&#8984;</code>+<code>Y</code> to redo. A toast notification confirms each undo/redo (and each copy, cut, and paste) with what was affected. Undoes cell edits, paste, cut, row insert/delete, column insert/delete, column rename, column reorder, and column resize. Multi-cell paste and cut undo as a single step. Also available from the Edit menu.</li>
 <li><strong>Find &amp; Replace:</strong> <code>Ctrl</code>/<code>&#8984;</code>+<code>F</code> (or <strong>Edit &rarr; Find &amp; Replace&hellip;</strong>) opens a non-modal dialog targeting the active table. All matches are highlighted; <code>Enter</code>/<code>Shift+Enter</code> (or the Prev/Next buttons) step between them, scrolling each match into view. Options: <em>Match case</em> and <em>Entire cell</em>. <strong>Replace</strong> replaces the current match; <strong>Replace All</strong> replaces every match as a single undo entry. Search respects the window&rsquo;s active filters and sort, and matches raw cell values (not plugin-formatted display values). <code>Escape</code> closes the dialog.</li>
-<li><strong>Selection statistics:</strong> When two or more cells are selected, the status bar shows <em>Count</em> (non-empty cells) plus <em>Sum</em>, <em>Avg</em>, <em>Min</em>, and <em>Max</em> computed over the numeric cells in the selection.</li>
+<li><strong>Selection statistics:</strong> When two or more cells are selected, the right side of the status bar shows <em>Count</em> (non-empty cells) plus <em>Sum</em>, <em>Avg</em>, <em>Min</em>, and <em>Max</em> computed over the numeric cells in the selection, temporarily replacing the column count.</li>
 <li><strong>Rows:</strong> Right-click a row number to insert below or delete. Right-click the <code>#</code> corner cell to insert a row at the beginning.</li>
 <li><strong>Columns:</strong> Right-click a column header to insert a column to the right or delete. Right-click the <code>#</code> corner cell to insert a column at the beginning. <code>Ctrl</code>/<code>&#8984;</code>+click a column header to rename inline &mdash; duplicate names are rejected with a red border on the input.</li>
 <li><strong>Select a column:</strong> Click a column header to select the entire column. Click the sort badge (triangle) to sort. Selection is the target for <code>Ctrl</code>/<code>&#8984;</code>+<code>&larr;</code>/<code>&rarr;</code> column reorder.</li>
@@ -7383,7 +7651,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <ul>
 <li><strong>Sort:</strong> Click the sort badge (triangle icon) in a column header to sort ascending &rarr; descending &rarr; unsorted.</li>
 <li><strong>Multi-column sort:</strong> Shift+click additional sort badges. Numbers inside triangle badges indicate sort priority.</li>
-<li><strong>Filter:</strong> Type a SQL <code>WHERE</code> clause in the filter bar (without the <code>WHERE</code> keyword). For example: <code>age > 30 AND name LIKE '%Smith%'</code></li>
+<li><strong>Filter:</strong> Flip the toolbar toggle to <em>Filter</em> and type a SQL <code>WHERE</code> clause in the filter bar (without the <code>WHERE</code> keyword). For example: <code>age > 30 AND name LIKE '%Smith%'</code></li>
+<li><strong>Quick search (default):</strong> With the toolbar toggle on <em>Search</em> (the default; <code>/</code> also focuses it whenever the table window is active), type to highlight every matching cell &mdash; the same highlight as Find &amp; Replace. Column headers are searched too, and header matches come before the data cells when stepping through. Rows are not filtered. The search matches what you see: when a plugin format is enabled for a column it matches the formatted display value, otherwise the raw value (Find &amp; Replace always matches raw values). A match counter next to the input shows your position. <code>Enter</code> or <code>Tab</code> moves the cursor into the first match; <code>Tab</code>/<code>Shift+Tab</code> then step to the next/previous match and <code>Escape</code> returns to the search box. While stepping through matches, any other key acts on the matched cell as usual and ends the match navigation &mdash; <code>i</code>/<code>F2</code>/<code>Ctrl+U</code> edit it, arrows move the selection, <code>Shift</code>+arrows extend it &mdash; while <code>n</code>/<code>p</code> keep jumping between matches from anywhere in the table. Off-screen matches scroll smoothly into view (honors the OS reduced-motion setting). Stepping past the last match wraps around to the first (and vice versa) &mdash; the counter shows &ldquo;wrapped&rdquo; and a toast appears so it&rsquo;s obvious. Pressing <code>/</code> while the toggle is on Filter switches to search mode only temporarily: <code>Escape</code> flips the toggle back to Filter, while the highlights stay for <code>n</code>/<code>p</code> until you clear the search text or press <code>Escape</code> in the table.</li>
 <li>The filter supports all SQLite expressions including <code>REGEXP</code> (see below). Autocompletion suggests the table&rsquo;s column names and SQL keywords as you type &mdash; see the SQL Console section.</li>
 <li><strong>Column autofilter:</strong> Click the funnel icon on any column header to open a dropdown with checkboxes for each unique value. Use the search box to narrow the list. Uncheck values and click Apply to hide matching rows. Multiple column filters AND together and combine with the WHERE filter bar. The funnel fills teal when a filter is active. Click Clear to remove a column&rsquo;s filter. Click the Filtered chip in the status bar to clear all column autofilters and the WHERE filter at once.</li>
 <li><strong>Status chips:</strong> <strong>Sorted</strong> and <strong>Filtered</strong> chips are always shown in the status bar center. <strong>Linking</strong> only appears when the table is a link source, <strong>Linked</strong> only when it is a link target, and <strong>Formatted</strong> only when a plugin has matching column transform rules. <strong>Sorted</strong> and <strong>Filtered</strong> chips clear the sort or filters when clicked (chip becomes inactive). <strong>Linked</strong> (on target tables receiving link filters) and <strong>Formatted</strong> chips toggle suspend/resume &mdash; suspended features show the chip with strikethrough. A <strong>Linking</strong> chip appears on the source table driving link filters; click to suspend/resume outbound linking. Keyboard shortcuts: <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>1</code> (clear sort), <code>2</code> (clear filters), <code>3</code> (toggle link), <code>4</code> (toggle format).</li>
@@ -7452,7 +7721,7 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <li><strong>Tab windows:</strong> Hold <code>Shift</code> and drag a window onto another window's title bar to merge them into a tab group. Click tabs to switch between windows.</li>
 <li><strong>Split dock:</strong> Hold <code>Shift</code> and drag a window onto the body area of another window. Drop zones are divided diagonally &mdash; drop on the top, right, bottom, or left region to split that direction.</li>
 <li><strong>Reorder tabs:</strong> Drag a tab left or right within the tab bar to rearrange it.</li>
-<li><strong>Move/undock tabs:</strong> Drag a tab away from the tab bar (vertically) to detach it. A ghost preview appears &mdash; drop on another window's tab bar to insert at a specific tab position (a vertical indicator shows where), on its body to split, or on empty space to place as a standalone window. <code>Shift</code>+drag skips reorder and enters ghost mode immediately.</li>
+<li><strong>Move/undock tabs:</strong> Drag a tab away from the tab bar (vertically) to detach it. A ghost preview appears &mdash; drop on another window's tab bar to insert at a specific tab position (a vertical indicator shows where), on its body to split, or on empty space to place as a standalone window. <code>Shift</code>+drag skips reorder and enters ghost mode immediately. Dragging a tab never moves the dock itself &mdash; a pane's lone tab detaches as a ghost right away; drag the empty tab bar area to move the whole dock.</li>
 <li><strong>Splitter:</strong> Drag the divider between split panes to resize. Double-click to reset to 50/50.</li>
 <li><strong>Maximize:</strong> Double-click a tab or the empty tab bar area to maximize/restore the dock container. Dragging the tab bar of a maximized dock restores it to its previous size and moves it.</li>
 <li><strong>Rename:</strong> <code>Ctrl</code>/<code>&#8984;</code>+click a tab to rename the table.</li>
@@ -7468,8 +7737,12 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <tr><td><code>Ctrl+W</code> / <code>&#8984;W</code></td><td>Close window</td></tr>
 <tr><td><code>Ctrl+&larr;</code> / <code>Ctrl+&rarr;</code> (or <code>&#8984;</code>+arrow)</td><td>Move selected header column, or cell-selection's columns, left / right</td></tr>
 <tr><td><code>i</code>, <code>F2</code>, <code>Ctrl</code>/<code>&#8984;</code>+<code>U</code>, or double-click</td><td>Enter edit mode on the selected cell</td></tr>
-<tr><td><code>/</code> (cell selected, not editing)</td><td>Jump to the window's filter input</td></tr>
-<tr><td><code>Escape</code> (in filter input)</td><td>Return focus to the selected cell</td></tr>
+<tr><td><code>/</code> (data window active, not editing)</td><td>Quick search: focus the search input (switching a Filter-mode toolbar to Search temporarily)</td></tr>
+<tr><td><code>Enter</code> or <code>Tab</code> (in search input)</td><td>Move the cursor into the current quick-search match (starts match navigation)</td></tr>
+<tr><td><code>Tab</code>/<code>Shift+Tab</code> (match navigation)</td><td>Step to the next / previous quick-search match; any other key ends navigation and acts normally</td></tr>
+<tr><td><code>Escape</code> (match navigation)</td><td>Return the cursor to the search box</td></tr>
+<tr><td><code>n</code>/<code>p</code> (cell selected, quick search active)</td><td>Jump to the next / previous quick-search match</td></tr>
+<tr><td><code>Escape</code> (in filter/search input)</td><td>Return focus to the current match or selected cell (reverts a temporary <code>/</code> search mode)</td></tr>
 <tr><td>Arrow keys (no cell selected)</td><td>Focus the cell in the middle of the visible table</td></tr>
 <tr><td>Arrow keys or <code>h</code>/<code>j</code>/<code>k</code>/<code>l</code> (cell selected, not editing)</td><td>Move selection to the adjacent cell</td></tr>
 <tr><td><code>Tab</code>/<code>Shift+Tab</code> (cell selected, not editing)</td><td>Move selection right / left</td></tr>
@@ -7477,7 +7750,7 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <tr><td><code>&uarr;</code>/<code>&darr;</code> (editing)</td><td>Commit edit, move to adjacent row (exits edit mode)</td></tr>
 <tr><td><code>Shift+</code>arrow or <code>Shift+H</code>/<code>J</code>/<code>K</code>/<code>L</code></td><td>Extend cell selection (highlights row &amp; column of every selected cell)</td></tr>
 <tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>A</code></td><td>Select all cells</td></tr>
-<tr><td><code>Escape</code> (cell selected, not editing)</td><td>Deselect all cells</td></tr>
+<tr><td><code>Escape</code> (cell selected, not editing)</td><td>Clear quick-search highlights if active, else deselect all cells</td></tr>
 <tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>X</code></td><td>Cut selected cells</td></tr>
 <tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>C</code></td><td>Copy selected cells</td></tr>
 <tr><td><code>Ctrl</code>/<code>&#8984;</code>+<code>V</code></td><td>Paste at selected cell</td></tr>
@@ -9606,6 +9879,9 @@ ${_aiImageContext()}`;
 
     const prevSourceId = _activeLinkSourceId;
     _activeLinkSourceId = sourceWin.id;
+    // Rebuilding the source window below (its linking badges/state changed)
+    // replaces the table DOM, silently dropping a focused cell — restore it after
+    const restoreFocus = sourceWin._container && sourceWin._container.contains(document.activeElement);
     _applyingLinkFilters = true;
     try {
       for (const win of windows) {
@@ -9631,6 +9907,7 @@ ${_aiImageContext()}`;
       _applyingLinkFilters = false;
     }
     if (prevSourceId !== sourceWin.id) rebuildTable(sourceWin);
+    if (restoreFocus) refocusAnchorCell(sourceWin);
     updateLinkingChips();
   }
 
@@ -9648,6 +9925,9 @@ ${_aiImageContext()}`;
     const prevSourceId = _activeLinkSourceId;
     if (sourceWin && _activeLinkSourceId === sourceWin.id) _activeLinkSourceId = null;
     else if (!sourceWin) _activeLinkSourceId = null;
+    // Same focus restore as applyLinkFilters — the source rebuild drops focus
+    const restoreFocus = sourceWin && sourceWin._container &&
+      sourceWin._container.contains(document.activeElement);
     _applyingLinkFilters = true;
     try {
       for (const win of windows) {
@@ -9668,6 +9948,7 @@ ${_aiImageContext()}`;
       const prevWin = windows.find(w => w.id === prevSourceId);
       if (prevWin) rebuildTable(prevWin);
     }
+    if (restoreFocus) refocusAnchorCell(sourceWin);
     updateLinkingChips();
   }
 
@@ -9881,6 +10162,198 @@ ${_aiImageContext()}`;
     }
   }
 
+  // ---- Quick search (toolbar Search mode) ----
+  // Highlights matching cells without filtering rows, reusing the find-match
+  // highlight classes (win._findMatches / win._findCurrentKey rendered by
+  // applyCellHighlights). win._searchMatchList (display-ordered array of
+  // "rownum:col" keys) marks quick search as the owner of those highlights —
+  // the Find & Replace dialog never sets it.
+
+  function setToolbarMode(win, mode) {
+    if (win.toolbarMode === mode) return;
+    win.toolbarMode = mode;
+    if (mode === 'filter') win._searchTempRevert = false;
+    if (win._applyToolbarMode) win._applyToolbarMode();
+  }
+
+  // "/" entry point: focus the window's search input, switching a Filter-mode
+  // toolbar to search temporarily (Escape in the input flips it back)
+  function openQuickSearchInput(win) {
+    const input = win.bodyEl && win.bodyEl.querySelector('.filter-input');
+    if (!input) return false;
+    if (win.toolbarMode !== 'search') {
+      setToolbarMode(win, 'search');
+      win._searchTempRevert = true;
+    }
+    input.focus();
+    input.select();
+    return true;
+  }
+
+  // Recompute matches over the displayed rows/columns (respects filter and
+  // sort; case-insensitive substring). Matches what the user sees: the
+  // formatted display value when a plugin transform is enabled for the column,
+  // the raw value otherwise. Data only — callers re-render via
+  // applyCellHighlights or the row render that follows.
+  function computeQuickSearchMatches(win) {
+    const q = win.searchText;
+    if (!q || !win._displayRows || !win._columns) {
+      win._searchMatchList = null;
+      win._findMatches = null;
+      win._findCurrentKey = null;
+      return;
+    }
+    const needle = q.toLowerCase();
+    const list = [];
+    const formatted = {};
+    // Header cells first (visually on top) — keys "h:<col>" vs "<rownum>:<col>"
+    for (const col of win._columns) {
+      if (String(col).toLowerCase().includes(needle)) list.push(`h:${col}`);
+      formatted[col] = win.tableName && !win.disabledTransforms.has(col) &&
+        hasDisplayTransform(win.tableName, col);
+    }
+    for (const row of win._displayRows) {
+      for (const col of win._columns) {
+        const val = formatted[col]
+          ? String(getDisplayValue(win.tableName, col, row) ?? '')
+          : String(row[col] ?? '');
+        if (val.toLowerCase().includes(needle)) list.push(`${row._rownum}:${col}`);
+      }
+    }
+    win._searchMatchList = list;
+    win._findMatches = new Set(list);
+    if (!win._findMatches.has(win._findCurrentKey)) win._findCurrentKey = null;
+  }
+
+  // Update the toolbar's match counter (visible in search mode only).
+  // wrapped=true flags a wrap-around in the counter text and styling.
+  function updateSearchCount(win, wrapped) {
+    const el = win.bodyEl && win.bodyEl.querySelector('.search-count');
+    if (!el) return;
+    if (win.toolbarMode !== 'search') { el.style.display = 'none'; return; }
+    el.style.display = '';
+    el.classList.toggle('wrapped', !!wrapped);
+    const list = win._searchMatchList;
+    if (!win.searchText) { el.textContent = ''; return; }
+    if (!list || list.length === 0) { el.textContent = 'No matches'; return; }
+    const idx = list.indexOf(win._findCurrentKey);
+    const pos = idx >= 0 ? `${idx + 1} of ${list.length}` : `${list.length} match${list.length === 1 ? '' : 'es'}`;
+    el.textContent = wrapped ? `${pos} — wrapped` : pos;
+  }
+
+  function runQuickSearch(win, query) {
+    // The Find & Replace dialog shares the highlight state — close it rather
+    // than letting the two fight over win._findMatches
+    if (_activeFindWin && _activeFindWin._findTargetWinId === win.id) closeFindReplace();
+    win.searchText = query;
+    computeQuickSearchMatches(win);
+    applyCellHighlights(win, false);
+    if (win._searchMatchList && win._searchMatchList.length > 0) quickSearchGoto(win, 0);
+    else updateSearchCount(win);
+  }
+
+  // Step to the next (dir=1) / previous (dir=-1) match; dir=0 (re-)anchors on
+  // the first match. opts.select moves the cell selection to the match (grid
+  // n/p navigation); otherwise the match is only scrolled into view.
+  function quickSearchGoto(win, dir, opts) {
+    const list = win._searchMatchList;
+    if (!list || list.length === 0) { updateSearchCount(win); return; }
+    let idx = list.indexOf(win._findCurrentKey);
+    let wrapped = false;
+    if (idx < 0) {
+      idx = dir < 0 ? list.length - 1 : 0;
+    } else if (dir !== 0) {
+      idx += dir;
+      if (idx >= list.length) { idx = 0; wrapped = true; }
+      else if (idx < 0) { idx = list.length - 1; wrapped = true; }
+    }
+    const key = list[idx];
+    win._findCurrentKey = key;
+    focusQuickSearchMatch(win, key, opts && opts.select);
+    updateSearchCount(win, wrapped);
+    if (wrapped) {
+      showToast(dir > 0 ? 'Search wrapped to the first match' : 'Search wrapped to the last match', 'success');
+    }
+  }
+
+  // Bring the given match key on screen; with select=true also move the
+  // cursor there. Header matches ("h:<col>") focus the sticky <th> (no
+  // selection change, so no link-filter side effects); data matches select
+  // and focus the cell.
+  function focusQuickSearchMatch(win, key, select) {
+    if (key.startsWith('h:')) {
+      const col = key.slice(2);
+      const ci = win._columns.indexOf(col);
+      if (ci < 0) return;
+      const th = scrollHeaderIntoView(win, ci, { smooth: true });
+      if (select && th) {
+        win._programmaticFocus = true;
+        th.focus({ preventScroll: true });
+        win._programmaticFocus = false;
+      }
+      applyCellHighlights(win, false);
+      return;
+    }
+    const sep = key.indexOf(':');
+    const rownum = parseInt(key.slice(0, sep), 10);
+    const col = key.slice(sep + 1);
+    const di = win._displayRows.findIndex(r => r._rownum === rownum);
+    const ci = win._columns.indexOf(col);
+    if (di < 0 || ci < 0) return;
+    if (select) {
+      win.anchorCell = { rownum, col };
+      win.selectedCells = new Set([key]);
+      // Highlight/link-filter side effects (which can rebuild the table DOM)
+      // run first; the smooth-scroll focus then lands on the final DOM
+      applyCellHighlights(win, true);
+      const di2 = win._displayRows.findIndex(r => r._rownum === rownum);
+      const ci2 = win._columns.indexOf(col);
+      if (di2 >= 0 && ci2 >= 0) focusCellAt(win, di2, ci2, { smooth: true });
+    } else {
+      scrollCellIntoView(win, di, ci, { smooth: true });
+      applyCellHighlights(win, false);
+    }
+  }
+
+  // Horizontal-only scroll for header cells (thead is sticky, always visible
+  // vertically), accounting for the sticky row-number column on the left.
+  // opts.smooth animates; the th is returned immediately either way (thead is
+  // not virtualized).
+  function scrollHeaderIntoView(win, colIdx, opts) {
+    const container = win._container;
+    const table = win._table;
+    if (!container || !table) return null;
+    const th = table.querySelector(`thead th[data-col-idx="${colIdx}"]`);
+    if (!th) return null;
+    const rowNumW = win.rowNumWidth || 50;
+    let targetLeft = container.scrollLeft;
+    if (th.offsetLeft - rowNumW < targetLeft) {
+      targetLeft = Math.max(0, th.offsetLeft - rowNumW);
+    } else if (th.offsetLeft + th.offsetWidth > targetLeft + container.clientWidth) {
+      targetLeft = th.offsetLeft + th.offsetWidth - container.clientWidth;
+    }
+    if (opts && opts.smooth && !prefersReducedMotion()) {
+      animateScroll(win, container, container.scrollTop, targetLeft, () => {});
+    } else {
+      container.scrollLeft = targetLeft;
+    }
+    return th;
+  }
+
+  function clearQuickSearch(win) {
+    if (!win) return;
+    const hadSearch = !!win.searchText || !!win._searchMatchList;
+    win.searchText = '';
+    win._searchMatchList = null;
+    win._searchNavActive = false;
+    if (!hadSearch) return;  // don't clobber the Find & Replace dialog's highlights
+    win._findMatches = null;
+    win._findCurrentKey = null;
+    if (win._tbody) applyCellHighlights(win, false);
+    if (win.toolbarMode === 'search' && win._applyToolbarMode) win._applyToolbarMode();
+    else updateSearchCount(win);
+  }
+
   // ---- Find & Replace ----
 
   function escapeRegExp(s) {
@@ -9904,6 +10377,7 @@ ${_aiImageContext()}`;
   function showFindReplace(targetWinId) {
     const targetWin = windows.find(w => w.id === targetWinId);
     if (!targetWin || !targetWin.tableName || !tables[targetWin.tableName]) return;
+    clearQuickSearch(targetWin);  // the dialog takes over the find-match highlights
 
     if (_activeFindWin) {
       if (_activeFindWin._findTargetWinId === targetWinId) {
@@ -9986,7 +10460,7 @@ ${_aiImageContext()}`;
         const rownum = parseInt(key.slice(0, sep), 10);
         const di = tw._displayRows.findIndex(r => r._rownum === rownum);
         const ci = tw._columns.indexOf(key.slice(sep + 1));
-        if (di >= 0 && ci >= 0) scrollCellIntoView(tw, di, ci);
+        if (di >= 0 && ci >= 0) scrollCellIntoView(tw, di, ci, { smooth: true });
         applyCellHighlights(tw, false);
         updateCount();
       }

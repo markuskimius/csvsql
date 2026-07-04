@@ -139,7 +139,8 @@ test.describe('Table Editing', () => {
   });
 
   test('filter with REGEXP narrows visible rows', async ({ page }) => {
-    // Type a REGEXP filter in the filter input
+    // Switch the toolbar to Filter mode and type a REGEXP filter
+    await page.locator('.subwindow .toolbar-mode .mode-filter').click();
     const filterInput = page.locator('.subwindow .filter-input');
     await filterInput.fill("[name] REGEXP '^A'");
     await page.waitForTimeout(500);

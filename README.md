@@ -24,7 +24,8 @@ A browser-based CSV database application. Open CSV, Excel, and compressed files 
 - **Clipboard** — Cut (Ctrl+X), Copy (Ctrl+C), and Paste (Ctrl+V) work on selected cells. A toast notification confirms each operation with the number of cells affected. Data is copied as tab-separated values. When a plugin display transform is active, copy uses formatted values; when formatting is disabled, raw values are copied. Copying with Select All or row selection includes the header row. Copy and cut work from any focus context (column header, titlebar, etc.)
 - **Undo / Redo** — Ctrl+Z undoes cell edits, paste, cut, replace, row insert/delete, column insert/delete, column rename, column reorder, and column resize. Ctrl+Shift+Z or Ctrl+Y redoes. A toast notification describes what was undone or redone. Multi-cell paste and cut undo as a single step. Works from anywhere in the window — no cell focus required
 - **Find & Replace** — Ctrl+F opens a find dialog for the active table. All matches are highlighted with next/previous navigation that scrolls matches into view; options for match case and entire-cell matching. Replace one match at a time, or Replace All as a single undo entry. Respects active filters and sort
-- **Selection statistics** — Selecting two or more cells shows Count, Sum, Avg, Min, and Max in the status bar (numeric stats computed over the numeric cells in the selection)
+- **Quick search** — The table toolbar's default Search mode (press `/` in an active table window to focus it) highlights every matching cell — column headers included — without filtering rows; flip the toggle to Filter for SQL WHERE filtering. Matches formatted display values when plugin formatting is enabled, raw values otherwise. Enter or Tab moves the cursor into the first match, Tab/Shift+Tab step through matches, Escape returns to the search box; `n`/`p` jump to the next/previous match from anywhere in the table. A match counter and a toast make it obvious when the search wraps around
+- **Selection statistics** — Selecting two or more cells shows Count, Sum, Avg, Min, and Max on the right side of the status bar, temporarily replacing the column count (numeric stats computed over the numeric cells in the selection)
 - **SELECT INTO** — Create new tables from query results (`SELECT ... INTO tablename ...`)
 - **CREATE TABLE** — New tables created via SQL auto-open as editable windows
 - **Drag and drop** — Drop files directly onto the window to open them
@@ -88,7 +89,7 @@ Use **File > Open** (Ctrl+O / Cmd+O), **File > Open URL**, or drag and drop file
 
 - **Edit cells** — Click a cell to select it; press i, F2, or Ctrl/Cmd+U to enter edit mode; or Ctrl/Cmd+click a cell to edit it directly. Long text scrolls within the cell to keep the cursor visible
 - **Navigate in edit mode** — Tab/Shift+Tab to move between cells (stays in edit mode), Enter to save and move down to the column where editing started (stays in edit mode, exits on last row), Up/Down arrow to commit and move to the adjacent row (exits edit mode), Escape to revert the edit
-- **Navigate in select mode** — Arrow keys or h/j/k/l to move the selection, Tab/Shift+Tab to move right/left, Enter to move down, Escape to clear the selection
+- **Navigate in select mode** — Arrow keys or h/j/k/l to move the selection, Tab/Shift+Tab to move right/left, Enter to move down, Escape to clear quick-search highlights if active, otherwise the selection
 - **Insert/delete rows** — Right-click a row number and choose "Insert Row Below" or "Delete Row"
 - **Insert/delete columns** — Right-click a column header and choose "Insert Column Right" or "Delete Column"
 - **Empty table entry point** — Right-click the `#` corner cell to insert a row or column when the table has no data
@@ -114,11 +115,12 @@ Use **File > Open** (Ctrl+O / Cmd+O), **File > Open URL**, or drag and drop file
 
 - **Sort** — Click the sort badge (triangle icon) in a column header to cycle: ascending → descending → unsorted
 - **Multi-column sort** — Shift+click additional sort badges. Numbers inside triangle badges show sort priority
-- **Filter** — Type a SQL WHERE expression in the filter bar (without the `WHERE` keyword):
+- **Filter** — Flip the toolbar toggle to **Filter** and type a SQL WHERE expression in the filter bar (without the `WHERE` keyword):
   ```
   age > 30 AND name LIKE '%Smith%'
   name REGEXP 'smith|jones'
   ```
+- **Quick search (default)** — With the toolbar toggle on **Search** (the default; `/` also focuses it whenever the table window is active), type to highlight every matching cell, using the same highlight as Find & Replace; rows are not filtered. Column headers are searched too, and header matches come before the data cells when stepping through. The search matches what you see: formatted display values for columns with an enabled plugin format, raw values otherwise (Find & Replace always matches raw values). A match counter next to the input shows your position. Enter or Tab moves the cursor into the first match; Tab/Shift+Tab then step to the next/previous match and Escape returns to the search box. While stepping through matches, any other key acts on the matched cell as usual and ends the match navigation — `i`/F2/Ctrl+U edit it, arrows move the selection, Shift+arrows extend it — while `n`/`p` keep jumping between matches from anywhere in the table. Off-screen matches scroll smoothly into view (respects the OS reduced-motion setting). Wrapping past the last (or first) match shows "wrapped" in the counter and a toast. Pressing `/` while the toggle is on Filter switches to search mode only temporarily — Escape flips the toggle back to Filter, keeping the highlights until the search is cleared (empty the input, or Escape in the table)
 - **Filter autocompletion** — The filter bar suggests the table's column names and SQL keywords as you type (see SQL Console below)
 - **Column autofilter** — Click the funnel icon on any column header to open an Excel-style dropdown with searchable checkboxes for each unique value. Uncheck values to hide matching rows. Multiple column filters AND together and combine with the WHERE filter. The funnel fills teal when a filter is active. Click the **Filtered** chip in the status bar to clear all filters at once
 - **Status chips** — **Sorted** and **Filtered** chips are always shown in the status bar center. **Linking** only appears when the table is a link source, **Linked** only when it is a link target, and **Formatted** only when a plugin has matching column transform rules. Inactive chips appear with faint outlines. **Sorted** and **Filtered** chips clear the sort or filters when clicked (chip becomes inactive). **Linked** (on target tables receiving link filters) and **Formatted** chips toggle suspend/resume — suspended features show the chip with strikethrough. A **Linking** chip (coral red) appears on the source table whose selection drives link filters and on intermediate tables in a transitive chain; click to suspend/resume outbound linking. When a table becomes a link target (receives link filters from another source), any previously suspended Linking state on that table is reset. Keyboard shortcuts: Ctrl/Cmd+Shift+1 (clear sort), 2 (clear filters), 3 (toggle link), 4 (toggle format)
@@ -204,7 +206,7 @@ Windows can be combined into tabbed groups and split layouts for an IDE-style wo
 - **Tab windows** — Hold Shift and drag a window onto another window's title bar to merge them into a tab group. Click tabs to switch between windows
 - **Split dock** — Hold Shift and drag a window onto the body area of another window. Drop zones are divided diagonally — drop on the top, right, bottom, or left region to split that direction
 - **Reorder tabs** — Drag a tab left or right within the tab bar to rearrange it
-- **Move/undock tabs** — Drag a tab away from the tab bar (vertically) to detach it. A ghost preview appears — drop on another window's tab bar to insert at a specific tab position (a vertical indicator shows where), on its body to split, or on empty space to place as a standalone window. Shift+drag skips reorder and enters ghost mode immediately
+- **Move/undock tabs** — Drag a tab away from the tab bar (vertically) to detach it. A ghost preview appears — drop on another window's tab bar to insert at a specific tab position (a vertical indicator shows where), on its body to split, or on empty space to place as a standalone window. Shift+drag skips reorder and enters ghost mode immediately. Dragging a tab never moves the dock itself — a pane's lone tab detaches as a ghost right away; drag the empty tab bar area to move the whole dock
 - **Splitter** — Drag the divider between split panes to resize. Double-click to reset to 50/50
 - **Maximize** — Double-click a tab or the empty tab bar area to maximize/restore the dock container. Dragging the tab bar of a maximized dock restores it to its previous size and moves it
 - **Rename** — Ctrl/Cmd+click a tab to rename the table
@@ -282,8 +284,12 @@ The in-app **Plugins > Expression Reference** has the full language documentatio
 | Ctrl+← / Ctrl+→ (or Cmd+arrow on Mac) | Move header-selected column left / right |
 | i, F2, or Ctrl+U / Cmd+U | Enter edit mode on the selected cell |
 | Ctrl+click / Cmd+click | Enter edit mode on the clicked cell directly |
-| / (cell selected, not editing) | Jump to the window's filter input |
-| Escape (in filter input) | Return focus to the selected cell |
+| / (data window active, not editing) | Quick search: focus the search input (switching a Filter-mode toolbar to Search temporarily) |
+| Enter or Tab (in search input) | Move the cursor into the current quick-search match (starts match navigation) |
+| Tab / Shift+Tab (match navigation) | Step to the next / previous quick-search match; any other key ends navigation and acts normally |
+| Escape (match navigation) | Return the cursor to the search box |
+| n / p (cell selected, quick search active) | Jump to the next / previous quick-search match |
+| Escape (in filter/search input) | Return focus to the current match or selected cell (reverts a temporary / search) |
 | Tab / Shift+Tab (cell selected, not editing) | Move selection right / left |
 | Enter (cell selected, not editing) | Move selection down |
 | Ctrl+Shift+L / Ctrl+Shift+H (cell selected, not editing) | Switch to next / previous table window |

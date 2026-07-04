@@ -177,6 +177,7 @@ test.describe('Column AutoFilter', () => {
     expect(await page.locator('.data-table tbody tr:not(.virtual-pad)').count()).toBe(9);
 
     // Now also apply a WHERE filter
+    await page.locator('.subwindow .toolbar-mode .mode-filter').click();
     const filterInput = page.locator('.subwindow .filter-input');
     await filterInput.fill("[name] REGEXP '^[A-D]'");
     await page.waitForTimeout(500);
@@ -369,6 +370,7 @@ test.describe('Column AutoFilter', () => {
   });
 
   test('Filtered chip appears with WHERE filter', async ({ page }) => {
+    await page.locator('.subwindow .toolbar-mode .mode-filter').click();
     const filterInput = page.locator('.subwindow .filter-input');
     await filterInput.fill("name LIKE '%Alice%'");
     await page.waitForTimeout(500);
@@ -406,6 +408,7 @@ test.describe('Column AutoFilter', () => {
   });
 
   test('Filtered chip clears WHERE filter text when clicked', async ({ page }) => {
+    await page.locator('.subwindow .toolbar-mode .mode-filter').click();
     const filterInput = page.locator('.subwindow .filter-input');
     await filterInput.fill("name LIKE '%Alice%'");
     await page.waitForTimeout(500);
@@ -431,6 +434,7 @@ test.describe('Column AutoFilter', () => {
     await page.waitForTimeout(300);
 
     // Also apply WHERE filter
+    await page.locator('.subwindow .toolbar-mode .mode-filter').click();
     const filterInput = page.locator('.subwindow .filter-input');
     await filterInput.fill("[email] LIKE '%alice%'");
     await page.waitForTimeout(500);
@@ -463,6 +467,7 @@ test.describe('Column AutoFilter', () => {
   });
 
   test('status bar shows filtered row count without trailing dash', async ({ page }) => {
+    await page.locator('.subwindow .toolbar-mode .mode-filter').click();
     const filterInput = page.locator('.subwindow .filter-input');
     await filterInput.fill("name LIKE '%Alice%'");
     await page.waitForTimeout(500);

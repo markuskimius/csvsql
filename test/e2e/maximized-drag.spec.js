@@ -258,14 +258,14 @@ test('touch drag (1.5-tap) on maximized titlebar restores size and moves it', as
   expect(after.top).toBeGreaterThan(maxState.top);
 });
 
-test('single-tab dock pane plain drag on maximized dock restores size and moves it', async ({ page }) => {
+test('single-tab dock pane plain drag on maximized dock ghosts the tab, not the dock', async ({ page }) => {
   await openApp(page);
   await uploadFile(page, 'sample1.csv');
   await waitForWindow(page, 'sample1');
   await executeSQL(page, 'SELECT * INTO [t2] FROM [sample1]');
   await waitForWindow(page, 't2');
 
-  // Split dock: two single-tab leaves; plain tab drag moves the whole dock
+  // Split dock: two single-tab leaves; dragging a tab must NOT move the dock
   const preDock = await page.evaluate(() => {
     const w = app._test.windows;
     app._test.mergeWindowsAsSplit(w[0].id, w[1].id, 'right');
@@ -281,24 +281,30 @@ test('single-tab dock pane plain drag on maximized dock restores size and moves 
   const grabY = box.y + box.height / 2;
   await page.mouse.move(grabX, grabY);
   await page.mouse.down();
+  // Past the drag threshold a ghost appears (no dock movement)
   await page.mouse.move(grabX + 30, grabY + 70, { steps: 5 });
+  const midDrag = await page.evaluate(() => {
+    const dock = app._test.dockContainers[0];
+    return { maximized: dock.maximized, ghost: !!document.querySelector('body > .subwindow[style*="fixed"]') };
+  });
+  // Drop back on the source tab (no-op)
+  await page.mouse.move(grabX, grabY, { steps: 3 });
   await page.mouse.up();
 
   const after = await page.evaluate(() => {
     const dock = app._test.dockContainers[0];
     return {
       maximized: dock.maximized,
-      top: parseInt(dock.el.style.top),
       width: dock.el.offsetWidth,
       height: dock.el.offsetHeight,
       leaves: document.querySelectorAll('.dock-leaf').length,
     };
   });
-  expect(after.maximized).toBe(false);
-  expect(after.width).toBe(preDock.width);
-  expect(after.height).toBe(preDock.height);
-  expect(after.top).toBeGreaterThan(0);
-  // Drag moved the dock, it did not undock or reorder anything
+  // The dock stayed maximized and untouched; the drag only ghosted the tab
+  expect(midDrag.maximized).toBe(true);
+  expect(midDrag.ghost).toBe(true);
+  expect(after.maximized).toBe(true);
+  expect(after.width).toBeGreaterThanOrEqual(preDock.width);
   expect(after.leaves).toBe(2);
 });
 
