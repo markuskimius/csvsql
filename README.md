@@ -12,7 +12,7 @@ A browser-based CSV database application. Open CSV, Excel, and compressed files 
 ## Features
 
 - **Multiple file formats** — CSV, TSV, PSV, Excel (.xlsx/.xls), Gzip (.csv.gz), and ZIP archives
-- **SQL queries** — Full SQLite syntax from the built-in console, including joins, subqueries, aggregates, UNION, CASE, and REGEXP. Query results are queryable tables too. Up/Down arrows at the start/end of the input recall query history (last 100 queries, persisted across reloads)
+- **SQL queries** — Full SQLite syntax from the built-in console, including joins, subqueries, aggregates, UNION, CASE, and REGEXP. Query results are queryable tables too. Up/Down arrows at the start/end of the input recall query history (last 100 queries, persisted across reloads); the History button opens a browsable panel to re-run, edit, or clear past queries
 - **SQL syntax highlighting** — Keywords, strings, numbers, comments, and identifiers are color-coded in the SQL console and filter inputs
 - **SQL autocompletion** — Context-aware suggestions for table names, column names, and keywords in the SQL console and filter inputs. Tab/Enter accepts, Ctrl+Space opens manually; names needing quoting are inserted bracket-quoted
 - **Inline editing** — Double-click a cell to edit it. Or click a cell to select it and press i, F2, or Ctrl/Cmd+U; Ctrl/Cmd+click also edits directly. Tab/Shift+Tab/Enter navigate between cells while staying in edit mode. Enter returns to the column where editing started. Up/Down arrow commits and exits edit mode. Long text scrolls within the cell to keep the cursor visible. Escape to revert

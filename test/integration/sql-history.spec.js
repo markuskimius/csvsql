@@ -1,5 +1,5 @@
 const { test, expect } = require('@playwright/test');
-const { openApp, uploadFile, waitForWindow, executeSQL } = require('../helpers');
+const { openApp, uploadFile, waitForWindow, executeSQL, getWindowCount } = require('../helpers');
 
 const Q1 = 'SELECT name FROM sample1';
 const Q2 = 'SELECT email FROM sample1 LIMIT 3';
@@ -94,5 +94,102 @@ test.describe('SQL query history', () => {
     await input(page).press('ArrowDown');
     expect(await input(page).inputValue()).toBe(before);
     await expect(page.locator('#sql-autocomplete')).toBeVisible();
+  });
+});
+
+test.describe('SQL history panel', () => {
+  test.beforeEach(async ({ page }) => {
+    await openApp(page);
+    await uploadFile(page, '../test/sample1.csv');
+    await waitForWindow(page, 'sample1');
+  });
+
+  test('History button lists queries newest-first; clicking an entry loads it for editing', async ({ page }) => {
+    await executeSQL(page, Q1);
+    await executeSQL(page, Q2);
+    await input(page).fill('');
+    await page.locator('#btn-sql-history').click();
+    const items = page.locator('.sql-history-item');
+    await expect(items).toHaveCount(2);
+    await expect(items.nth(0)).toContainText(Q2);
+    await expect(items.nth(1)).toContainText(Q1);
+    await items.nth(1).click();
+    // Panel closes; the entry is in the input, focused, with the overlay synced
+    await expect(page.locator('#sql-history-panel')).toHaveCount(0);
+    await expect(input(page)).toHaveValue(Q1);
+    await expect(input(page)).toBeFocused();
+    await expect(page.locator('#sql-highlight')).toContainText(Q1);
+  });
+
+  test('the run button executes the entry immediately', async ({ page }) => {
+    await executeSQL(page, Q1);
+    const before = await getWindowCount(page);
+    await input(page).fill('');
+    await page.locator('#btn-sql-history').click();
+    await page.locator('.sql-history-item .sql-history-run').first().click();
+    await expect(page.locator('#sql-history-panel')).toHaveCount(0);
+    // A new result window opens from the executed query
+    await page.waitForFunction((n) => app._test.windows.length > n, before);
+  });
+
+  test('Clear History erases the history', async ({ page }) => {
+    await executeSQL(page, Q1);
+    await input(page).fill('');
+    await page.locator('#btn-sql-history').click();
+    await page.locator('.sql-history-clear').click();
+    await expect(page.locator('.sql-history-empty')).toBeVisible();
+    await expect(page.locator('.sql-history-clear')).toBeDisabled();
+    const stored = await page.evaluate(() => localStorage.getItem('csvsql_sql_history'));
+    expect(JSON.parse(stored)).toEqual([]);
+    // ArrowUp no longer recalls anything
+    await page.keyboard.press('Escape');
+    await input(page).click();
+    await input(page).press('ArrowUp');
+    await expect(input(page)).toHaveValue('');
+  });
+
+  test('panel toggles via the button and closes on Escape or outside click', async ({ page }) => {
+    await executeSQL(page, Q1);
+    const btn = page.locator('#btn-sql-history');
+    const panel = page.locator('#sql-history-panel');
+    await btn.click();
+    await expect(panel).toBeVisible();
+    await btn.click();
+    await expect(panel).toHaveCount(0);
+    await btn.click();
+    await expect(panel).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(panel).toHaveCount(0);
+    await btn.click();
+    await expect(panel).toBeVisible();
+    await page.locator('#menubar').click();
+    await expect(panel).toHaveCount(0);
+  });
+
+  test('panel fits a short narrow viewport and survives resize', async ({ page }) => {
+    await executeSQL(page, Q1);
+    await page.setViewportSize({ width: 640, height: 380 });
+    await page.locator('#btn-sql-history').click();
+    const panel = page.locator('#sql-history-panel');
+    await expect(panel).toBeVisible();
+    let box = await panel.boundingBox();
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(640);
+    // A viewport resize (mobile soft keyboards fire these) repositions the
+    // panel instead of closing it
+    await page.setViewportSize({ width: 500, height: 300 });
+    await expect(panel).toBeVisible();
+    box = await panel.boundingBox();
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(500);
+    expect(box.y + box.height).toBeLessThanOrEqual(300);
+  });
+
+  test('empty history shows a placeholder', async ({ page }) => {
+    await page.locator('#btn-sql-history').click();
+    await expect(page.locator('.sql-history-empty')).toHaveText('No queries yet');
+    await expect(page.locator('.sql-history-clear')).toBeDisabled();
   });
 });

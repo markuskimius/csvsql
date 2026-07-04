@@ -6345,6 +6345,176 @@ const app = (() => {
     try { localStorage.setItem('csvsql_sql_history', JSON.stringify(_sqlHistory)); } catch (_) {}
   }
 
+  // ---- SQL history panel (History button in the console header) ----
+  let _historyPanel = null;
+
+  function toggleSQLHistory() {
+    if (_historyPanel) closeSQLHistory();
+    else openSQLHistory();
+  }
+
+  function openSQLHistory() {
+    const btn = document.getElementById('btn-sql-history');
+    if (!btn || _activeConsoleTab !== 'sql') return;
+
+    const panel = document.createElement('div');
+    panel.id = 'sql-history-panel';
+
+    const header = document.createElement('div');
+    header.className = 'sql-history-header';
+    const title = document.createElement('span');
+    title.textContent = 'Query History';
+    const clearBtn = document.createElement('button');
+    clearBtn.className = 'sql-history-clear';
+    clearBtn.textContent = 'Clear History';
+    clearBtn.disabled = _sqlHistory.length === 0;
+    clearBtn.addEventListener('click', () => {
+      _sqlHistory = [];
+      persistSQLHistory();
+      _sqlHistoryIdx = 0;
+      _sqlHistoryDraft = '';
+      clearBtn.disabled = true;
+      renderSQLHistoryList();
+      showToast('Query history cleared');
+    });
+    header.appendChild(title);
+    header.appendChild(clearBtn);
+    panel.appendChild(header);
+
+    const list = document.createElement('div');
+    list.className = 'sql-history-list';
+    panel.appendChild(list);
+
+    document.body.appendChild(panel);
+    _historyPanel = panel;
+    renderSQLHistoryList();
+    positionSQLHistory();
+
+    document.addEventListener('mousedown', _historyOutsideClose, true);
+    document.addEventListener('keydown', _historyEscClose, true);
+    // Reposition (don't close) on resize: on mobile the soft keyboard
+    // appearing/dismissing resizes the viewport right as the panel opens
+    window.addEventListener('resize', positionSQLHistory);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', positionSQLHistory);
+      window.visualViewport.addEventListener('scroll', positionSQLHistory);
+    }
+  }
+
+  // Anchored above the History button, right-aligned, sized and clamped to
+  // the visual viewport so a soft keyboard or short landscape screen never
+  // cuts it off
+  function positionSQLHistory() {
+    if (!_historyPanel) return;
+    const btn = document.getElementById('btn-sql-history');
+    if (!btn) return;
+    const vv = window.visualViewport;
+    const vvTop = vv ? vv.offsetTop : 0;
+    const vvLeft = vv ? vv.offsetLeft : 0;
+    const vvBottom = vvTop + (vv ? vv.height : window.innerHeight);
+    const vvRight = vvLeft + (vv ? vv.width : window.innerWidth);
+
+    const rect = btn.getBoundingClientRect();
+    // If a keyboard overlay hides the button (iOS keeps innerHeight), anchor
+    // to the visible bottom instead
+    const anchorTop = Math.min(rect.top, vvBottom - 8);
+    _historyPanel.style.maxWidth = (vvRight - vvLeft - 16) + 'px';
+    _historyPanel.style.maxHeight = Math.max(100, Math.min(340, anchorTop - vvTop - 12)) + 'px';
+    _historyPanel.style.bottom = (window.innerHeight - anchorTop + 6) + 'px';
+
+    // Right-align to the button, keeping both edges inside the visual viewport
+    let right = Math.max(window.innerWidth - rect.right, window.innerWidth - vvRight + 8);
+    const w = _historyPanel.offsetWidth;
+    if (window.innerWidth - right - w < vvLeft + 8) {
+      right = Math.max(window.innerWidth - vvRight + 8, window.innerWidth - vvLeft - 8 - w);
+    }
+    _historyPanel.style.right = right + 'px';
+  }
+
+  function renderSQLHistoryList() {
+    if (!_historyPanel) return;
+    const list = _historyPanel.querySelector('.sql-history-list');
+    list.innerHTML = '';
+    if (_sqlHistory.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'sql-history-empty';
+      empty.textContent = 'No queries yet';
+      list.appendChild(empty);
+      return;
+    }
+    // Newest first
+    for (let i = _sqlHistory.length - 1; i >= 0; i--) {
+      const q = _sqlHistory[i];
+      const item = document.createElement('div');
+      item.className = 'sql-history-item';
+      item.title = q;
+
+      const text = document.createElement('span');
+      text.className = 'sql-history-text';
+      text.innerHTML = sqlHighlightHTML(q.replace(/\s+/g, ' ').trim());
+
+      const runBtn = document.createElement('button');
+      runBtn.className = 'sql-history-run';
+      runBtn.title = 'Execute';
+      runBtn.textContent = '▶';
+      runBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        loadHistoryEntry(q);
+        closeSQLHistory();
+        executeQuery();
+      });
+
+      item.addEventListener('click', () => {
+        loadHistoryEntry(q);
+        closeSQLHistory();
+      });
+
+      item.appendChild(text);
+      item.appendChild(runBtn);
+      list.appendChild(item);
+    }
+  }
+
+  // Puts a history entry into the console input (editable before executing)
+  // and resets Up/Down history navigation to the end
+  function loadHistoryEntry(q) {
+    const input = document.getElementById('sql-input');
+    input.value = q;
+    _sqlHistoryIdx = _sqlHistory.length;
+    _sqlHistoryDraft = '';
+    _syncSQLHighlight();
+    input.focus();
+    input.setSelectionRange(q.length, q.length);
+  }
+
+  function _historyOutsideClose(e) {
+    if (!_historyPanel || _historyPanel.contains(e.target)) return;
+    // Let the button's own click handler do the toggle-close
+    if (e.target.closest && e.target.closest('#btn-sql-history')) return;
+    closeSQLHistory();
+  }
+
+  function _historyEscClose(e) {
+    if (e.key === 'Escape' && _historyPanel) {
+      e.preventDefault();
+      e.stopPropagation();
+      closeSQLHistory();
+    }
+  }
+
+  function closeSQLHistory() {
+    if (!_historyPanel) return;
+    _historyPanel.remove();
+    _historyPanel = null;
+    document.removeEventListener('mousedown', _historyOutsideClose, true);
+    document.removeEventListener('keydown', _historyEscClose, true);
+    window.removeEventListener('resize', positionSQLHistory);
+    if (window.visualViewport) {
+      window.visualViewport.removeEventListener('resize', positionSQLHistory);
+      window.visualViewport.removeEventListener('scroll', positionSQLHistory);
+    }
+  }
+
   function handleHistoryKey(e, history, getIdx, setIdx, getDraft, setDraft) {
     const el = e.target;
     if (e.key === 'ArrowUp') {
@@ -7997,7 +8167,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.55 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.56 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `, true);
@@ -8085,7 +8255,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 <h4>SQL Console</h4>
 <p>The SQL Console at the bottom runs queries against all open tables using SQLite syntax. Press <code>Ctrl+Enter</code> / <code>&#8984;+Enter</code> to execute. The console and filter inputs feature SQL syntax highlighting for keywords, strings, numbers, comments, and bracket-quoted identifiers.</p>
-<p><strong>Query history:</strong> Press <code>&uarr;</code> with the cursor at the very start of the input (or <code>&darr;</code> at the very end) to step through previously executed queries; <code>&darr;</code> past the newest entry restores whatever you were typing. History holds the last 100 queries, skips duplicates, and persists across page reloads. While the autocomplete dropdown is open, the arrow keys navigate the dropdown instead.</p>
+<p><strong>Query history:</strong> Press <code>&uarr;</code> with the cursor at the very start of the input (or <code>&darr;</code> at the very end) to step through previously executed queries; <code>&darr;</code> past the newest entry restores whatever you were typing. History holds the last 100 queries, skips duplicates, and persists across page reloads. While the autocomplete dropdown is open, the arrow keys navigate the dropdown instead. The <strong>History</strong> button (next to Run and Clear) opens a panel listing all saved queries, newest first: click an entry to copy it into the input for editing, click its <code>&#9654;</code> button to execute it immediately, or click <strong>Clear History</strong> to erase the history.</p>
 <p><strong>Autocompletion:</strong> As you type, a dropdown suggests table names (after <code>FROM</code>, <code>JOIN</code>, <code>INSERT INTO</code>, etc.), column names (after <code>tablename.</code> or a query alias, plus columns of any table referenced in the statement), and SQL keywords &mdash; filtered to those valid at the cursor position (for example, type names appear only inside <code>CAST(... AS</code>, and commands like <code>VACUUM</code> only at the start of a statement). <code>Tab</code> or <code>Enter</code> accepts the highlighted suggestion, <code>&uarr;</code>/<code>&darr;</code> navigate, <code>Escape</code> dismisses, and <code>Ctrl+Space</code> opens the dropdown manually. Names that need quoting (spaces, special characters, keyword collisions) are inserted bracket-quoted automatically. Suggestions never appear inside string literals or comments, and while the dropdown is closed no keys are intercepted. The same autocompletion works in every table&rsquo;s filter bar, where that table&rsquo;s own columns are suggested first.</p>
 <p>Tables are referenced by the name shown in their window title bar. Names are sanitized to <code>[a-zA-Z0-9_]</code> characters.</p>
 <p>Query results open in new windows and are automatically registered as queryable tables &mdash; you can run further SQL queries or use the filter bar on any result set.</p>
@@ -8383,6 +8553,8 @@ value || 'N/A'                                   Default for empty</pre>
     });
     document.getElementById('console-body').style.display = tab === 'sql' ? '' : 'none';
     document.getElementById('ai-body').style.display = tab === 'ai' ? '' : 'none';
+    document.getElementById('btn-sql-history').style.display = tab === 'sql' ? '' : 'none';
+    if (tab !== 'sql') closeSQLHistory();
     if (tab === 'ai') {
       populateTableSelect();
       detectAIProvider();
@@ -11535,6 +11707,7 @@ choose(value, 'A', 'Active', 'I', 'Inactive')
     cancelQuery,
     clearConsole,
     runConsole,
+    toggleSQLHistory,
     layoutTileH,
     layoutTileV,
     layoutGrid,
