@@ -77,6 +77,7 @@ const app = (() => {
     setupSQLHighlight();
     setupMenuClose();
     setupAI();
+    setupAIUnlockDetection();
     setupBrowserResize();
     fixShortcutLabels();
     loadPersistedPlugins();
@@ -141,7 +142,7 @@ const app = (() => {
     // Highlight AI panel when hovering over it during a drag
     const aiBody = document.getElementById('ai-body');
     let aiDragCounter = 0;
-    aiBody.addEventListener('dragenter', () => { aiDragCounter++; aiBody.classList.add('ai-drag-over'); });
+    aiBody.addEventListener('dragenter', () => { if (!_aiUnlocked) return; aiDragCounter++; aiBody.classList.add('ai-drag-over'); });
     aiBody.addEventListener('dragleave', () => { aiDragCounter--; if (aiDragCounter <= 0) { aiDragCounter = 0; aiBody.classList.remove('ai-drag-over'); } });
 
     document.addEventListener('dragover', (e) => {
@@ -157,7 +158,7 @@ const app = (() => {
       aiBody.classList.remove('ai-drag-over');
 
       // If dropped on AI panel and files are images, handle as AI image upload
-      if (aiBody && aiBody.style.display !== 'none' && aiBody.contains(e.target)) {
+      if (aiBody && _aiUnlocked && aiBody.style.display !== 'none' && aiBody.contains(e.target)) {
         const files = [...e.dataTransfer.files];
         const images = files.filter(isImageFile);
         if (images.length > 0) {
@@ -7578,7 +7579,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.50 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.51 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `, true);
@@ -7591,7 +7592,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <p>Install from PyPI with <code>pip install csvsql</code>, then run <code>csvsql</code> to start. If <code>csvsql</code> conflicts with another command on your system, use <code>csvsqlw</code> instead &mdash; it&rsquo;s an identical alias.</p>
 
 <h4>Privacy</h4>
-<p>Your data never leaves your device. Files are parsed, edited, and queried entirely in your browser; there is no backend, no telemetry, and no analytics, and CSVSQL never uploads your data to any server. The only network activity the app ever performs is at your explicit request: <strong>File &rarr; Open URL</strong> downloads a file from the URL you enter, and the optional AI assistant &mdash; which runs locally by default (WebLLM, Ollama) &mdash; sends your prompts and query results to a cloud provider only if you deliberately configure one (Claude, OpenAI, Gemini, or Grok) with your own API key.</p>
+<p>Your data never leaves your device. Files are parsed, edited, and queried entirely in your browser; there is no backend, no telemetry, and no analytics, and CSVSQL never uploads your data to any server. The only network activity the app ever performs is at your explicit request: <strong>File &rarr; Open URL</strong> downloads a file from the URL you enter.</p>
 
 <h4>Opening Files</h4>
 <p>Use <strong>File &rarr; Open</strong> (<code>Ctrl+O</code> / <code>&#8984;O</code>), <strong>File &rarr; Open URL</strong>, or drag and drop files onto the window. Hold <strong>Shift</strong> while opening or dropping to load files without headers &mdash; columns will be named A, B, C, &hellip; Z, AA, AB, etc.</p>
@@ -7712,7 +7713,7 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <li><strong>Close:</strong> Click the close button. <code>Ctrl</code>/<code>&#8984;</code>+click closes all windows.</li>
 <li><strong>Layout:</strong> Use the Windows menu to tile, grid, or cascade all windows.</li>
 <li><strong>Proportional scaling:</strong> Windows reposition and resize proportionally when the browser window or console panel is resized.</li>
-<li><strong>Dialog boxes:</strong> Prompts (New Table, Save As, Insert Column, Open URL) and AI Settings open as modal dialog boxes &mdash; the workspace dims behind them and they block the other windows until you confirm, press <code>Esc</code>, or click outside to dismiss. All dialog boxes &mdash; including these, the Column Manager, and the About windows &mdash; are draggable and resizable, but do not snap to window edges. Non-modal dialogs (Column Manager, Plugin About) always stay on top of regular windows, even when you click or focus other windows, and are excluded from layout operations (tile, grid, cascade).</li>
+<li><strong>Dialog boxes:</strong> Prompts (New Table, Save As, Insert Column, Open URL) open as modal dialog boxes &mdash; the workspace dims behind them and they block the other windows until you confirm, press <code>Esc</code>, or click outside to dismiss. All dialog boxes &mdash; including these, the Column Manager, and the About windows &mdash; are draggable and resizable, but do not snap to window edges. Non-modal dialogs (Column Manager, Plugin About) always stay on top of regular windows, even when you click or focus other windows, and are excluded from layout operations (tile, grid, cascade).</li>
 </ul>
 
 <h4>Tabbing and Docking</h4>
@@ -7765,35 +7766,7 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <tr><td><code>Ctrl+Enter</code></td><td>Execute SQL query</td></tr>
 <tr><td><code>Ctrl+Space</code> (SQL console or filter input)</td><td>Open the autocomplete dropdown</td></tr>
 <tr><td><code>Tab</code>/<code>Enter</code>, <code>&uarr;</code>/<code>&darr;</code>, <code>Escape</code> (autocomplete open)</td><td>Accept / navigate / dismiss suggestions</td></tr>
-<tr><td><code>Enter</code></td><td>Send AI prompt</td></tr>
-<tr><td><code>Shift+Enter</code></td><td>Newline in AI prompt</td></tr>
-<tr><td><code>Up</code> / <code>Down</code></td><td>AI prompt history</td></tr>
 </table>
-
-<h4>AI Analysis <em>(experimental)</em></h4>
-<p>The AI tab in the console panel lets you analyze your data using natural language. The AI has full SQL access to your data &mdash; it writes and executes queries automatically to answer your questions with exact results, regardless of dataset size. You can also chat with the AI without any tables loaded.</p>
-<p><strong>Six provider options:</strong></p>
-<ul>
-<li><strong>WebLLM (default):</strong> Runs entirely in the browser via WebGPU. Requires Chrome/Edge 113+. No install, no API key, no data leaves your machine.</li>
-<li><strong>Ollama:</strong> Local AI server. Install from <a href="https://ollama.com">ollama.com</a>, then run <code>ollama pull llama3.2</code>. Larger models than WebLLM, still fully local.</li>
-<li><strong>Claude (Anthropic):</strong> Cloud provider. Requires an API key from <a href="https://console.anthropic.com">console.anthropic.com</a>. Best reasoning quality.</li>
-<li><strong>OpenAI:</strong> Cloud provider. Requires an API key from <a href="https://platform.openai.com">platform.openai.com</a>.</li>
-<li><strong>Gemini (Google):</strong> Cloud provider. Requires an API key from <a href="https://aistudio.google.com/apikey">aistudio.google.com</a>. Generous free tier.</li>
-<li><strong>Grok (xAI):</strong> Cloud provider. Requires an API key from <a href="https://console.x.ai">console.x.ai</a>.</li>
-</ul>
-<p><strong>Usage:</strong> Switch to the AI tab, select one or more tables, type your question, and press <code>Enter</code> or click Run. Use <code>Shift+Enter</code> for multiline prompts. Press <code>Up</code>/<code>Down</code> arrow to recall previous prompts.</p>
-<p><strong>How it works:</strong> The AI receives column statistics and sample rows for context, then writes SQL queries in <code>\`\`\`sql</code> code blocks. These queries are executed automatically against the full dataset, and the results are fed back to the AI for analysis. This loop repeats (up to 5 rounds) until the AI has enough data to answer.</p>
-
-<h4>Rich AI Output</h4>
-<p>The AI can produce rich output beyond plain text:</p>
-<ul>
-<li><strong>Charts:</strong> Ask for a chart or visualization and the AI will render an interactive Chart.js chart inline. Example: &ldquo;show me a bar chart of sales by region&rdquo;</li>
-<li><strong>Formatted tables:</strong> Ask for a formatted table and the AI will render a styled HTML table. Example: &ldquo;show the top 10 rows as a table&rdquo;</li>
-<li><strong>PDF reports:</strong> Ask for a PDF or report and the AI will generate a downloadable PDF file. PDFs can include text, tables, embedded charts, and images. Example: &ldquo;generate a PDF report with charts and summary statistics&rdquo;</li>
-</ul>
-<p><strong>Images:</strong> Drag and drop PNG or JPG images onto the AI chat area to upload them. Uploaded images appear as thumbnails above the input field and can be included in PDF reports (e.g., as a logo). Click &times; to remove an image.</p>
-<p>The AI queries your data with SQL first, then uses the results to build the rich output. Chart.js and jsPDF libraries are loaded on demand when first needed.</p>
-<p>Click the gear icon &#9881; to configure the provider, model, and API keys.</p>
 
 <h4>Plugins</h4>
 <p>Plugins customize how cell values are displayed. A plugin is a JSON config file that maps table and column name patterns to display expressions written in the CSVSQL expression language.</p>
@@ -7884,6 +7857,91 @@ value || 'N/A'                                   Default for empty</pre>
     setStatus(msg, type);
   }
 
+  // ---- AI unlock ----
+  // The AI assistant is hidden unless Shift is held while the page loads. While
+  // locked, the AI tab is invisible and the app performs NO AI-related activity
+  // (no provider probing, no engine loading, no network requests of any kind).
+  let _aiUnlocked = false;
+
+  function unlockAI() {
+    if (_aiUnlocked) return;
+    _aiUnlocked = true;
+    const tabBtn = document.getElementById('console-tab-ai');
+    if (tabBtn) tabBtn.style.display = '';
+    const privacy = document.querySelector('.empty-state-privacy');
+    if (privacy) {
+      privacy.innerHTML = '\u{1F512} Your data stays entirely in this browser and is never sent to any server &mdash; unless you use an AI model that sends data to a server (a cloud provider you configure on the AI tab).';
+    }
+  }
+
+  // Detect Shift held down while the page loads. The browser has no API to poll
+  // keyboard state, and a held key emits no events by itself — the only proof
+  // that Shift is down is the shiftKey modifier flag on an input event. So:
+  // while the page is still loading, any event with shiftKey set unlocks. Once
+  // the page has fully loaded, an event with shiftKey set unlocks (Shift still
+  // physically down at that moment, e.g. a mouse move while holding it), with
+  // one exclusion: Shift's own keydown — pressing Shift after the page has
+  // loaded must do nothing, and it ends detection. Other keys may be pressed
+  // and released freely (e.g. the rest of a Ctrl+Shift+R reload combo); their
+  // shift-less events are ignored. Detection ends without unlocking on Shift's
+  // own press or release, or on a shift-less pointer event (proof Shift is not
+  // down).
+  function setupAIUnlockDetection() {
+    // Deterministic path for same-tab reloads (Ctrl/Cmd+Shift+R etc.): the
+    // outgoing page tracks whether Shift is physically down (self-correcting
+    // via the modifier flag on every input event) and, if it is down when the
+    // page is torn down, leaves a one-shot sessionStorage flag that unlocks the
+    // incoming page — regardless of when or in what order the keys are
+    // released afterward. The event-based detection below remains as the
+    // fallback for first navigations, where there is no outgoing page to ask.
+    try {
+      if (sessionStorage.getItem('csvsql_ai_unlock')) {
+        sessionStorage.removeItem('csvsql_ai_unlock');
+        unlockAI();
+      }
+    } catch {}
+    let shiftDown = false;
+    const trackShift = (e) => { shiftDown = e.shiftKey === true; };
+    window.addEventListener('keydown', trackShift, true);
+    window.addEventListener('keyup', trackShift, true);
+    window.addEventListener('mousemove', trackShift, true);
+    window.addEventListener('mousedown', trackShift, true);
+    window.addEventListener('blur', () => { shiftDown = false; });
+    window.addEventListener('pagehide', () => {
+      try { if (shiftDown) sessionStorage.setItem('csvsql_ai_unlock', '1'); } catch {}
+    });
+    if (_aiUnlocked) return;
+
+    let loaded = document.readyState === 'complete';
+    if (!loaded) window.addEventListener('load', () => { loaded = true; }, { once: true });
+    const stop = () => {
+      window.removeEventListener('keydown', check, true);
+      window.removeEventListener('keyup', check, true);
+      window.removeEventListener('mousemove', check, true);
+      window.removeEventListener('mousedown', check, true);
+    };
+    const check = (e) => {
+      if (!loaded) {
+        if (e.shiftKey) { unlockAI(); stop(); }
+        return;
+      }
+      if (e.shiftKey && !(e.type === 'keydown' && e.key === 'Shift')) {
+        unlockAI();
+        stop();
+        return;
+      }
+      if (e.type === 'keydown' || e.type === 'keyup') {
+        if (e.key === 'Shift') stop();
+        return;
+      }
+      stop();
+    };
+    window.addEventListener('keydown', check, true);
+    window.addEventListener('keyup', check, true);
+    window.addEventListener('mousemove', check, true);
+    window.addEventListener('mousedown', check, true);
+  }
+
   // Tab switching
   function setupConsoleTabs() {
     const tabs = document.querySelectorAll('.console-tab');
@@ -7895,6 +7953,7 @@ value || 'N/A'                                   Default for empty</pre>
   }
 
   function switchConsoleTab(tab) {
+    if (tab === 'ai' && !_aiUnlocked) return;
     _activeConsoleTab = tab;
     document.querySelectorAll('.console-tab').forEach(t => {
       t.classList.toggle('active', t.dataset.tab === tab);
@@ -8528,6 +8587,7 @@ You can optionally set "width" (in PDF points, max is page width). Reference ima
 
   // Run AI analysis
   async function runAI() {
+    if (!_aiUnlocked) return;
     const sel = document.getElementById('ai-table-select');
     const input = document.getElementById('ai-input');
     const respDiv = document.getElementById('ai-response');
@@ -11103,6 +11163,8 @@ choose(value, 'A', 'Active', 'I', 'Inactive')
         get _activeFindWin() { return _activeFindWin; },
         closeWindow,
         showAISettings, showAbout, showManual, showPrompt,
+        unlockAI,
+        get aiUnlocked() { return _aiUnlocked; },
       }
     } : {}),
   };

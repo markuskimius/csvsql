@@ -88,7 +88,7 @@
           <button onclick="app.loadExampleData()">Try Example Data</button>
         </div>
         <p class="empty-state-hint">Every file becomes a SQL table &mdash; query and join them in the console below.</p>
-        <p class="empty-state-privacy">&#128274; Your data stays on your device &mdash; files are opened, edited, and queried entirely in this browser and are never sent to any server. The optional AI assistant runs locally by default and only contacts a cloud service if you explicitly configure one.</p>
+        <p class="empty-state-privacy">&#128274; Your data stays on your device &mdash; files are opened, edited, and queried entirely in this browser and are never sent to any server.</p>
       </section>
     </div>
   </div>
@@ -98,7 +98,7 @@
     <div id="console-header">
       <div id="console-tabs">
         <button class="console-tab active" data-tab="sql">SQL</button>
-        <button class="console-tab" data-tab="ai">AI <span style="font-size:9px;opacity:0.6;">(experimental)</span></button>
+        <button class="console-tab" data-tab="ai" id="console-tab-ai" style="display:none">AI <span style="font-size:9px;opacity:0.6;">(experimental)</span></button>
       </div>
       <div id="console-actions">
         <button onclick="app.runConsole()" title="Execute (Ctrl+Enter)">Run</button>

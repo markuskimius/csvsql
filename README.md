@@ -2,7 +2,7 @@
 
 A browser-based CSV database application. Open CSV, Excel, and compressed files as database tables, run SQL queries, edit data inline, and save — all in a multi-window interface with no server, build step, or internet connection required. Fully self-contained with all dependencies bundled locally.
 
-**Private by design** — your data never leaves your device. Files are parsed, edited, and queried entirely in the browser; there is no backend, telemetry, or analytics. The only network activity is user-initiated: Open URL downloads the file you ask for, and the optional AI assistant (local WebLLM/Ollama by default) contacts a cloud provider only if you explicitly configure Claude, OpenAI, Gemini, or Grok with your own API key.
+**Private by design** — your data never leaves your device. Files are parsed, edited, and queried entirely in the browser; there is no backend, telemetry, or analytics. The only network activity is user-initiated: Open URL downloads the file you ask for.
 
 **[Try the live version](https://app.cbreak.org/csvsql/)**
 
@@ -33,7 +33,6 @@ A browser-based CSV database application. Open CSV, Excel, and compressed files 
 - **Save** — Write directly back to the original file (Chrome/Edge) or download. Save As supports CSV, TSV, PSV, Excel, Gzip, and ZIP formats
 - **Frozen row-number column** — The `#` column stays pinned on the left edge when scrolling horizontally, so you always know which row you're looking at. Column headers use opaque backgrounds so scrolling data never shows through — including when a column is selected
 - **Virtual scrolling** — Handles large datasets efficiently
-- **AI analysis** *(experimental)* — Natural language data analysis with automatic SQL query execution, inline charts, formatted tables, and PDF report generation. Supports WebLLM (in-browser), Ollama (local), Claude, OpenAI, Gemini, and Grok
 
 ## Installation
 
@@ -160,27 +159,6 @@ INSERT, UPDATE, DELETE, ALTER TABLE, and DROP TABLE all work. Changes to existin
 
 <!-- ![SQL Console](screenshots/sql-console.png) -->
 
-### AI Analysis *(experimental)*
-
-The AI tab lets you analyze data using natural language. The AI automatically writes and executes SQL queries against your full dataset, so it works with tables of any size. You can also chat with the AI without any tables loaded.
-
-**Providers:**
-
-| Provider | Type | Setup |
-|----------|------|-------|
-| WebLLM (default) | In-browser | No setup — runs via WebGPU in Chrome/Edge 113+ |
-| Ollama | Local | Install from [ollama.com](https://ollama.com), run `ollama pull llama3.2` |
-| Claude | Cloud | API key from [console.anthropic.com](https://console.anthropic.com) |
-| OpenAI | Cloud | API key from [platform.openai.com](https://platform.openai.com) |
-| Gemini | Cloud | API key from [aistudio.google.com](https://aistudio.google.com/apikey) |
-| Grok (xAI) | Cloud | API key from [console.x.ai](https://console.x.ai) |
-
-Type a question and press **Enter** to send. Use **Shift+Enter** for multiline prompts and **Up/Down** arrows for prompt history. Click the gear icon to configure provider, model, and API keys.
-
-The AI receives column statistics and sample rows, then writes SQL queries to get exact answers. Queries are executed automatically and results fed back for up to 5 rounds of analysis.
-
-**Rich output:** The AI can render inline charts (Chart.js), formatted tables, and downloadable PDF reports. Ask for a visualization, a formatted table, or a PDF report and it will appear inline in the chat. Chart.js and jsPDF are loaded on demand when first needed. Drag and drop images (PNG, JPG) onto the AI chat area to upload them for inclusion in PDF reports (e.g., company logos).
-
 ### Saving Files
 
 - **Save** (Ctrl+S / Cmd+S) — Writes directly back to the original file on Chrome/Edge (via File System Access API). On Firefox, triggers a download
@@ -197,7 +175,7 @@ The AI receives column statistics and sample rows, then writes SQL queries to ge
 - **Close** — Click the close button. Ctrl/Cmd+click closes all windows
 - **Layout** — Use the Windows menu to Tile Horizontally, Tile Vertically, Grid, or Cascade
 - **Proportional scaling** — Windows reposition and resize proportionally when the browser window or console panel is resized
-- **Dialog boxes** — Prompts (New Table, Save As, Insert Column, Open URL) and AI Settings open as modal dialog boxes: the workspace dims behind them and they block other windows until you confirm, press Esc, or click outside to dismiss. All dialog boxes — including these, the Column Manager, and the About windows — are draggable and resizable but do not snap to window edges. Non-modal dialogs (Column Manager, Plugin About) always stay on top of regular windows, even when you click or focus other windows, and are excluded from layout operations (tile, grid, cascade)
+- **Dialog boxes** — Prompts (New Table, Save As, Insert Column, Open URL) open as modal dialog boxes: the workspace dims behind them and they block other windows until you confirm, press Esc, or click outside to dismiss. All dialog boxes — including these, the Column Manager, and the About windows — are draggable and resizable but do not snap to window edges. Non-modal dialogs (Column Manager, Plugin About) always stay on top of regular windows, even when you click or focus other windows, and are excluded from layout operations (tile, grid, cascade)
 
 ### Tabbing and Docking
 
@@ -310,9 +288,6 @@ The in-app **Plugins > Expression Reference** has the full language documentatio
 | Ctrl+Enter / Cmd+Enter | Execute SQL query |
 | Ctrl+Space (SQL console or filter input) | Open the autocomplete dropdown |
 | Tab/Enter, Up/Down, Escape (autocomplete open) | Accept / navigate / dismiss suggestions |
-| Enter (AI tab) | Send AI prompt |
-| Shift+Enter (AI tab) | Newline in AI prompt |
-| Up / Down (AI tab) | AI prompt history |
 | Tab / Shift+Tab (editing) | Move to next / previous cell (stays in edit mode) |
 | Enter (editing) | Move down to the column where editing started (stays in edit mode) |
 | Escape | Cancel cell edit |
