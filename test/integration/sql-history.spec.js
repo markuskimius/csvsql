@@ -193,3 +193,23 @@ test.describe('SQL history panel', () => {
     await expect(page.locator('.sql-history-clear')).toBeDisabled();
   });
 });
+
+test.describe('SQL history on touch devices', () => {
+  test.use({ hasTouch: true, isMobile: true });
+
+  test('run button executes without focusing the input (no soft keyboard)', async ({ page }) => {
+    await openApp(page);
+    await uploadFile(page, '../test/sample1.csv');
+    await waitForWindow(page, 'sample1');
+    await executeSQL(page, Q1);
+    await input(page).fill('');
+    await input(page).blur();
+    const before = await getWindowCount(page);
+    await page.locator('#btn-sql-history').click();
+    await page.locator('.sql-history-item .sql-history-run').first().click();
+    await expect(page.locator('#sql-history-panel')).toHaveCount(0);
+    await page.waitForFunction((n) => app._test.windows.length > n, before);
+    await expect(input(page)).toHaveValue(Q1);
+    await expect(input(page)).not.toBeFocused();
+  });
+});

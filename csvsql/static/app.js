@@ -6459,7 +6459,8 @@ const app = (() => {
       runBtn.textContent = '▶';
       runBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        loadHistoryEntry(q);
+        // No focus on touch devices — executing directly shouldn't pop the soft keyboard
+        loadHistoryEntry(q, { focus: !window.matchMedia('(pointer: coarse)').matches });
         closeSQLHistory();
         executeQuery();
       });
@@ -6477,13 +6478,13 @@ const app = (() => {
 
   // Puts a history entry into the console input (editable before executing)
   // and resets Up/Down history navigation to the end
-  function loadHistoryEntry(q) {
+  function loadHistoryEntry(q, opts) {
     const input = document.getElementById('sql-input');
     input.value = q;
     _sqlHistoryIdx = _sqlHistory.length;
     _sqlHistoryDraft = '';
     _syncSQLHighlight();
-    input.focus();
+    if (!opts || opts.focus !== false) input.focus();
     input.setSelectionRange(q.length, q.length);
   }
 
@@ -8167,7 +8168,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.56 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.57 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `, true);
