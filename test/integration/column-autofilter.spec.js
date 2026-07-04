@@ -478,7 +478,9 @@ test.describe('Column AutoFilter', () => {
   });
 
   test('dropdown is right-aligned to column header', async ({ page }) => {
-    const th = page.locator('.data-table th:not(.row-num-header)').first();
+    // Use the last column: its right edge is far enough from the viewport's
+    // left edge that the 240px dropdown right-aligns without clamping.
+    const th = page.locator('.data-table th:not(.row-num-header)').last();
     await th.locator('.col-filter-btn').click();
     await page.waitForTimeout(300);
 

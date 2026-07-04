@@ -147,8 +147,10 @@ test.describe('Column reorder', () => {
       w.el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
     }, qName);
 
+    // Click the header's label (auto-fit columns are narrow, so the th
+    // center could land on the sort/filter buttons instead)
     const firstHeader = page.locator(`.subwindow.active table thead th`).nth(1);
-    await firstHeader.click();
+    await firstHeader.locator('.col-name').click();
 
     await page.evaluate(() => document.body.focus());
     await page.keyboard.press('Control+ArrowRight');

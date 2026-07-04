@@ -522,3 +522,140 @@ test.describe('Row-number column resize', () => {
     expect(tableWidth).toBe(expectedWidth);
   });
 });
+
+test.describe('Initial auto-fit on load', () => {
+  const { executeSQL } = require('../helpers');
+
+  async function uploadCSVBuffer(page, name, csv) {
+    await page.locator('#file-input').setInputFiles({
+      name, mimeType: 'text/csv', buffer: Buffer.from(csv),
+    });
+    await waitForWindow(page, name.replace(/\.csv$/, ''));
+    await page.waitForTimeout(200);
+  }
+
+  test('initial widths are content-proportional, not evenly distributed', async ({ page }) => {
+    await openApp(page);
+    await uploadCSVBuffer(page, 'fit1.csv',
+      'a,medium_column,long_header_column_name\n' +
+      'x,hello world,some longer cell content here\n'.repeat(5));
+
+    const widths = await getColWidths(page);
+    expect(widths.length).toBe(3);
+    // Short column should be much narrower than the long ones
+    expect(widths[0]).toBeLessThan(widths[1]);
+    expect(widths[1]).toBeLessThan(widths[2]);
+    // Short column should sit near the content-fit floor, not stretched to fill
+    expect(widths[0]).toBeLessThan(100);
+  });
+
+  test('initial widths match a manual auto-fit-all (parity)', async ({ page }) => {
+    await openApp(page);
+    await uploadFile(page, '../test/sample1.csv');
+    await waitForWindow(page, 'sample1');
+    await page.waitForTimeout(200);
+
+    const { initial, refit, rowNumInitial, rowNumRefit } = await page.evaluate(() => {
+      const win = app._test.windows[0];
+      const initial = [...win.colWidths];
+      const rowNumInitial = win.rowNumWidth;
+      app._test.autoFitAllColumns(win);
+      return {
+        initial, refit: [...win.colWidths],
+        rowNumInitial, rowNumRefit: win.rowNumWidth,
+      };
+    });
+    expect(refit).toEqual(initial);
+    expect(rowNumRefit).toBe(rowNumInitial);
+  });
+
+  test('colgroup col widths match colWidths after load', async ({ page }) => {
+    await openApp(page);
+    await uploadFile(page, '../test/sample1.csv');
+    await waitForWindow(page, 'sample1');
+    await page.waitForTimeout(200);
+
+    const { colWidths, domWidths } = await page.evaluate(() => {
+      const win = app._test.windows[0];
+      const cols = [...win._colgroup.querySelectorAll('col')].slice(1);
+      return {
+        colWidths: [...win.colWidths],
+        domWidths: cols.map(c => parseInt(c.style.width)),
+      };
+    });
+    expect(domWidths).toEqual(colWidths);
+  });
+
+  test('very long content is capped at 75% of the window width', async ({ page }) => {
+    await openApp(page);
+    await uploadCSVBuffer(page, 'wide.csv',
+      'short,huge\nx,' + 'y'.repeat(2000) + '\n');
+
+    const { width, cap } = await page.evaluate(() => {
+      const win = app._test.windows[0];
+      return {
+        width: win.colWidths[1],
+        cap: Math.floor(win.el.offsetWidth * 0.75),
+      };
+    });
+    expect(width).toBe(cap);
+  });
+
+  test('long value far below the visible rows still widens the column', async ({ page }) => {
+    await openApp(page);
+    const rows = [];
+    for (let i = 1; i <= 300; i++) {
+      rows.push(i === 250
+        ? `r${i},this is a very long cell value that only appears deep in the file`
+        : `r${i},short`);
+    }
+    await uploadCSVBuffer(page, 'deep.csv', 'id,val\n' + rows.join('\n') + '\n');
+
+    const widths = await getColWidths(page);
+    // The long row-250 value must have been measured (old behavior only
+    // measured the visible rows and would leave this column narrow)
+    expect(widths[1]).toBeGreaterThan(250);
+  });
+
+  test('rows beyond the 5000-row sampling cap are not measured', async ({ page }) => {
+    await openApp(page);
+    const rows = [];
+    for (let i = 1; i <= 5100; i++) {
+      rows.push(i === 5090
+        ? `r${i},this extremely long value sits past the load-time sampling cap and is skipped`
+        : `r${i},short`);
+    }
+    await uploadCSVBuffer(page, 'huge.csv', 'id,val\n' + rows.join('\n') + '\n');
+
+    const widths = await getColWidths(page);
+    expect(widths[1]).toBeLessThan(150);
+  });
+
+  test('row-number column auto-fits on load', async ({ page }) => {
+    await openApp(page);
+    await uploadFile(page, '../test/sample1.csv');
+    await waitForWindow(page, 'sample1');
+    await page.waitForTimeout(200);
+
+    const rowNumWidth = await page.evaluate(() => app._test.windows[0].rowNumWidth);
+    // 10 rows: fitted width is narrower than the old fixed 50px default
+    expect(rowNumWidth).toBeGreaterThanOrEqual(30);
+    expect(rowNumWidth).toBeLessThan(50);
+  });
+
+  test('query result windows auto-fit on first render', async ({ page }) => {
+    await openApp(page);
+    await uploadFile(page, '../test/sample1.csv');
+    await waitForWindow(page, 'sample1');
+    await executeSQL(page, "SELECT 'x' AS tiny, 'a much longer literal value here' AS wide FROM sample1 LIMIT 3");
+    await page.waitForTimeout(300);
+
+    const widths = await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.isQuery);
+      return w ? [...w.colWidths] : null;
+    });
+    expect(widths).not.toBeNull();
+    expect(widths[0]).toBeLessThan(100);
+    expect(widths[1]).toBeGreaterThan(widths[0] + 50);
+  });
+});

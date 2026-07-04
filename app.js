@@ -38,6 +38,9 @@ const app = (() => {
   const ROW_HEIGHT = 26;
   const OVERSCAN = 10;
 
+  // Max rows sampled by the initial-load auto-fit (keeps huge files fast)
+  const AUTO_FIT_LOAD_MAX_ROWS = 5000;
+
   // Debounced sync timers
   const syncTimers = {};
 
@@ -4257,15 +4260,10 @@ const app = (() => {
     renderVisibleRows(win);
 
     if (!win.colWidths) {
-      const ths = table.querySelectorAll('thead th:not(.row-num-header)');
+      // First build for this window: auto-fit every column to its content
       win.colWidths = [];
-      for (const th of ths) win.colWidths.push(th.offsetWidth);
-      const cols = colgroup.querySelectorAll('col');
-      for (let i = 0; i < win.colWidths.length; i++) {
-        cols[i + 1].style.width = win.colWidths[i] + 'px';
-      }
       table.classList.add('fixed-layout');
-      updateTableWidth(win);
+      autoFitAllColumns(win, AUTO_FIT_LOAD_MAX_ROWS);
     }
 
     // Scroll listener for virtual scrolling
@@ -5609,7 +5607,7 @@ const app = (() => {
     updateTableWidth(win);
   }
 
-  function autoFitAllColumns(win) {
+  function autoFitAllColumns(win, maxRows) {
     const MIN_COL_WIDTH = 40;
     const MIN_ROWNUM_WIDTH = 30;
     const MAX_ROWNUM_WIDTH = 200;
@@ -5626,6 +5624,7 @@ const app = (() => {
 
     const columns = win._columns;
     const displayRows = win._displayRows;
+    const rowLimit = maxRows ? Math.min(displayRows.length, maxRows) : displayRows.length;
 
     for (let colIdx = 0; colIdx < columns.length; colIdx++) {
       const col = columns[colIdx];
@@ -5634,7 +5633,7 @@ const app = (() => {
 
       const useTransform = !win.disabledTransforms.has(col) && hasDisplayTransform(win.tableName, col);
 
-      for (let i = 0; i < displayRows.length; i++) {
+      for (let i = 0; i < rowLimit; i++) {
         const row = displayRows[i];
         measurer.textContent = useTransform
           ? String(getDisplayValue(win.tableName, col, row))
@@ -7579,7 +7578,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.51 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.52 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `, true);
@@ -7635,7 +7634,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <li><strong>Select a column:</strong> Click a column header to select the entire column. Click the sort badge (triangle) to sort. Selection is the target for <code>Ctrl</code>/<code>&#8984;</code>+<code>&larr;</code>/<code>&rarr;</code> column reorder.</li>
 <li><strong>Reorder columns:</strong> Drag a column header to a new position. Click a column header to select it, then press <code>Ctrl</code>/<code>&#8984;</code>+<code>&larr;</code>/<code>&rarr;</code> to nudge it.</li>
 <li><strong>Column Manager:</strong> Open via <strong>Edit &rarr; Manage Columns&hellip;</strong>, <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>M</code>, or right-click a column header. Shows a searchable vertical list of all columns. Click to select, Shift+click for range, Ctrl/&#8984;+click to toggle. Drag to reorder within the list or drop onto the table&rsquo;s column headers. Use <code>Alt</code>+<code>&uarr;</code>/<code>&darr;</code> to move selected columns. Double-click a column name to scroll the table to it. All reorders are batched into a single undo entry when the manager closes.</li>
-<li><strong>Resize columns:</strong> Drag any column border to resize &mdash; the resize handle spans both sides of the divider line, including the <code>#</code> row-number column. Double-click the border to auto-fit the column to its content (measures all rows, not just visible ones). When multiple columns are selected (e.g. via Ctrl+A), double-click auto-fits all selected columns, and drag-resize sets all selected columns to the dragged column&rsquo;s width on release. Column widths are fixed after initial load and survive sorting and filtering.</li>
+<li><strong>Resize columns:</strong> Columns auto-fit to their content when a table first opens (very wide columns are capped at 75% of the window). Drag any column border to resize &mdash; the resize handle spans both sides of the divider line, including the <code>#</code> row-number column. Double-click the border to auto-fit the column to its content (measures all rows, not just visible ones). When multiple columns are selected (e.g. via Ctrl+A), double-click auto-fits all selected columns, and drag-resize sets all selected columns to the dragged column&rsquo;s width on release. Column widths survive sorting and filtering.</li>
 <li><strong>Frozen row-number column:</strong> The <code>#</code> row-number column stays fixed on the left edge when scrolling horizontally, so you always know which row you&rsquo;re looking at. Column headers use opaque backgrounds so scrolling data never shows through &mdash; including when a column is selected.</li>
 <li><strong>Rename tables:</strong> <code>Ctrl</code>/<code>&#8984;</code>+click the window title.</li>
 </ul>
