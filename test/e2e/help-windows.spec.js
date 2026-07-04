@@ -141,6 +141,35 @@ test.describe('Help Windows', () => {
     expect(headings).toContain('SELECT INTO');
   });
 
+  test('manual documents the hosted instance before the pip install instructions', async ({ page }) => {
+    await page.evaluate(() => app.showManual());
+    await page.waitForSelector('.help-body');
+
+    const link = page.locator('.help-body a[href="https://app.cbreak.org/csvsql/"]');
+    await expect(link).toHaveCount(1);
+    await expect(link).toHaveAttribute('target', '_blank');
+
+    const order = await page.evaluate(() => {
+      const body = document.querySelector('.help-body').innerHTML;
+      return {
+        hosted: body.indexOf('app.cbreak.org/csvsql'),
+        pip: body.indexOf('pip install csvsql'),
+      };
+    });
+    expect(order.hosted).toBeGreaterThan(-1);
+    expect(order.pip).toBeGreaterThan(-1);
+    expect(order.hosted).toBeLessThan(order.pip);
+  });
+
+  test('about dialog version matches pyproject.toml', async ({ page }) => {
+    const toml = require('fs').readFileSync(require('path').join(__dirname, '../../pyproject.toml'), 'utf8');
+    const version = toml.match(/^version = "([^"]+)"/m)[1];
+
+    await page.evaluate(() => app.showAbout());
+    await page.waitForSelector('.help-body');
+    await expect(page.locator('.help-body')).toContainText(`Version ${version}`);
+  });
+
   test('pre elements scroll horizontally for long content', async ({ page }) => {
     await page.evaluate(() => app.showManual());
     await page.waitForSelector('.help-body pre');

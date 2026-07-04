@@ -34,9 +34,15 @@ A browser-based CSV database application. Open CSV, Excel, and compressed files 
 - **Frozen row-number column** — The `#` column stays pinned on the left edge when scrolling horizontally, so you always know which row you're looking at. Column headers use opaque backgrounds so scrolling data never shows through — including when a column is selected
 - **Virtual scrolling** — Handles large datasets efficiently
 
-## Installation
+## Getting Started
 
-### Option 1: pip (recommended)
+No installation is needed — use the hosted instance at **[https://app.cbreak.org/csvsql/](https://app.cbreak.org/csvsql/)**. Even there, all data processing happens locally in your browser; your files are never uploaded.
+
+## Installation (optional)
+
+If you'd rather run a standalone copy:
+
+### Option 1: pip
 
 ```sh
 pip install csvsql

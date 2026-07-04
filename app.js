@@ -8168,7 +8168,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.59 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.60 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
       <h4>Third-Party Libraries</h4>
@@ -8180,7 +8180,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
     showHelpWindow("User's Manual", `
 <h4>Overview</h4>
 <p>CSVSQL treats CSV and other data files as database tables. Open files, edit cells, run SQL queries, and save &mdash; all in the browser with no server required.</p>
-<p>Install from PyPI with <code>pip install csvsql</code>, then run <code>csvsql</code> to start. If <code>csvsql</code> conflicts with another command on your system, use <code>csvsqlw</code> instead &mdash; it&rsquo;s an identical alias.</p>
+<p>No installation is needed &mdash; use the hosted instance at <a href="https://app.cbreak.org/csvsql/" target="_blank">app.cbreak.org/csvsql</a>. Even there, all data processing happens locally in your browser (see Privacy below).</p>
+<p>If you&rsquo;d rather run a standalone copy, install from PyPI with <code>pip install csvsql</code>, then run <code>csvsql</code> to start. If <code>csvsql</code> conflicts with another command on your system, use <code>csvsqlw</code> instead &mdash; it&rsquo;s an identical alias.</p>
 
 <h4>Privacy</h4>
 <p>Your data never leaves your device. Files are parsed, edited, and queried entirely in your browser; there is no backend, no telemetry, and no analytics, and CSVSQL never uploads your data to any server. The only network activity the app ever performs is at your explicit request: <strong>File &rarr; Open URL</strong> downloads a file from the URL you enter.</p>

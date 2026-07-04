@@ -2,7 +2,7 @@
 
 ## What This Is
 
-CSVSQL is a browser-based CSV database: CSV files become SQL-queryable tables with editable cells in a multi-window interface. No build step or server required — open `index.html` directly in a browser. Also distributed via PyPI (`pip install csvsql`).
+CSVSQL is a browser-based CSV database: CSV files become SQL-queryable tables with editable cells in a multi-window interface. No build step or server required — open `index.html` directly in a browser. Also distributed via PyPI (`pip install csvsql`). The hosted instance at https://app.cbreak.org/csvsql/ is the primary usage path (pip = optional standalone); documented in README and the manual Overview — keep in sync.
 
 ## Privacy Guarantee (hard constraint)
 
@@ -68,10 +68,6 @@ Text targets WCAG 4.5:1: `--text-dim` #aaaacc (secondary text), `--text-disabled
 
 Each row's primary key is its `_rownum` property (1-based index). Renumbered on insert/delete. Not a real column — excluded from CSV export.
 
-## Development
-
-No build tools — open `index.html` directly or serve with `python3 -m http.server 8000`; all dependencies are bundled locally.
-
 ## Testing
 
 Playwright test suite (Chromium only), organized into `test/unit/`, `test/integration/`, `test/e2e/`.
@@ -95,10 +91,10 @@ Fixtures (`sample1.csv`, `sample.xlsx`, …) live in `test/`.
 
 Published as `csvsql` on PyPI. The Python package in `csvsql/` serves static files via `cli.py`.
 
-**IMPORTANT:** `csvsql/static/` contains copies of the root static files (`app.js`, `index.html`, `style.css`, `THIRD-PARTY-NOTICES.md`, `lib/`, `example/`). These are NOT auto-synced — whenever you modify any root static file, you MUST copy it to `csvsql/static/` as well, or the `csvsql`/`csvsqlw` command will serve stale files.
+**IMPORTANT:** `csvsql/static/` contains copies of the root static files (`app.js`, `index.html`, `style.css`, `THIRD-PARTY-NOTICES.md`, `lib/`, `example/`). These are NOT auto-synced — whenever you modify any root static file, you MUST copy it to `csvsql/static/` as well or the `csvsql` command will serve stale files.
 
 ```bash
-# Sync static files to PyPI package (run after ANY change to root static files)
+# Sync static files to PyPI package
 cp app.js index.html style.css THIRD-PARTY-NOTICES.md csvsql/static/ && cp lib/* csvsql/static/lib/ && cp -r example csvsql/static/
 
 # Build and publish
