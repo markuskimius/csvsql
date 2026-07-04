@@ -41,6 +41,9 @@ const app = (() => {
   // Max rows sampled by the initial-load auto-fit (keeps huge files fast)
   const AUTO_FIT_LOAD_MAX_ROWS = 5000;
 
+  // Workspaces narrower than this (phones) open new windows maximized
+  const AUTO_MAXIMIZE_MAX_WIDTH = 700;
+
   // Debounced sync timers
   const syncTimers = {};
 
@@ -77,6 +80,8 @@ const app = (() => {
     setupFileInput();
     setupDragAndDrop();
     setupKeyboard();
+    setupTouchDragBridge();
+    setupLongPress();
     setupSQLHighlight();
     setupMenuClose();
     setupAI();
@@ -951,8 +956,9 @@ const app = (() => {
     const area = document.getElementById('window-area');
     const rect = area.getBoundingClientRect();
     const cascadeOffset = ((windows.length) % 8) * 30;
-    const w = opts.width || Math.min(700, rect.width - 40);
-    const h = opts.height || Math.min(400, rect.height - 40);
+    // Explicit sizes are still clamped to the workspace (small/touch screens)
+    const w = Math.min(opts.width || Math.min(700, rect.width - 40), Math.max(200, rect.width - 20));
+    const h = Math.min(opts.height || Math.min(400, rect.height - 40), Math.max(140, rect.height - 20));
     const isDialog = !!opts.dialog;
     const isModal = !!opts.modal;
     // Modal dialogs center in the workspace; everything else cascades
@@ -1039,6 +1045,10 @@ const app = (() => {
 
     if (contentFn) contentFn(winObj, el.querySelector('.win-body'));
     focusWindow(id);
+
+    // Phone-sized workspaces: floating windows are impractical, open maximized
+    // (still restorable via the maximize button or drag)
+    if (!isDialog && rect.width < AUTO_MAXIMIZE_MAX_WIDTH) toggleMaximize(id);
 
     if (isModal) {
       // Dim the workspace behind the dialog and block interaction with other windows.
@@ -1465,6 +1475,49 @@ const app = (() => {
     };
     titlebar.addEventListener('touchend', endWinTouch);
     titlebar.addEventListener('touchcancel', endWinTouch);
+
+    // Touch: long-press (hold ~600ms without a prior tap) enters ghost/dock
+    // mode — the touch equivalent of Shift+drag. On fire the touch is handed
+    // to the drag bridge with shiftKey set, so the mouse ghost/dock path
+    // (detectDropTarget/showDropOverlay/executeDock) runs unchanged.
+    let dockHold = null;  // { touchId, startX, startY, timer }
+    titlebar.addEventListener('touchstart', (e) => {
+      if (e.touches.length !== 1 || e.target.tagName === 'BUTTON') return;
+      if (_touchWinDrag || _touchBridge || win.dockable === false) return;
+      const touch = e.touches[0];
+      const state = {
+        touchId: touch.identifier,
+        startX: touch.clientX, startY: touch.clientY,
+        timer: null,
+      };
+      state.timer = setTimeout(() => {
+        if (dockHold !== state || _touchWinDrag || _touchBridge) return;
+        dockHold = null;
+        if (navigator.vibrate) navigator.vibrate(10);
+        _touchBridge = {
+          touchId: state.touchId,
+          startX: state.startX, startY: state.startY,
+          moved: false, handle: null, secondTap: false, shiftKey: true,
+        };
+        synthMouseEvent('mousedown', state.startX, state.startY, titlebar);
+      }, LONG_PRESS_MS);
+      dockHold = state;
+    }, { passive: true });
+    titlebar.addEventListener('touchmove', (e) => {
+      if (!dockHold) return;
+      const touch = Array.from(e.changedTouches).find(t => t.identifier === dockHold.touchId);
+      if (!touch) return;
+      if (Math.abs(touch.clientX - dockHold.startX) > LONG_PRESS_MOVE_TOLERANCE ||
+          Math.abs(touch.clientY - dockHold.startY) > LONG_PRESS_MOVE_TOLERANCE) {
+        clearTimeout(dockHold.timer);
+        dockHold = null;
+      }
+    }, { passive: true });
+    const cancelDockHold = () => {
+      if (dockHold) { clearTimeout(dockHold.timer); dockHold = null; }
+    };
+    titlebar.addEventListener('touchend', cancelDockHold);
+    titlebar.addEventListener('touchcancel', cancelDockHold);
   }
 
   function setupWindowResize(win) {
@@ -3395,29 +3448,7 @@ const app = (() => {
         sortBtn.addEventListener('click', (e) => {
           e.stopPropagation();
           e.preventDefault();
-          const existing = win.sortCols.findIndex(s => s.col === col);
-          if (e.shiftKey) {
-            if (existing !== -1) {
-              if (win.sortCols[existing].dir === 'asc') {
-                win.sortCols[existing].dir = 'desc';
-              } else {
-                win.sortCols.splice(existing, 1);
-              }
-            } else {
-              win.sortCols.push({ col, dir: 'asc' });
-            }
-          } else {
-            if (existing !== -1 && win.sortCols.length === 1) {
-              if (win.sortCols[0].dir === 'asc') {
-                win.sortCols[0].dir = 'desc';
-              } else {
-                win.sortCols = [];
-              }
-            } else {
-              win.sortCols = [{ col, dir: 'asc' }];
-            }
-          }
-          rebuildTable(win);
+          toggleColumnSort(win, col, e.shiftKey);
         });
         thInner.appendChild(sortBtn);
       }
@@ -3594,7 +3625,7 @@ const app = (() => {
           if (navigator.vibrate) navigator.vibrate(10);
         }
         if (_touchHeaderDrag.dragging) {
-          e.preventDefault();
+          if (e.cancelable) e.preventDefault();
           _touchHeaderDrag.ghost.style.left = touch.clientX + 'px';
           _touchHeaderDrag.ghost.style.top = touch.clientY + 'px';
           const ths = headerRow.querySelectorAll('th:not(.row-num-header)');
@@ -5789,12 +5820,44 @@ const app = (() => {
     _activeAutoFilter.el.remove();
     document.removeEventListener('mousedown', _autoFilterOutsideClick);
     document.removeEventListener('keydown', _autoFilterEscapeKey);
-    window.removeEventListener('resize', closeAutoFilter);
+    window.removeEventListener('resize', _autoFilterResize);
     if (_activeAutoFilter.scrollHandler) {
       const container = _activeAutoFilter.win.bodyEl.querySelector('.table-container');
       if (container) container.removeEventListener('scroll', _activeAutoFilter.scrollHandler);
     }
     _activeAutoFilter = null;
+  }
+
+  function _autoFilterResize() {
+    if (!_activeAutoFilter) return;
+    // Focusing the dropdown's search input pops the soft keyboard, which
+    // resizes the layout viewport (interactive-widget=resizes-content) and
+    // fires this handler — closing here would tear the dropdown down the
+    // moment it opens. While focus is inside the dropdown, reposition into
+    // the new viewport instead; close only on unrelated resizes.
+    if (_activeAutoFilter.el.contains(document.activeElement)) {
+      positionAutoFilter(_activeAutoFilter.el, _activeAutoFilter.anchorEl);
+    } else {
+      closeAutoFilter();
+    }
+  }
+
+  // Position below the anchor header cell, right-aligned to its right edge;
+  // flips above and clamps when the viewport (possibly shrunk by a soft
+  // keyboard) can't fit it below.
+  function positionAutoFilter(dropdown, anchorEl) {
+    if (!anchorEl.isConnected) return;
+    const rect = anchorEl.getBoundingClientRect();
+    dropdown.style.maxHeight = Math.min(360, window.innerHeight - 16) + 'px';
+    let top = rect.bottom + 2;
+    const dRect = dropdown.getBoundingClientRect();
+    let left = rect.right - dRect.width;
+    if (top + dRect.height > window.innerHeight) top = rect.top - dRect.height - 2;
+    if (top < 4) top = 4;
+    if (left < 0) left = 4;
+    if (left + dRect.width > window.innerWidth) left = window.innerWidth - dRect.width - 8;
+    dropdown.style.top = top + 'px';
+    dropdown.style.left = left + 'px';
   }
 
   function _autoFilterOutsideClick(e) {
@@ -6000,30 +6063,66 @@ const app = (() => {
     renderList();
     document.body.appendChild(dropdown);
 
-    // Position below the anchor header cell, right-aligned to its right edge
-    const rect = anchorEl.getBoundingClientRect();
-    let top = rect.bottom + 2;
-    const dRect = dropdown.getBoundingClientRect();
-    let left = rect.right - dRect.width;
-    if (top + dRect.height > window.innerHeight) top = rect.top - dRect.height - 2;
-    if (left < 0) left = 4;
-    if (left + dRect.width > window.innerWidth) left = window.innerWidth - dRect.width - 8;
-    dropdown.style.top = top + 'px';
-    dropdown.style.left = left + 'px';
+    positionAutoFilter(dropdown, anchorEl);
 
-    searchInput.focus();
+    // Focusing the search box on a touch device pops the soft keyboard over
+    // the dropdown — let the user tap it if they want to search
+    if (!window.matchMedia('(pointer: coarse)').matches) searchInput.focus();
 
     // Close on outside click or Escape
     const scrollHandler = () => closeAutoFilter();
     const container = win.bodyEl.querySelector('.table-container');
     if (container) container.addEventListener('scroll', scrollHandler);
 
-    _activeAutoFilter = { win, col, el: dropdown, scrollHandler };
+    _activeAutoFilter = { win, col, el: dropdown, scrollHandler, anchorEl };
     setTimeout(() => {
       document.addEventListener('mousedown', _autoFilterOutsideClick);
       document.addEventListener('keydown', _autoFilterEscapeKey);
-      window.addEventListener('resize', closeAutoFilter);
+      window.addEventListener('resize', _autoFilterResize);
     }, 0);
+  }
+
+  // ---- Sorting (shared by the header sort button and the column context menu) ----
+  // additive = multi-sort behavior (Shift+click on the sort button): cycle this
+  // column asc → desc → removed without touching other sort columns; otherwise
+  // single-column cycle that replaces any existing sort.
+  function toggleColumnSort(win, col, additive) {
+    const existing = win.sortCols.findIndex(s => s.col === col);
+    if (additive) {
+      if (existing !== -1) {
+        if (win.sortCols[existing].dir === 'asc') {
+          win.sortCols[existing].dir = 'desc';
+        } else {
+          win.sortCols.splice(existing, 1);
+        }
+      } else {
+        win.sortCols.push({ col, dir: 'asc' });
+      }
+    } else {
+      if (existing !== -1 && win.sortCols.length === 1) {
+        if (win.sortCols[0].dir === 'asc') {
+          win.sortCols[0].dir = 'desc';
+        } else {
+          win.sortCols = [];
+        }
+      } else {
+        win.sortCols = [{ col, dir: 'asc' }];
+      }
+    }
+    rebuildTable(win);
+  }
+
+  // Set an explicit sort direction; additive appends to (or updates within)
+  // the existing multi-sort instead of replacing it.
+  function setColumnSort(win, col, dir, additive) {
+    const existing = win.sortCols.findIndex(s => s.col === col);
+    if (additive) {
+      if (existing !== -1) win.sortCols[existing].dir = dir;
+      else win.sortCols.push({ col, dir });
+    } else {
+      win.sortCols = [{ col, dir }];
+    }
+    rebuildTable(win);
   }
 
   // ---- Context Menus ----
@@ -6067,6 +6166,57 @@ const app = (() => {
     menu.className = 'context-menu';
     menu.style.left = x + 'px';
     menu.style.top = y + 'px';
+
+    const renameBtn = document.createElement('button');
+    renameBtn.textContent = 'Rename Column…';
+    renameBtn.addEventListener('click', () => {
+      removeContextMenu();
+      const th = win._table && win._table.querySelector(`thead th[data-col-idx="${colIdx}"]`);
+      if (th) startColumnRename(win, th, colName);
+    });
+    menu.appendChild(renameBtn);
+
+    menu.appendChild(document.createElement('hr'));
+
+    const sortIdx = win.sortCols.findIndex(s => s.col === colName);
+    const sortAscBtn = document.createElement('button');
+    sortAscBtn.textContent = 'Sort Ascending';
+    sortAscBtn.addEventListener('click', () => {
+      removeContextMenu();
+      setColumnSort(win, colName, 'asc', false);
+    });
+    menu.appendChild(sortAscBtn);
+
+    const sortDescBtn = document.createElement('button');
+    sortDescBtn.textContent = 'Sort Descending';
+    sortDescBtn.addEventListener('click', () => {
+      removeContextMenu();
+      setColumnSort(win, colName, 'desc', false);
+    });
+    menu.appendChild(sortDescBtn);
+
+    if (sortIdx === -1 && win.sortCols.length > 0) {
+      const multiSortBtn = document.createElement('button');
+      multiSortBtn.textContent = 'Add to Multi-sort';
+      multiSortBtn.addEventListener('click', () => {
+        removeContextMenu();
+        setColumnSort(win, colName, 'asc', true);
+      });
+      menu.appendChild(multiSortBtn);
+    }
+
+    if (sortIdx !== -1) {
+      const unsortBtn = document.createElement('button');
+      unsortBtn.textContent = 'Remove from Sort';
+      unsortBtn.addEventListener('click', () => {
+        removeContextMenu();
+        win.sortCols.splice(sortIdx, 1);
+        rebuildTable(win);
+      });
+      menu.appendChild(unsortBtn);
+    }
+
+    menu.appendChild(document.createElement('hr'));
 
     const insertBtn = document.createElement('button');
     insertBtn.textContent = 'Insert Column Right';
@@ -6145,6 +6295,16 @@ const app = (() => {
       removeContextMenu();
     });
     menu.appendChild(insertRowBtn);
+
+    menu.appendChild(document.createElement('hr'));
+
+    const renameTableBtn = document.createElement('button');
+    renameTableBtn.textContent = 'Rename Table…';
+    renameTableBtn.addEventListener('click', () => {
+      removeContextMenu();
+      startInlineRename(win);
+    });
+    menu.appendChild(renameTableBtn);
 
     document.body.appendChild(menu);
     setTimeout(() => {
@@ -6935,9 +7095,14 @@ const app = (() => {
     const pos = acCaretViewportPos(inputEl);
     const w = el.offsetWidth;
     const h = el.offsetHeight;
-    let x = Math.max(8, Math.min(pos.x, window.innerWidth - w - 8));
+    // Use the visual viewport when available so a mobile soft keyboard
+    // occluding the bottom of the layout viewport flips the dropdown up
+    const vv = window.visualViewport;
+    const viewW = vv ? vv.offsetLeft + vv.width : window.innerWidth;
+    const viewH = vv ? vv.offsetTop + vv.height : window.innerHeight;
+    let x = Math.max(8, Math.min(pos.x, viewW - w - 8));
     let y = pos.y + 2;
-    if (y + h > window.innerHeight - 8) y = pos.y - pos.lineH - h - 2; // flip above the caret line
+    if (y + h > viewH - 8) y = pos.y - pos.lineH - h - 2; // flip above the caret line
     if (y < 8) y = 8;
     el.style.left = x + 'px';
     el.style.top = y + 'px';
@@ -7379,6 +7544,184 @@ const app = (() => {
     return (ms / 1000).toFixed(2) + 's';
   }
 
+  // ---- Touch drag bridge ----
+  // Re-dispatches single-finger touch sequences on drag-handle elements as
+  // synthetic mouse events (mousedown on the touched element, mousemove and
+  // mouseup on document), giving every mousedown-driven drag site touch
+  // support without changing its drag logic. Invariant this relies on: drag
+  // handlers must never require trusted events (no isTrusted / movementX).
+  const TOUCH_BRIDGE_SELECTOR = [
+    '.resize-handle',          // window + dock edge/corner resize
+    '.dock-splitter',          // dock split pane divider
+    '.col-resize-handle',      // column + row-number width handles
+    '#console-resize-handle',  // SQL console height handle
+    '.dock-tab',               // tab reorder / undock ghost drag
+    '.dock-tab-bar',           // dock move by empty tab-bar area
+    '.col-manager-grip',       // Column Manager reorder grip
+    'td.row-num',              // row drag-select (pan selects instead of scrolls)
+  ].join(', ');
+  let _touchBridge = null;                    // { touchId, startX, startY, moved, handle, secondTap, shiftKey }
+  let _bridgeLastTap = { el: null, time: 0 }; // for double-tap → detail:2 mousedown + dblclick
+
+  function synthMouseEvent(type, x, y, target, opts) {
+    const ev = new MouseEvent(type, {
+      bubbles: true, cancelable: true, view: window,
+      clientX: x, clientY: y, button: 0,
+      buttons: type === 'mouseup' || type === 'dblclick' ? 0 : 1,
+      shiftKey: !!(opts && opts.shiftKey),
+      detail: (opts && opts.detail) || 1,
+    });
+    (target || document).dispatchEvent(ev);
+  }
+
+  function setupTouchDragBridge() {
+    document.addEventListener('touchstart', (e) => {
+      if (_touchBridge || e.touches.length !== 1) return;
+      if (_touchWinDrag || _touchHeaderDrag || _touchCellDrag) return;
+      const t = e.target;
+      if (!t.closest) return;
+      const handle = t.closest(TOUCH_BRIDGE_SELECTOR);
+      if (!handle) return;
+      if (t.closest('.dock-tab-close')) return;  // plain tap closes the tab natively
+      const touch = e.touches[0];
+      const now = Date.now();
+      const secondTap = _bridgeLastTap.el === handle &&
+                        (now - _bridgeLastTap.time) < DOUBLE_TAP_WINDOW_MS;
+      _touchBridge = {
+        touchId: touch.identifier,
+        startX: touch.clientX, startY: touch.clientY,
+        moved: false, handle, secondTap, shiftKey: false,
+      };
+      // Claim the touch: no scrolling, no synthesized mouse events after
+      // touchend, and no 1.5-tap handlers on ancestors (th, titlebar).
+      if (e.cancelable) e.preventDefault();
+      e.stopPropagation();
+      synthMouseEvent('mousedown', touch.clientX, touch.clientY, t, { detail: secondTap ? 2 : 1 });
+    }, { capture: true, passive: false });
+
+    document.addEventListener('touchmove', (e) => {
+      if (!_touchBridge) return;
+      const touch = Array.from(e.changedTouches).find(t => t.identifier === _touchBridge.touchId);
+      if (!touch) return;
+      if (e.cancelable) e.preventDefault();
+      e.stopPropagation();
+      if (Math.abs(touch.clientX - _touchBridge.startX) > 5 ||
+          Math.abs(touch.clientY - _touchBridge.startY) > 5) {
+        _touchBridge.moved = true;
+      }
+      synthMouseEvent('mousemove', touch.clientX, touch.clientY, document, { shiftKey: _touchBridge.shiftKey });
+    }, { capture: true, passive: false });
+
+    const endBridge = (e) => {
+      if (!_touchBridge) return;
+      const touch = Array.from(e.changedTouches).find(t => t.identifier === _touchBridge.touchId);
+      if (!touch) return;
+      const state = _touchBridge;
+      _touchBridge = null;
+      if (e.cancelable) e.preventDefault();
+      e.stopPropagation();
+      synthMouseEvent('mouseup', touch.clientX, touch.clientY, document, { shiftKey: state.shiftKey });
+      // Double-tap parity: a second stationary tap on the same handle also
+      // fires dblclick (splitter ratio reset, tab/dock maximize, auto-fit)
+      if (!state.moved && state.handle) {
+        if (state.secondTap) {
+          _bridgeLastTap = { el: null, time: 0 };
+          synthMouseEvent('dblclick', touch.clientX, touch.clientY, state.handle, { detail: 2 });
+        } else {
+          _bridgeLastTap = { el: state.handle, time: Date.now() };
+        }
+      } else {
+        _bridgeLastTap = { el: null, time: 0 };
+      }
+    };
+    document.addEventListener('touchend', endBridge, { capture: true, passive: false });
+    document.addEventListener('touchcancel', endBridge, { capture: true, passive: false });
+  }
+
+  // ---- Long-press → context menu ----
+  // Touch equivalent of right-click on row numbers, the # corner cell, and
+  // column headers: hold ~600ms without moving to open the same context menus
+  // via a synthetic contextmenu event on the pressed element.
+  const LONG_PRESS_MS = 600;
+  const LONG_PRESS_MOVE_TOLERANCE = 10;
+  const LONG_PRESS_SELECTOR = 'td.row-num, th.row-num-header, .data-table th[data-col-idx]';
+  let _longPress = null;  // { touchId, timer, startX, startY, target, fired }
+
+  function cancelLongPress() {
+    if (_longPress && _longPress.timer) clearTimeout(_longPress.timer);
+    _longPress = null;
+  }
+
+  function setupLongPress() {
+    document.addEventListener('touchstart', (e) => {
+      if (e.touches.length !== 1) { cancelLongPress(); return; }
+      if (_touchWinDrag || _touchHeaderDrag || _touchCellDrag) return;
+      if (!e.target.closest) return;
+      // A finger resting on a width handle is a (pending) resize, not a press.
+      if (e.target.closest('.col-resize-handle')) return;
+      const target = e.target.closest(LONG_PRESS_SELECTOR);
+      if (!target) return;
+      const touch = e.touches[0];
+      const state = {
+        touchId: touch.identifier,
+        startX: touch.clientX, startY: touch.clientY,
+        target, fired: false, timer: null,
+      };
+      state.timer = setTimeout(() => {
+        if (_longPress !== state) return;
+        state.fired = true;
+        if (navigator.vibrate) navigator.vibrate(10);
+        // Selection/highlight updates during the hold can re-render table DOM
+        // and detach the pressed element — re-resolve it before dispatching.
+        let menuTarget = state.target;
+        if (!menuTarget.isConnected) {
+          const el = document.elementFromPoint(state.startX, state.startY);
+          menuTarget = (el && el.closest && el.closest(LONG_PRESS_SELECTOR)) || menuTarget;
+        }
+        const ev = new MouseEvent('contextmenu', {
+          bubbles: true, cancelable: true, view: window,
+          clientX: state.startX, clientY: state.startY, button: 2,
+        });
+        menuTarget.dispatchEvent(ev);
+        // A bridged drag (row select) may own this touch — end it now that the
+        // menu is open (its mouseup may re-render and refocus).
+        if (_touchBridge && _touchBridge.touchId === state.touchId) {
+          _touchBridge = null;
+          synthMouseEvent('mouseup', state.startX, state.startY, document);
+        }
+      }, LONG_PRESS_MS);
+      _longPress = state;
+    }, { capture: true, passive: true });
+
+    document.addEventListener('touchmove', (e) => {
+      if (!_longPress || _longPress.fired) return;
+      const touch = Array.from(e.changedTouches).find(t => t.identifier === _longPress.touchId);
+      if (!touch) return;
+      if (Math.abs(touch.clientX - _longPress.startX) > LONG_PRESS_MOVE_TOLERANCE ||
+          Math.abs(touch.clientY - _longPress.startY) > LONG_PRESS_MOVE_TOLERANCE) {
+        cancelLongPress();
+      }
+    }, { capture: true, passive: true });
+
+    const endLongPress = (e) => {
+      if (!_longPress) return;
+      const touch = Array.from(e.changedTouches).find(t => t.identifier === _longPress.touchId);
+      if (!touch) return;
+      // Suppress the synthesized click after a fired long-press — it would
+      // instantly dismiss the just-opened context menu.
+      if (_longPress.fired && e.cancelable) e.preventDefault();
+      cancelLongPress();
+    };
+    document.addEventListener('touchend', endLongPress, { capture: true, passive: false });
+    document.addEventListener('touchcancel', endLongPress, { capture: true, passive: false });
+
+    // Android fires a native (trusted) contextmenu on long-press — let it win
+    // instead of showing the menu twice.
+    document.addEventListener('contextmenu', (e) => {
+      if (e.isTrusted && _longPress && !_longPress.fired) cancelLongPress();
+    }, { capture: true });
+  }
+
   // ---- Console Resize ----
   function setupConsoleResize() {
     const handle = document.getElementById('console-resize-handle');
@@ -7465,6 +7808,10 @@ const app = (() => {
       const win = getActiveDataWindow();
       if (win && win.tableName) showFindReplace(win.id);
     });
+    document.getElementById('btn-rename-table').addEventListener('click', () => {
+      const win = getActiveDataWindow();
+      if (win && win.tableName) startInlineRename(win);
+    });
 
     function updateMenuState() {
       const hasActive = !!activeWinId;
@@ -7496,6 +7843,7 @@ const app = (() => {
       document.getElementById('btn-select-none').disabled = !hasSel;
       document.getElementById('btn-col-manager').disabled = !(win && win.tableName && tables[win.tableName]);
       document.getElementById('btn-find').disabled = !(win && win.tableName && tables[win.tableName]);
+      document.getElementById('btn-rename-table').disabled = !(win && win.tableName && tables[win.tableName]);
     }
 
     function openItem(item) {
@@ -7649,7 +7997,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.54 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.55 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `, true);
@@ -7700,22 +8048,27 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <li><strong>Undo / Redo:</strong> <code>Ctrl</code>/<code>&#8984;</code>+<code>Z</code> to undo, <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>Z</code> or <code>Ctrl</code>/<code>&#8984;</code>+<code>Y</code> to redo. A toast notification confirms each undo/redo (and each copy, cut, and paste) with what was affected. Undoes cell edits, paste, cut, row insert/delete, column insert/delete, column rename, column reorder, and column resize. Multi-cell paste and cut undo as a single step. Also available from the Edit menu.</li>
 <li><strong>Find &amp; Replace:</strong> <code>Ctrl</code>/<code>&#8984;</code>+<code>F</code> (or <strong>Edit &rarr; Find &amp; Replace&hellip;</strong>) opens a non-modal dialog targeting the active table. All matches are highlighted; <code>Enter</code>/<code>Shift+Enter</code> (or the Prev/Next buttons) step between them, scrolling each match into view. Options: <em>Match case</em> and <em>Entire cell</em>. <strong>Replace</strong> replaces the current match; <strong>Replace All</strong> replaces every match as a single undo entry. Search respects the window&rsquo;s active filters and sort, and matches raw cell values (not plugin-formatted display values). <code>Escape</code> closes the dialog.</li>
 <li><strong>Selection statistics:</strong> When two or more cells are selected, the right side of the status bar shows <em>Count</em> (non-empty cells) plus <em>Sum</em>, <em>Avg</em>, <em>Min</em>, and <em>Max</em> computed over the numeric cells in the selection, temporarily replacing the column count.</li>
-<li><strong>Rows:</strong> Right-click a row number to insert below or delete. Right-click the <code>#</code> corner cell to insert a row at the beginning.</li>
-<li><strong>Columns:</strong> Right-click a column header to insert a column to the right or delete. Right-click the <code>#</code> corner cell to insert a column at the beginning. <code>Ctrl</code>/<code>&#8984;</code>+click a column header to rename inline &mdash; duplicate names are rejected with a red border on the input.</li>
+<li><strong>Rows:</strong> Right-click (or long-press) a row number to insert below or delete. Right-click the <code>#</code> corner cell to insert a row at the beginning.</li>
+<li><strong>Columns:</strong> Right-click (or long-press) a column header to rename, sort, insert a column to the right, or delete. Right-click the <code>#</code> corner cell to insert a column at the beginning. <code>Ctrl</code>/<code>&#8984;</code>+click a column header also renames inline &mdash; duplicate names are rejected with a red border on the input.</li>
 <li><strong>Select a column:</strong> Click a column header to select the entire column. Click the sort badge (triangle) to sort. Selection is the target for <code>Ctrl</code>/<code>&#8984;</code>+<code>&larr;</code>/<code>&rarr;</code> column reorder.</li>
 <li><strong>Reorder columns:</strong> Drag a column header to a new position. Click a column header to select it, then press <code>Ctrl</code>/<code>&#8984;</code>+<code>&larr;</code>/<code>&rarr;</code> to nudge it.</li>
 <li><strong>Column Manager:</strong> Open via <strong>Edit &rarr; Manage Columns&hellip;</strong>, <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>M</code>, or right-click a column header. Shows a searchable vertical list of all columns. Click to select, Shift+click for range, Ctrl/&#8984;+click to toggle. Drag to reorder within the list or drop onto the table&rsquo;s column headers. Use <code>Alt</code>+<code>&uarr;</code>/<code>&darr;</code> to move selected columns. Double-click a column name to scroll the table to it. All reorders are batched into a single undo entry when the manager closes.</li>
 <li><strong>Resize columns:</strong> Columns auto-fit to their content when a table first opens (very wide columns are capped at 75% of the window). Drag any column border to resize &mdash; the resize handle spans both sides of the divider line, including the <code>#</code> row-number column. Double-click the border to auto-fit the column to its content (measures all rows, not just visible ones). When multiple columns are selected (e.g. via Ctrl+A), double-click auto-fits all selected columns, and drag-resize sets all selected columns to the dragged column&rsquo;s width on release. Column widths survive sorting and filtering.</li>
 <li><strong>Frozen row-number column:</strong> The <code>#</code> row-number column stays fixed on the left edge when scrolling horizontally, so you always know which row you&rsquo;re looking at. Column headers use opaque backgrounds so scrolling data never shows through &mdash; including when a column is selected.</li>
-<li><strong>Rename tables:</strong> <code>Ctrl</code>/<code>&#8984;</code>+click the window title.</li>
+<li><strong>Rename tables:</strong> <code>Ctrl</code>/<code>&#8984;</code>+click the window title, use <strong>Edit &rarr; Rename Table&hellip;</strong>, or right-click (or long-press) the <code>#</code> corner cell.</li>
 </ul>
 
 <h4>Touch Gestures</h4>
 <ul>
 <li><strong>Edit a cell:</strong> Double-tap the cell to enter edit mode.</li>
 <li><strong>Select a rectangle of cells:</strong> Tap a cell, then tap and pan from any cell to draw a selection rectangle from the first cell to the panned cell.</li>
+<li><strong>Select rows:</strong> Tap a row number, or pan down the row-number column to select a range.</li>
+<li><strong>Context menus:</strong> Long-press (hold about half a second) a row number, column header, or the <code>#</code> corner cell to open the same menu as a right-click &mdash; insert/delete rows and columns, rename a column or the table, and sort.</li>
 <li><strong>Reorder a column:</strong> Tap a column header, then tap-and-hold the same header and pan to the target position.</li>
 <li><strong>Move a window:</strong> Tap the window's title bar, then tap the title bar again and pan to move the window.</li>
+<li><strong>Dock a window:</strong> Long-press the title bar (without a prior tap) until the device vibrates, then drag onto another window &mdash; the touch equivalent of Shift+drag. Drop on a title bar to tab, on a body region to split.</li>
+<li><strong>Resize:</strong> Drag window edges/corners, column borders, dock splitters, and the console divider directly with a finger. Double-tap a column border to auto-fit, a dock splitter to reset the split, or a tab to maximize the dock.</li>
+<li><strong>Undock a tab:</strong> Drag a tab vertically out of the tab bar, then drop it on another window or on empty space.</li>
 </ul>
 
 <h4>Sorting &amp; Filtering</h4>
@@ -7789,8 +8142,8 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <h4>Tabbing and Docking</h4>
 <p>Windows can be combined into tabbed groups and split layouts for an IDE-style workspace.</p>
 <ul>
-<li><strong>Tab windows:</strong> Hold <code>Shift</code> and drag a window onto another window's title bar to merge them into a tab group. Click tabs to switch between windows.</li>
-<li><strong>Split dock:</strong> Hold <code>Shift</code> and drag a window onto the body area of another window. Drop zones are divided diagonally &mdash; drop on the top, right, bottom, or left region to split that direction.</li>
+<li><strong>Tab windows:</strong> Hold <code>Shift</code> and drag a window onto another window's title bar to merge them into a tab group (on touch: long-press the title bar, then drag). Click tabs to switch between windows.</li>
+<li><strong>Split dock:</strong> Hold <code>Shift</code> and drag a window onto the body area of another window (on touch: long-press the title bar, then drag). Drop zones are divided diagonally &mdash; drop on the top, right, bottom, or left region to split that direction.</li>
 <li><strong>Reorder tabs:</strong> Drag a tab left or right within the tab bar to rearrange it.</li>
 <li><strong>Move/undock tabs:</strong> Drag a tab away from the tab bar (vertically) to detach it. A ghost preview appears &mdash; drop on another window's tab bar to insert at a specific tab position (a vertical indicator shows where), on its body to split, or on empty space to place as a standalone window. <code>Shift</code>+drag skips reorder and enters ghost mode immediately. Dragging a tab never moves the dock itself &mdash; a pane's lone tab detaches as a ghost right away; drag the empty tab bar area to move the whole dock.</li>
 <li><strong>Splitter:</strong> Drag the divider between split panes to resize. Double-click to reset to 50/50.</li>

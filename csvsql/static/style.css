@@ -2690,3 +2690,123 @@ body.col-resizing * {
   background: rgba(255,255,255,0.25);
   color: #fff;
 }
+
+/* ==== Touch support ==== */
+html { -webkit-tap-highlight-color: transparent; }
+
+/* Suppress the iOS long-press callout/selection on gesture surfaces */
+.data-table th,
+.data-table td.row-num,
+.win-titlebar,
+.dock-tab,
+.dock-tab-bar {
+  -webkit-touch-callout: none;
+}
+
+/* Elements handled by the touch drag bridge must not scroll/zoom the page.
+   td.row-num is deliberate: panning on the row-number column drag-selects
+   rows instead of scrolling (scroll anywhere else in the table). */
+.resize-handle,
+.dock-splitter,
+.col-resize-handle,
+#console-resize-handle,
+.dock-tab,
+.dock-tab-bar,
+.col-manager-grip,
+.data-table td.row-num {
+  touch-action: none;
+}
+
+/* Coarse-pointer (touch) adjustments: bigger hit areas and always-visible
+   affordances. Hit areas grow via ::before/::after overhangs so element
+   layout is unchanged. NEVER change data row height here — ROW_HEIGHT in
+   app.js drives virtual scrolling and must match the rendered row height. */
+@media (pointer: coarse) {
+  /* Window/dock edge + corner resize handles: ~16px edges, ~28px corners */
+  .resize-handle::after {
+    content: '';
+    position: absolute;
+    inset: -5px;
+  }
+  .resize-handle.rh-tl::after, .resize-handle.rh-tr::after,
+  .resize-handle.rh-bl::after, .resize-handle.rh-br::after {
+    inset: -8px;
+  }
+
+  /* Column width handles: 5px visual, ~13px hit strip */
+  .col-resize-handle::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -4px;
+    right: -4px;
+  }
+
+  /* Dock splitter: 4px visual, ~16px hit strip */
+  .dock-splitter-horizontal::after {
+    content: '';
+    position: absolute;
+    top: 0; bottom: 0; left: -6px; right: -6px;
+  }
+  .dock-splitter-vertical::after {
+    content: '';
+    position: absolute;
+    left: 0; right: 0; top: -6px; bottom: -6px;
+  }
+
+  /* Console height handle: 9px band → ~21px (::after is the visible grip) */
+  #console-resize-handle::before {
+    content: '';
+    position: absolute;
+    left: 0; right: 0; top: -6px; bottom: -6px;
+  }
+
+  /* Header sort/filter buttons: 14 → 22px, funnel visible without hover */
+  .col-sort-btn, .col-filter-btn {
+    width: 22px;
+    height: 22px;
+  }
+  .col-filter-btn { color: rgba(255,255,255,0.45); }
+  .col-badge-sort.sort-outline {
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 8'%3E%3Cpolygon points='5,0.75 0.75,7.25 9.25,7.25' fill='none' stroke='white' stroke-opacity='0.5' stroke-width='1.2' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat center / contain;
+  }
+
+  /* Tab close button: always visible, 18 → 24px */
+  .dock-tab-close {
+    opacity: 1;
+    width: 24px;
+    height: 24px;
+    line-height: 24px;
+  }
+
+  /* Window / dock control buttons: wider, capped to the shortest (dialog)
+     titlebar height so they never overflow */
+  .win-controls button,
+  .dock-controls button {
+    width: 32px;
+    height: 28px;
+    line-height: 28px;
+  }
+
+  /* Menus: taller rows for finger-sized targets */
+  #menubar { height: 40px; }
+  .menu-item { line-height: 40px; }
+  .menu-dropdown { top: 40px; }
+  .menu-dropdown button,
+  .context-menu button {
+    padding: 11px 16px;
+  }
+
+  /* Toolbar controls */
+  .win-toolbar button { padding: 7px 12px; }
+}
+
+/* Narrow (phone) screens — new windows also open maximized (see
+   AUTO_MAXIMIZE_MAX_WIDTH in app.js) */
+@media (max-width: 640px) {
+  .win-toolbar { flex-wrap: wrap; }
+  .menu-dropdown { max-width: 94vw; }
+  .context-menu { max-width: 94vw; }
+  .modal { min-width: 0; width: min(94vw, 420px); }
+}

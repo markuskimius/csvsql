@@ -38,6 +38,35 @@ test.describe('Column AutoFilter', () => {
     expect(await items.count()).toBe(10);
   });
 
+  test('resize with focus inside the dropdown repositions instead of closing', async ({ page }) => {
+    // A soft keyboard appearing for the dropdown's own search input fires a
+    // window resize (interactive-widget=resizes-content) — the dropdown must
+    // survive it.
+    const th = page.locator('.data-table th:not(.row-num-header)').first();
+    await th.locator('.col-filter-btn').click();
+    await page.waitForTimeout(300);
+
+    const dropdown = page.locator('.autofilter-dropdown');
+    await expect(dropdown).toBeVisible();
+    await dropdown.locator('.autofilter-search').focus();
+    await page.evaluate(() => window.dispatchEvent(new Event('resize')));
+    await page.waitForTimeout(100);
+    await expect(dropdown).toBeVisible();
+  });
+
+  test('resize with focus elsewhere closes the dropdown', async ({ page }) => {
+    const th = page.locator('.data-table th:not(.row-num-header)').first();
+    await th.locator('.col-filter-btn').click();
+    await page.waitForTimeout(300);
+
+    const dropdown = page.locator('.autofilter-dropdown');
+    await expect(dropdown).toBeVisible();
+    await page.evaluate(() => { document.activeElement.blur(); });
+    await page.evaluate(() => window.dispatchEvent(new Event('resize')));
+    await page.waitForTimeout(100);
+    await expect(dropdown).toHaveCount(0);
+  });
+
   test('unchecking values and applying filters rows', async ({ page }) => {
     const th = page.locator('.data-table th:not(.row-num-header)').first();
     await th.locator('.col-filter-btn').click();

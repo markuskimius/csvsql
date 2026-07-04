@@ -96,6 +96,42 @@ async function getWindowCount(page) {
   return page.evaluate(() => app._test.windows.length);
 }
 
+/**
+ * Dispatch a touch event on an element at the given viewport coordinates.
+ * Shared by the touch specs (touch-gestures, touch-drag-bridge, touch-long-press,
+ * touch-dock, maximized-drag).
+ */
+async function dispatchTouch(page, elementHandle, type, clientX, clientY) {
+  await elementHandle.evaluate((el, args) => {
+    const touch = new Touch({
+      identifier: 1,
+      target: el,
+      clientX: args.x,
+      clientY: args.y,
+      pageX: args.x,
+      pageY: args.y,
+      radiusX: 1,
+      radiusY: 1,
+      force: 1,
+    });
+    const list = args.type === 'touchend' || args.type === 'touchcancel' ? [] : [touch];
+    const evt = new TouchEvent(args.type, {
+      cancelable: true,
+      bubbles: true,
+      touches: list,
+      targetTouches: list,
+      changedTouches: [touch],
+    });
+    el.dispatchEvent(evt);
+  }, { type, x: clientX, y: clientY });
+}
+
+/** Center viewport coordinates of a locator's bounding box. */
+async function touchCenterOf(locator) {
+  const box = await locator.boundingBox();
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+}
+
 module.exports = {
   openApp,
   uploadFile,
@@ -104,4 +140,6 @@ module.exports = {
   executeSQL,
   countVisibleWindows,
   getWindowCount,
+  dispatchTouch,
+  touchCenterOf,
 };
