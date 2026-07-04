@@ -336,12 +336,15 @@ body {
 }
 
 .empty-state-actions {
-  display: flex;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
   gap: 10px;
   margin-top: 8px;
 }
 
 .empty-state-actions button {
+  white-space: nowrap;
   padding: 7px 18px;
   border-radius: 4px;
   border: 1px solid var(--border);

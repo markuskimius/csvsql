@@ -23,6 +23,21 @@ test.describe('Empty state', () => {
     await expect(page.locator('#empty-state')).toBeHidden();
   });
 
+  test('action buttons are equal width and their labels do not wrap', async ({ page }) => {
+    await openApp(page);
+    const buttons = page.locator('.empty-state-actions button');
+    await expect(buttons).toHaveCount(2);
+
+    const boxes = await buttons.evaluateAll(els => els.map(el => {
+      const r = el.getBoundingClientRect();
+      return { width: r.width, height: r.height, lineHeight: parseFloat(getComputedStyle(el).lineHeight) || 0 };
+    }));
+    expect(boxes[0].width).toBeCloseTo(boxes[1].width, 1);
+    // Single-line labels: equal heights, and neither tall enough to hold two lines
+    expect(boxes[0].height).toBeCloseTo(boxes[1].height, 1);
+    for (const box of boxes) expect(box.height).toBeLessThan(45);
+  });
+
   test('Try Example Data loads sample tables and hides the empty state', async ({ page }) => {
     await openApp(page);
     await page.locator('#empty-state button', { hasText: 'Try Example Data' }).click();
