@@ -6446,6 +6446,13 @@ const app = (() => {
     'JULIANDAY','NOT','BOOLEAN','TRUE','FALSE','INTEGER','REAL','TEXT','BLOB','NUMERIC',
   ]);
 
+  // Suggestion-only keyword categories. These words highlight like any other
+  // keyword, but autocompletion offers them only where they can be valid:
+  // type names after CAST(... AS, collation names after COLLATE. They are
+  // excluded from the default keyword pool entirely.
+  const _sqlTypeNames = ['INTEGER','REAL','TEXT','BLOB','NUMERIC','BOOLEAN'];
+  const _sqlCollationNames = ['NOCASE'];
+
   // Lexer shared by SQL syntax highlighting and autocompletion. Emits tokens
   // { type, start, end, text } where end is exclusive and concatenating all
   // token texts reconstructs the input exactly.
@@ -6536,7 +6543,27 @@ const app = (() => {
     return out;
   }
 
-  const _sqlKeywordList = Array.from(_sqlKeywords).sort();
+  // Default completion pool: the highlight word set minus the position-gated
+  // categories above (those are offered only from their dedicated positions
+  // in sqlCompletionContext).
+  const _sqlGatedWords = new Set(_sqlTypeNames.concat(_sqlCollationNames));
+  const _sqlKeywordList = Array.from(_sqlKeywords).filter(w => !_sqlGatedWords.has(w)).sort();
+
+  // Statement-position gating for the default pool. Each rule hides its words
+  // unless allowed(ctx) — ctx is { stmtStart, openParen, filterTable, anchorKw }.
+  // Rules only ever narrow suggestions: a context a rule doesn't anticipate
+  // degrades to showing the word (never a throw or a wrong insertion).
+  // VALUES stays ungated (INSERT INTO t VALUES ... is mid-statement).
+  const _sqlStmtOnly = new Set(['VACUUM','PRAGMA','ANALYZE','REINDEX','ATTACH','DETACH',
+    'EXPLAIN','BEGIN','COMMIT','ROLLBACK','CREATE','DROP','ALTER','INSERT','UPDATE','DELETE']);
+  const _sqlSubqueryHeads = new Set(['SELECT','WITH']);
+  const _sqlCompoundOps = new Set(['UNION','EXCEPT','INTERSECT','ALL']);
+  const _sqlKeywordRules = [
+    { words: _sqlStmtOnly, allowed: c => c.stmtStart && !c.filterTable },
+    { words: _sqlSubqueryHeads, // AS admits CREATE TABLE/VIEW ... AS SELECT
+      allowed: c => (c.stmtStart && !c.filterTable) || c.openParen ||
+        _sqlCompoundOps.has(c.anchorKw) || c.anchorKw === 'AS' },
+  ];
 
   // Completion context for SQL inputs. Pure function: given text, caret offset,
   // and a schema snapshot, decide what the user is typing and return ranked,
@@ -6653,7 +6680,22 @@ const app = (() => {
       .filter(matches)
       .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))
       .map(n => ({ label: n, insert: quoteName(n), kind: 'table' }));
+    const kwCtx = {
+      // Prefix is the first significant token of its statement, or the
+      // statement is an EXPLAIN prefix awaiting its command
+      stmtStart: !sig.some(t => t.start < start) ||
+        (anchor && anchor.type === 'keyword' && anchor.text.toUpperCase() === 'EXPLAIN'),
+      // Caret sits inside an unclosed paren within this statement
+      openParen: sig.reduce((d, t) =>
+        t.start < start && t.type === 'op' ? d + (t.text === '(' ? 1 : t.text === ')' ? -1 : 0) : d, 0) > 0,
+      filterTable: !!filterTable,
+      anchorKw: anchor && anchor.type === 'keyword' ? anchor.text.toUpperCase() : null,
+    };
     const keywordItems = () => _sqlKeywordList
+      .filter(matches)
+      .filter(w => _sqlKeywordRules.every(r => !r.words.has(w) || r.allowed(kwCtx)))
+      .map(w => ({ label: w, insert: w, kind: 'keyword' }));
+    const wordItems = words => words
       .filter(matches)
       .map(w => ({ label: w, insert: w, kind: 'keyword' }));
 
@@ -6667,6 +6709,33 @@ const app = (() => {
         return result(canon ? columnItems([canon]) : []);
       }
       return result([]);
+    }
+
+    // COLLATE position: only collation names are valid
+    if (kwCtx.anchorKw === 'COLLATE') return result(wordItems(_sqlCollationNames));
+
+    // CAST type position: after an AS whose enclosing open paren belongs to
+    // CAST, only type names are valid. Walk back from the AS tracking paren
+    // depth; a plain alias AS (no enclosing CAST paren) falls through to the
+    // default context.
+    if (kwCtx.anchorKw === 'AS') {
+      let depth = 0, k = anchorIdx;
+      while (true) {
+        k = prevSig(k);
+        if (k < 0) break;
+        const t = tokens[k];
+        if (t.type !== 'op') continue;
+        if (t.text === ';') break;
+        if (t.text === ')') depth++;
+        else if (t.text === '(') {
+          if (depth > 0) { depth--; continue; }
+          const c = prevSig(k);
+          if (c >= 0 && tokens[c].type === 'keyword' && tokens[c].text.toUpperCase() === 'CAST') {
+            return result(wordItems(_sqlTypeNames));
+          }
+          break;
+        }
+      }
     }
 
     // Table position: right after FROM/JOIN/INTO/UPDATE/TABLE
@@ -7580,7 +7649,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.53 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.54 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
     `, true);
@@ -7664,7 +7733,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <h4>SQL Console</h4>
 <p>The SQL Console at the bottom runs queries against all open tables using SQLite syntax. Press <code>Ctrl+Enter</code> / <code>&#8984;+Enter</code> to execute. The console and filter inputs feature SQL syntax highlighting for keywords, strings, numbers, comments, and bracket-quoted identifiers.</p>
 <p><strong>Query history:</strong> Press <code>&uarr;</code> with the cursor at the very start of the input (or <code>&darr;</code> at the very end) to step through previously executed queries; <code>&darr;</code> past the newest entry restores whatever you were typing. History holds the last 100 queries, skips duplicates, and persists across page reloads. While the autocomplete dropdown is open, the arrow keys navigate the dropdown instead.</p>
-<p><strong>Autocompletion:</strong> As you type, a dropdown suggests table names (after <code>FROM</code>, <code>JOIN</code>, <code>INSERT INTO</code>, etc.), column names (after <code>tablename.</code> or a query alias, plus columns of any table referenced in the statement), and SQL keywords. <code>Tab</code> or <code>Enter</code> accepts the highlighted suggestion, <code>&uarr;</code>/<code>&darr;</code> navigate, <code>Escape</code> dismisses, and <code>Ctrl+Space</code> opens the dropdown manually. Names that need quoting (spaces, special characters, keyword collisions) are inserted bracket-quoted automatically. Suggestions never appear inside string literals or comments, and while the dropdown is closed no keys are intercepted. The same autocompletion works in every table&rsquo;s filter bar, where that table&rsquo;s own columns are suggested first.</p>
+<p><strong>Autocompletion:</strong> As you type, a dropdown suggests table names (after <code>FROM</code>, <code>JOIN</code>, <code>INSERT INTO</code>, etc.), column names (after <code>tablename.</code> or a query alias, plus columns of any table referenced in the statement), and SQL keywords &mdash; filtered to those valid at the cursor position (for example, type names appear only inside <code>CAST(... AS</code>, and commands like <code>VACUUM</code> only at the start of a statement). <code>Tab</code> or <code>Enter</code> accepts the highlighted suggestion, <code>&uarr;</code>/<code>&darr;</code> navigate, <code>Escape</code> dismisses, and <code>Ctrl+Space</code> opens the dropdown manually. Names that need quoting (spaces, special characters, keyword collisions) are inserted bracket-quoted automatically. Suggestions never appear inside string literals or comments, and while the dropdown is closed no keys are intercepted. The same autocompletion works in every table&rsquo;s filter bar, where that table&rsquo;s own columns are suggested first.</p>
 <p>Tables are referenced by the name shown in their window title bar. Names are sanitized to <code>[a-zA-Z0-9_]</code> characters.</p>
 <p>Query results open in new windows and are automatically registered as queryable tables &mdash; you can run further SQL queries or use the filter bar on any result set.</p>
 

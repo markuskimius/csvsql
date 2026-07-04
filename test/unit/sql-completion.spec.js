@@ -198,6 +198,76 @@ test.describe('sqlCompletionContext — filter mode', () => {
   });
 });
 
+test.describe('sqlCompletionContext — keyword context gating', () => {
+  test('type names and NOCASE are not offered in expression context', async ({ page }) => {
+    await openApp(page);
+    expect(labels(await ctx(page, 'SELECT nu| FROM people'), 'keyword')).not.toContain('NUMERIC');
+    expect(labels(await ctx(page, 'SELECT in| FROM people'), 'keyword')).not.toContain('INTEGER');
+    expect(labels(await ctx(page, 'SELECT no| FROM people'), 'keyword')).not.toContain('NOCASE');
+  });
+
+  test('CAST(... AS offers exactly the type names', async ({ page }) => {
+    await openApp(page);
+    const r = await ctx(page, 'SELECT CAST(age AS |) FROM people');
+    expect(kinds(r)).toEqual(['keyword']);
+    expect(labels(r).sort()).toEqual(['BLOB', 'BOOLEAN', 'INTEGER', 'NUMERIC', 'REAL', 'TEXT']);
+    expect(labels(await ctx(page, 'SELECT CAST(age AS nu|) FROM people'))).toEqual(['NUMERIC']);
+  });
+
+  test('CAST detection tracks nested parens', async ({ page }) => {
+    await openApp(page);
+    expect(labels(await ctx(page, 'SELECT CAST(round(age, 2) AS in|'))).toEqual(['INTEGER']);
+  });
+
+  test('plain alias AS is not a type position', async ({ page }) => {
+    await openApp(page);
+    const r = await ctx(page, 'SELECT age AS n| FROM people');
+    expect(labels(r, 'keyword')).not.toContain('NUMERIC');
+    expect(labels(r, 'column')).toEqual(['name']);
+  });
+
+  test('COLLATE offers only collation names', async ({ page }) => {
+    await openApp(page);
+    const r = await ctx(page, 'SELECT name FROM people ORDER BY name COLLATE no|');
+    expect(labels(r)).toEqual(['NOCASE']);
+    expect(kinds(r)).toEqual(['keyword']);
+  });
+
+  test('statement commands only at statement start', async ({ page }) => {
+    await openApp(page);
+    expect(labels(await ctx(page, 'va|'), 'keyword')).toContain('VACUUM');
+    expect(labels(await ctx(page, 'SELECT name FROM people; va|'), 'keyword')).toContain('VACUUM');
+    expect(labels(await ctx(page, 'SELECT * FROM people WHERE va|'), 'keyword')).not.toContain('VACUUM');
+    expect(labels(await ctx(page, 'SELECT * FROM people WHERE pr|'), 'keyword')).not.toContain('PRAGMA');
+  });
+
+  test('SELECT mid-statement only inside parens, after compound ops, or after AS', async ({ page }) => {
+    await openApp(page);
+    expect(labels(await ctx(page, 'SELECT * FROM people WHERE sel|'), 'keyword')).not.toContain('SELECT');
+    expect(labels(await ctx(page, 'SELECT * FROM people WHERE age > (sel|'), 'keyword')).toContain('SELECT');
+    expect(labels(await ctx(page, 'SELECT name FROM people UNION sel|'), 'keyword')).toContain('SELECT');
+    expect(labels(await ctx(page, 'SELECT name FROM people UNION ALL sel|'), 'keyword')).toContain('SELECT');
+    expect(labels(await ctx(page, 'EXPLAIN sel|'), 'keyword')).toContain('SELECT');
+    expect(labels(await ctx(page, 'CREATE TABLE t2 AS sel|'), 'keyword')).toContain('SELECT');
+  });
+
+  test('VALUES stays available mid-statement (INSERT INTO ... VALUES)', async ({ page }) => {
+    await openApp(page);
+    expect(labels(await ctx(page, 'INSERT INTO people val|'), 'keyword')).toContain('VALUES');
+  });
+
+  test('filter inputs never see statement commands', async ({ page }) => {
+    await openApp(page);
+    const opts = { filterTable: 'people' };
+    expect(labels(await ctx(page, 'va|', opts), 'keyword')).not.toContain('VACUUM');
+    expect(labels(await ctx(page, 'sel|', opts), 'keyword')).not.toContain('SELECT');
+    expect(labels(await ctx(page, 'nu|', opts), 'keyword')).not.toContain('NUMERIC');
+    expect(labels(await ctx(page, 'age > (SELECT avg(age) FROM people) AND sel|', opts), 'keyword'))
+      .not.toContain('SELECT');
+    expect(labels(await ctx(page, 'age > (sel|', opts), 'keyword')).toContain('SELECT');
+  });
+});
+
 test.describe('sqlCompletionContext — robustness', () => {
   test('never throws: fuzzed inputs at every caret position', async ({ page }) => {
     await openApp(page);
