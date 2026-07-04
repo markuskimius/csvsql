@@ -12,7 +12,7 @@ The app MUST NEVER send user data to any server or website. No telemetry, no ana
 
 Single-page app with three core files:
 
-- **index.html** — Shell: menubar, workspace area (with `#empty-state` welcome screen), SQL console panel (default height 113px = 3 lines of SQL text; drag handle clamps 60px–50vh), hidden file input, script tags. `updateMenuState()` runs at menu-open time: Save/Save As enabled only for table windows (`!!t` — Manual/About/Expression Reference don't count), Close Window for any window (`!!activeWinId`), layout buttons via `hasAny`
+- **index.html** — Shell: menubar, workspace area (with `#empty-state` welcome screen), SQL console panel (default height 113px = 3 lines of SQL text; drag handle clamps 60px–50vh; `#console-actions` buttons equal-width — grid `1fr` + nowrap, like `.empty-state-actions`), hidden file input, script tags. `updateMenuState()` runs at menu-open time: Save/Save As enabled only for table windows (`!!t` — Manual/About/Expression Reference don't count), Close Window for any window (`!!activeWinId`), layout buttons via `hasAny`
 - **style.css** — Dark theme styling, window management visuals, table layout
 - **app.js** — All application logic in a single IIFE (`app` module), exposing methods on the global `app` object
 
@@ -73,15 +73,11 @@ Each row's primary key is its `_rownum` property (1-based index). Renumbered on 
 Playwright test suite (Chromium only), organized into `test/unit/`, `test/integration/`, `test/e2e/`.
 
 ```bash
-# Run all tests
-./run-tests.sh   # or: npm test
-
-# Run a single test file
-npx playwright test --config test/playwright.config.js test/integration/sql-queries.spec.js
-
+./run-tests.sh   # all tests (or: npm test)
+npx playwright test --config test/playwright.config.js test/integration/sql-queries.spec.js   # one file
 ```
 
-The test server runs on port 8274 (auto-started by Playwright config). Tests use `?test=1` query param which sets `window._appReady` after init. Test helpers are in `test/helpers.js` — notably `openApp()`, `uploadFile()`, `executeSQL()`, `waitForWindow()`, and `getTableData()`.
+The test server runs on port 8274 (auto-started). Tests use `?test=1`, which sets `window._appReady` after init. Test helpers are in `test/helpers.js` — notably `openApp()`, `uploadFile()`, `executeSQL()`, `waitForWindow()`, and `getTableData()`.
 
 Tests run fully parallel (`fullyParallel: true`, workers = cores−2) — every test must stay independent: open its own page via `openApp()` and never rely on state from another test. Set `PW_WORKERS=1` to debug serially.
 
@@ -94,10 +90,8 @@ Published as `csvsql` on PyPI. The Python package in `csvsql/` serves static fil
 **IMPORTANT:** `csvsql/static/` contains copies of the root static files (`app.js`, `index.html`, `style.css`, `THIRD-PARTY-NOTICES.md`, `lib/`, `example/`). These are NOT auto-synced — whenever you modify any root static file, you MUST copy it to `csvsql/static/` as well or the `csvsql` command will serve stale files.
 
 ```bash
-# Sync static files to PyPI package
+# Sync static files, then build and publish
 cp app.js index.html style.css THIRD-PARTY-NOTICES.md csvsql/static/ && cp lib/* csvsql/static/lib/ && cp -r example csvsql/static/
-
-# Build and publish
 rm -rf dist build *.egg-info && python3 -m build
 python3 -m twine upload dist/*
 ```

@@ -69,6 +69,55 @@ test.describe('Console Panel', () => {
     expect(height).toBe(60);
   });
 
+  test('Run, History, and Clear buttons are equal width and labels do not wrap', async ({ page }) => {
+    await openApp(page);
+    const buttons = page.locator('#console-actions button:not(#btn-interrupt)');
+    await expect(buttons).toHaveCount(3);
+    await expect(buttons.nth(0)).toHaveText('Run');
+    await expect(buttons.nth(1)).toHaveText('History');
+    await expect(buttons.nth(2)).toHaveText('Clear');
+
+    const boxes = await buttons.evaluateAll(els => els.map(el => {
+      const r = el.getBoundingClientRect();
+      return { width: r.width, height: r.height, whiteSpace: getComputedStyle(el).whiteSpace };
+    }));
+    for (const box of boxes) {
+      expect(box.width).toBeCloseTo(boxes[0].width, 1);
+      // Single-line labels: equal heights, none tall enough to hold two lines
+      expect(box.height).toBeCloseTo(boxes[0].height, 1);
+      expect(box.height).toBeLessThan(30);
+      expect(box.whiteSpace).toBe('nowrap');
+    }
+  });
+
+  test('Run stays the first console action button', async ({ page }) => {
+    // The executeSQL test helper clicks the first button in #console-actions
+    await openApp(page);
+    await expect(page.locator('#console-actions button:first-child')).toHaveText('Run');
+  });
+
+  test('buttons stay equal width and unwrapped when Interrupt appears', async ({ page }) => {
+    await openApp(page);
+    // Mirror showInterruptButton(): it appends #btn-interrupt to #console-actions
+    await page.evaluate(() => {
+      const btn = document.createElement('button');
+      btn.id = 'btn-interrupt';
+      btn.textContent = 'Interrupt';
+      document.getElementById('console-actions').appendChild(btn);
+    });
+
+    const boxes = await page.locator('#console-actions button').evaluateAll(els => els.map(el => {
+      const r = el.getBoundingClientRect();
+      return { width: r.width, height: r.height, whiteSpace: getComputedStyle(el).whiteSpace };
+    }));
+    expect(boxes.length).toBe(4);
+    for (const box of boxes) {
+      expect(box.width).toBeCloseTo(boxes[0].width, 1);
+      expect(box.height).toBeLessThan(30);
+      expect(box.whiteSpace).toBe('nowrap');
+    }
+  });
+
   test('resize clamps to 50% of viewport maximum', async ({ page }) => {
     await openApp(page);
 

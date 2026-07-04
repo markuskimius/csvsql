@@ -1579,12 +1579,15 @@ body {
 }
 
 #console-actions {
-  display: flex;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
   gap: 6px;
   padding-bottom: 4px;
 }
 
 #console-actions button {
+  white-space: nowrap;
   background: var(--accent);
   border: none;
   color: #fff;
