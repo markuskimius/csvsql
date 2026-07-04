@@ -39,6 +39,39 @@ textarea::placeholder {
   opacity: 1;
 }
 
+/* ---- Scrollbars (uniform app-wide) ----
+   12px gutter with a 6px visible thumb centered by a transparent border
+   (background-clip keeps the border unpainted). The window resize handles
+   overhang ~2px into the window; that overhang lands on the thumb's
+   transparent margin, so the visible thumb is always grabbable and the
+   resize edge stays usable. Hide rules (.dock-tab-bar, editable cells)
+   override this by specificity. */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar);
+  border: 3px solid transparent;
+  border-radius: 6px;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #6a6a8f;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: var(--bg);
+}
+
 /* ---- Menubar ---- */
 #menubar {
   display: flex;
@@ -558,20 +591,6 @@ body {
   overflow: auto;
 }
 
-.table-container::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-.table-container::-webkit-scrollbar-track {
-  background: var(--bg);
-}
-
-.table-container::-webkit-scrollbar-thumb {
-  background: var(--scrollbar);
-  border-radius: 4px;
-}
-
 .data-table {
   border-collapse: separate;
   border-spacing: 0;
@@ -894,15 +913,6 @@ body {
   overflow-y: auto;
   padding: 4px 0;
   max-height: 240px;
-}
-
-.autofilter-list::-webkit-scrollbar {
-  width: 6px;
-}
-
-.autofilter-list::-webkit-scrollbar-thumb {
-  background: var(--scrollbar);
-  border-radius: 3px;
 }
 
 .autofilter-item,
@@ -1864,19 +1874,6 @@ body {
   background: var(--accent-hover);
 }
 
-#ai-response::-webkit-scrollbar {
-  width: 6px;
-}
-
-#ai-response::-webkit-scrollbar-track {
-  background: var(--bg);
-}
-
-#ai-response::-webkit-scrollbar-thumb {
-  background: var(--scrollbar);
-  border-radius: 3px;
-}
-
 .ai-msg {
   margin-bottom: 10px;
 }
@@ -2341,19 +2338,6 @@ body {
   flex-direction: column;
 }
 
-.help-body::-webkit-scrollbar {
-  width: 6px;
-}
-
-.help-body::-webkit-scrollbar-track {
-  background: var(--bg);
-}
-
-.help-body::-webkit-scrollbar-thumb {
-  background: var(--scrollbar);
-  border-radius: 3px;
-}
-
 .help-body h4 {
   margin: 14px 0 6px;
   font-size: 13px;
@@ -2519,19 +2503,6 @@ body.col-resizing * {
   outline: none;
 }
 
-.col-manager-list::-webkit-scrollbar {
-  width: 8px;
-}
-
-.col-manager-list::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.col-manager-list::-webkit-scrollbar-thumb {
-  background: var(--scrollbar);
-  border-radius: 4px;
-}
-
 .col-manager-item {
   display: flex;
   align-items: center;
@@ -2627,15 +2598,6 @@ body.col-resizing * {
   padding: 3px 0;
 }
 
-#sql-autocomplete::-webkit-scrollbar {
-  width: 8px;
-}
-
-#sql-autocomplete::-webkit-scrollbar-thumb {
-  background: var(--scrollbar);
-  border-radius: 4px;
-}
-
 #sql-history-panel {
   position: fixed;
   display: flex;
@@ -2685,15 +2647,6 @@ body.col-resizing * {
 .sql-history-list {
   overflow-y: auto;
   padding: 3px 0;
-}
-
-.sql-history-list::-webkit-scrollbar {
-  width: 8px;
-}
-
-.sql-history-list::-webkit-scrollbar-thumb {
-  background: var(--scrollbar);
-  border-radius: 4px;
 }
 
 .sql-history-item {
@@ -2824,6 +2777,18 @@ html { -webkit-tap-highlight-color: transparent; }
    layout is unchanged. NEVER change data row height here — ROW_HEIGHT in
    app.js drives virtual scrolling and must match the rendered row height. */
 @media (pointer: coarse) {
+  /* Scrollbars: 16px gutter, 8px visible thumb — finger-draggable while
+     the resize-handle overhang still only covers the transparent margin */
+  ::-webkit-scrollbar {
+    width: 16px;
+    height: 16px;
+  }
+  ::-webkit-scrollbar-thumb,
+  ::-webkit-scrollbar-thumb:hover {
+    border-width: 4px;
+    border-radius: 8px;
+  }
+
   /* Window/dock edge + corner resize handles: ~16px edges, ~28px corners */
   .resize-handle::after {
     content: '';

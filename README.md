@@ -300,4 +300,6 @@ The in-app **Plugins > Expression Reference** has the full language documentatio
 
 ## License
 
-MIT — see [About dialog](javascript:void(0)) in the app for full text.
+CSVSQL is released under the MIT License — see [LICENSE](LICENSE).
+
+CSVSQL bundles several open-source libraries in `lib/`, including Papa Parse, sql.js, SheetJS, and JSZip. Their attributions and full license texts are collected in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

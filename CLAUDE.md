@@ -12,7 +12,7 @@ The app MUST NEVER send user data to any server or website. No telemetry, no ana
 
 Single-page app with three core files:
 
-- **index.html** — Shell: menubar, workspace area (with `#empty-state` welcome screen), SQL console panel (default height 113px = 3 lines of SQL text; drag handle clamps 60px–50vh), hidden file input, script tags. File menu order: New Table, Open..., Open (no header)..., Open URL..., Open URL (no header)..., Save Table, Save Table As..., Close Window. `updateMenuState()` runs at menu-open time: Save/Save As enabled only for table windows (`!!t` — Manual/About/Expression Reference don't count), Close Window for any window (`!!activeWinId`), layout buttons via `hasAny`
+- **index.html** — Shell: menubar, workspace area (with `#empty-state` welcome screen), SQL console panel (default height 113px = 3 lines of SQL text; drag handle clamps 60px–50vh), hidden file input, script tags. `updateMenuState()` runs at menu-open time: Save/Save As enabled only for table windows (`!!t` — Manual/About/Expression Reference don't count), Close Window for any window (`!!activeWinId`), layout buttons via `hasAny`
 - **style.css** — Dark theme styling, window management visuals, table layout
 - **app.js** — All application logic in a single IIFE (`app` module), exposing methods on the global `app` object
 
@@ -26,17 +26,15 @@ Single-page app with three core files:
 - **jsPDF + autotable** — PDF report generation (lazy-loaded on first AI PDF)
 - **@mlc-ai/web-llm** — In-browser LLM inference via WebGPU (lazy-loaded)
 
+All bundled libraries are credited in `THIRD-PARTY-NOTICES.md` (root + synced `csvsql/static/` copy; in `license-files` in `pyproject.toml`) — update it when adding/upgrading a library. README and the About dialog deliberately name only Papa Parse, sql.js, SheetJS, and JSZip: the AI-only deps (web-llm, Chart.js, jsPDF) stay out of user-facing docs per the AI-undocumented rule; the notices file lists everything.
+
 ### Data flow
 
-1. CSV opened via File menu → Papa Parse parses → stored in `tables[name]` object (columns, rows, filename, modified flag)
-2. Table registered in SQLite via `CREATE TABLE` + batch `INSERT` with prepared statements
-3. Edits to cells update `tables[name].rows` and sync back to SQLite via `syncToSQL()`
-4. SQL queries run against SQLite; results become new entries in `tables` and open in new subwindows
-5. Save serializes `tables[name]` back to CSV via Papa.unparse and triggers browser download
+Open: Papa Parse → `tables[name]` (columns, rows, filename, modified flag) → registered in SQLite (`CREATE TABLE` + prepared batch INSERTs). Cell edits update `tables[name].rows` and sync back via `syncToSQL()`. Query results become new `tables` entries in new subwindows. Save: Papa.unparse → browser download.
 
 ### Window management
 
-Custom subwindow system — each table/query result gets a draggable, resizable, minimizable window inside `#window-area`. Drag, resize, and keyboard nudge all clamp to the `#window-area` bounds. All mouse-driven interactions require the left button only (`e.button !== 0` guard); right/middle click on data cells calls `e.preventDefault()`. During drag and resize, windows snap to workspace and other window edges within `SNAP_THRESHOLD` (10 px) with blue guide lines — helpers: `getSnapEdges(excludeWin)`, `findSnap`, `snapPosition()`, `showSnapGuides`/`hideSnapGuides`. Dragging the titlebar of a maximized window (or the tab bar of a maximized dock) restores its `prevBounds` via `unmaximizeForDrag()` (grab point stays proportional; a click without movement does not unmaximize); resizing a maximized window/dock clears the `maximized` flag. Layout functions (tile, grid, cascade) reposition all visible windows; `scaleWindowsToArea()` rescales proportionally on browser/console resize. Windows track their own sort/filter state and column autofilters. The `windows` array and `tables` object are the two central data structures.
+Custom subwindow system — each table/query result gets a draggable, resizable, minimizable window inside `#window-area`. Drag, resize, and keyboard nudge all clamp to the `#window-area` bounds. All mouse-driven interactions require the left button only (`e.button !== 0` guard); right/middle click on data cells calls `e.preventDefault()`. During drag and resize, windows snap to workspace and other window edges within `SNAP_THRESHOLD` (10 px) with blue guide lines — helpers: `getSnapEdges`, `findSnap`, `snapPosition`, `showSnapGuides`/`hideSnapGuides`. Dragging the titlebar of a maximized window (or the tab bar of a maximized dock) restores its `prevBounds` via `unmaximizeForDrag()` (grab point stays proportional; a click without movement does not unmaximize); resizing a maximized window/dock clears the `maximized` flag. Layout functions (tile, grid, cascade) reposition all visible windows; `scaleWindowsToArea()` rescales proportionally on browser/console resize. Windows track their own sort/filter state and column autofilters. The `windows` array and `tables` object are the two central data structures.
 
 ### Tabbing and docking
 
@@ -46,19 +44,21 @@ Windows combine into dock containers via tabbing and docking: a `.dock-container
 
 **Tabbing:** Hold Shift and drag a window's titlebar onto another window's titlebar area to merge into a tab group (touch: long-press the titlebar, then drag — see Conventions). Tabs are content-width. Only 1 level of tabbing (no nested tab groups; each pane in a dock split can be its own tab group). The active tab's `.win-body`/`.win-statusbar` are visible; inactive tabs' content hides via `display: none` with `dataset.winId`. Double-clicking a tab toggles maximize/restore on the dock. Single-tab leaves inside a split hide their tab bar (class `single-tab`); it reappears with a second tab. Tabs reorder by dragging left/right within the tab bar (no Shift) — dragged tab dims, blue indicator shows the drop position. A `::after` pseudo-element gives the tab bar a 40px min grab area right of the tabs so the dock can always be dragged.
 
-**Docking:** Hold Shift and drop a window onto another window's body to create a split dock (touch: long-press the titlebar, then drag). Without Shift, dragging just moves. Drop zones: the body (below titlebar/tab-bar) splits into 4 triangular zones by its diagonals (top/right/bottom/left). Dropping on the titlebar/tab bar triggers tabbing (center zone) with position-aware insertion — `detectDropTarget` computes `tabIndex` from cursor X vs tab midpoints, `showDropOverlay` renders a `.dock-drop-tab-indicator` line, `dockWindowAsTab(winId, leaf, dock, atIndex)` splices there. `getDropZone(x, y, rect, titlebarHeight)` implements the diagonal math. Multi-level recursive splitting is supported. The `.dock-splitter` divider resizes panes (ratio clamped [0.1, 0.9], double-click resets to 0.5).
+**Docking:** Hold Shift and drop a window onto another window's body to create a split dock (touch: same long-press path). Without Shift, dragging just moves. Drop zones: the body (below titlebar/tab-bar) splits into 4 triangular zones by its diagonals (top/right/bottom/left). Dropping on the titlebar/tab bar triggers tabbing (center zone) with position-aware insertion — `detectDropTarget` computes `tabIndex` from cursor X vs tab midpoints, `showDropOverlay` renders a `.dock-drop-tab-indicator` line, `dockWindowAsTab(winId, leaf, dock, atIndex)` splices there. `getDropZone(x, y, rect, titlebarHeight)` implements the diagonal math. Multi-level recursive splitting is supported. The `.dock-splitter` divider resizes panes (ratio clamped [0.1, 0.9], double-click resets to 0.5).
 
 **Ghost drag:** Standalone windows: Shift initiates ghost mode at 5px threshold — once active, releasing Shift does NOT cancel. Ghost matches source size/offset; drop on a valid target docks, empty space moves; self-drop is a no-op. Tabs: dragging vertically past `TAB_UNDOCK_THRESHOLD` (30px) enters ghost mode automatically (Shift = immediate override); horizontal drag stays in reorder mode (multi-tab leaves). Dragging a tab never moves the dock — a single-tab leaf's lone tab ghosts immediately on plain drag; move the dock by its empty tab-bar area. An undocked ghost dropped on empty space becomes standalone, retaining pane dimensions.
 
 **Dissolve logic:** `removeTabFromLeaf` handles cleanup. Empty leaf → `collapseLeaf` (sibling replaces parent split). Single leaf + single tab → `dissolveDock` (back to standalone). Same-dock moves pass `skipCleanup`, deferring to `cleanupAfterTabRemoval` after re-docking — it must `activateTab` (not just `renderTabBar`) so the source leaf's remaining tab body is unhidden.
-
-**Key functions:** `createDockContainer`/`destroyDockContainer`, `renderDockTree`/`buildDockNodeDOM`, `setupTabDragFromMousedown`, `setupSplitterDrag`, `findLeafAtPoint`, `executeDock` (others named in context above)
 
 **Integration:** `focusWindow` brings the dock to front and activates the tab; `closeWindow`/`minimizeWindow`/`restoreWindow`/`toggleMaximize`/`nudgeWindow` delegate to the dock when docked. Layout functions use `getLayoutUnits()` (standalone windows + docks); `scaleWindowsToArea`/`getSnapEdges` include docks. `updateWindowTitle`/`startInlineRename` update tab titles. Help/about/plugin-about windows are `dockable: false`. Dock `mousedown` maps `e.target` to its `.dock-leaf` and calls `focusWindow(leaf.activeTab)` so `activeWinId` stays correct in splits. `refreshAllTableWindows` closes SQL-dropped tables via `closeWindow` (clearing the modified flag first). `undockWindow` clears `maximized`/`prevBounds`; `dissolveDock` transfers the dock's maximized state. Dock resize handles and splitter drag call `closeAutoFilter()` on mousedown. Minimize acts on the whole dock, not individual tabs (intentional — undock first).
 
 ### Empty state
 
 `#empty-state` — a `<section>` (not a `<div>`, so `.subwindow` `div:nth-of-type` test selectors keep their indices) inside `#window-area`, shown when no windows are open. Buttons: **Open File…** (`app.openFile`) and **Try Example Data** (`app.loadExampleData()` — embedded sample CSVs mirroring `example/*.csv` as in-memory `File` objects, works under `file://`). `.empty-state-privacy` states the privacy guarantee (see Privacy Guarantee). Toggled in `updateWindowsList()` (hidden while `windows.length > 0`). Tests: `test/integration/empty-state.spec.js`
+
+### Scrollbars
+
+Global-only styling (`::-webkit-scrollbar`: 12px gutter, 6px thumb centered by 3px transparent border + `background-clip: padding-box`; coarse 16px/8px). The resize handles' 3px inward overhang lands on the thumb's transparent margin — keep overhang and thumb border equal. Per-element scrollbar rules only to hide (`.dock-tab-bar`, edit-mode cells).
 
 ### Theme contrast conventions
 
@@ -70,38 +70,36 @@ Each row's primary key is its `_rownum` property (1-based index). Renumbered on 
 
 ## Development
 
-No build tools. Develop with `python3 -m http.server 8000`, or just open `index.html` directly — all dependencies are bundled locally.
+No build tools — open `index.html` directly or serve with `python3 -m http.server 8000`; all dependencies are bundled locally.
 
 ## Testing
 
-Playwright-based test suite (Chromium only). Tests are organized into `test/unit/`, `test/integration/`, and `test/e2e/`.
+Playwright test suite (Chromium only), organized into `test/unit/`, `test/integration/`, `test/e2e/`.
 
 ```bash
-# Run all tests (installs deps + browser if needed)
+# Run all tests
 ./run-tests.sh   # or: npm test
 
 # Run a single test file
 npx playwright test --config test/playwright.config.js test/integration/sql-queries.spec.js
 
-# Run tests matching a grep pattern
-npx playwright test --config test/playwright.config.js -g "filter"
 ```
 
 The test server runs on port 8274 (auto-started by Playwright config). Tests use `?test=1` query param which sets `window._appReady` after init. Test helpers are in `test/helpers.js` — notably `openApp()`, `uploadFile()`, `executeSQL()`, `waitForWindow()`, and `getTableData()`.
 
-Tests run fully parallel (`fullyParallel: true`, workers = cores−2) — every test must stay independent: open its own page via `openApp()` and never rely on state from another test. Set `PW_WORKERS=1` to debug serially (~10 min vs ~1.5 min parallel).
+Tests run fully parallel (`fullyParallel: true`, workers = cores−2) — every test must stay independent: open its own page via `openApp()` and never rely on state from another test. Set `PW_WORKERS=1` to debug serially.
 
-Fixtures live in `test/` (`sample1.csv`, `sample.xlsx`, `sample.zip`, …).
+Fixtures (`sample1.csv`, `sample.xlsx`, …) live in `test/`.
 
 ## PyPI Packaging
 
 Published as `csvsql` on PyPI. The Python package in `csvsql/` serves static files via `cli.py`.
 
-**IMPORTANT:** `csvsql/static/` contains copies of the root static files (`app.js`, `index.html`, `style.css`, `lib/`, `example/`). These are NOT auto-synced — whenever you modify any root static file, you MUST copy it to `csvsql/static/` as well, or the `csvsql`/`csvsqlw` command will serve stale files.
+**IMPORTANT:** `csvsql/static/` contains copies of the root static files (`app.js`, `index.html`, `style.css`, `THIRD-PARTY-NOTICES.md`, `lib/`, `example/`). These are NOT auto-synced — whenever you modify any root static file, you MUST copy it to `csvsql/static/` as well, or the `csvsql`/`csvsqlw` command will serve stale files.
 
 ```bash
 # Sync static files to PyPI package (run after ANY change to root static files)
-cp app.js index.html style.css csvsql/static/ && cp lib/* csvsql/static/lib/ && cp -r example csvsql/static/
+cp app.js index.html style.css THIRD-PARTY-NOTICES.md csvsql/static/ && cp lib/* csvsql/static/lib/ && cp -r example csvsql/static/
 
 # Build and publish
 rm -rf dist build *.egg-info && python3 -m build
@@ -114,13 +112,12 @@ Version is in `pyproject.toml`.
 
 - All state lives in the `app` IIFE's closure (`windows`, `tables`, `nextWinId`, etc.)
 - Public methods are returned from the IIFE and called from HTML onclick handlers or internally
-- Test internals are exposed via `app._test` (only used by Playwright tests)
-- Table and column names are sanitized to `[a-zA-Z0-9_]` for SQL compatibility
-- SQL identifiers use bracket-quoting (`[tableName]`) to handle edge cases
+- Test internals are exposed via `app._test` (Playwright only)
+- Table/column names are sanitized to `[a-zA-Z0-9_]`; SQL identifiers use bracket-quoting (`[tableName]`) for edge cases
 - SQL syntax highlighting uses the overlay technique: a div with highlighted spans behind a transparent textarea/input. Lexer `sqlTokenize(text)` → `{ type, start, end, text }` tokens (`ws`/`comment`/`string`/`bracket`/`number`/`keyword`/`word`/`op`; `end` exclusive; token texts concatenate back to the input); `sqlHighlightHTML()` is a thin renderer. Setup: `setupSQLHighlight()` (console), inline in `renderTableView()` (filter inputs). The lexer is shared with autocompletion — extend `sqlTokenize`, not the renderer
 - SQL autocompletion context: `sqlCompletionContext(text, caret, opts)` is pure (no DOM/app state); returns `null` (caret in string/comment/number) or `{ start, end, prefix, items: [{ label, insert, kind }] }` (`[start, end)` = replace range; kind `column`/`table`/`keyword`). `opts.schema` = `{ tableName: [colNames] }`; `opts.filterTable` ranks that table's columns first and drops bare table suggestions. Detection is lexical — unknown syntax degrades to broader suggestions: after FROM/JOIN/INTO/UPDATE/TABLE or comma-continued FROM lists → tables; `identifier.` → that table's columns (resolves aliases, case-insensitive); SELECT INTO target → nothing; default → columns of statement-mentioned tables (split on `;`), then tables, then keywords. Keywords are context-gated via `_sqlKeywordRules` (ctx `{ stmtStart, openParen, filterTable, anchorKw }`; extend with a words-set + predicate; rules only narrow): type names only after `CAST(… AS`, NOCASE only after COLLATE (both out of the default pool), `_sqlStmtOnly` commands only at statement start/after EXPLAIN and never in filter inputs, SELECT/WITH also inside an open paren or after UNION/EXCEPT/INTERSECT/ALL/AS. Inserts bracket-quoted when not plain identifiers or colliding with a keyword. Must never throw for any (text, caret) — fuzz-enforced in `test/unit/sql-completion.spec.js`
 - Autocomplete dropdown: `attachAutocomplete(inputEl, getContext)` wires the shared dropdown; attached to `#sql-input` in `setupSQLHighlight()` and each `.filter-input` in `renderTableView()` (before the filter's Escape handler so an open dropdown consumes the first Escape). `getContext` calls `sqlCompletionContext` with a fresh `liveSQLSchema()` snapshot, try/catch-wrapped (errors → no suggestions). Singleton state: `_acState`, `_acEl` (lazy `#sql-autocomplete`), `_acAccepting`. Keyboard: CLOSED intercepts nothing except Ctrl/Cmd+Space; OPEN — Up/Down navigate, Tab/Enter accept, Escape closes (all `stopImmediatePropagation`), Ctrl/Cmd+Enter closes WITHOUT accepting and falls through to execution. Accept uses `setRangeText` (keeps native undo) + a bubbling `input` event. Opens on identifier char, `.`, `[`, Ctrl+Space; closes on blur/outside mousedown/resize; caret position via `acCaretViewportPos()` (mirror div). Tests: `test/integration/autocomplete.spec.js`
-- Query result tables are registered in SQLite via `registerTable()` so they can be queried and filtered like any other table
+- Query result tables are registered via `registerTable()` so they're queryable/filterable like any table
 - `db.export()` in sql.js destroys custom functions — `registerDBFunctions()` re-registers them after each export
 - SELECT INTO is intercepted and handled manually (SQLite doesn't support it natively)
 - AI analysis (experimental) uses a SQL tool-use loop: the AI writes SQL in ```sql code blocks, which are executed against SQLite and results fed back (up to 5 rounds). AI can also be used without any tables loaded (general chat mode)
