@@ -575,6 +575,10 @@ body {
   color: #fff;
 }
 
+.win-toolbar .filter-clear {
+  flex-shrink: 0;
+}
+
 /* Quick-search match counter; .wrapped flags a wrap-around */
 .search-count {
   flex-shrink: 0;

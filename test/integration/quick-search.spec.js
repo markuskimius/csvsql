@@ -197,6 +197,82 @@ test.describe('Quick search (toolbar Search mode)', () => {
     await expect(input(page)).toHaveValue("name LIKE 'A%'");
   });
 
+  test('Clear button appears with text and clears search or filter per mode', async ({ page }) => {
+    const clearBtn = page.locator('.subwindow .filter-clear');
+    await expect(clearBtn).toBeHidden();
+    // Search mode: clears the text and highlights
+    await input(page).fill('davi');
+    await page.waitForTimeout(DEBOUNCE);
+    await expect(clearBtn).toBeVisible();
+    await expect(page.locator('.subwindow table tbody td.cell-find-match')).toHaveCount(3);
+    await clearBtn.click();
+    await expect(input(page)).toHaveValue('');
+    await expect(clearBtn).toBeHidden();
+    await expect(page.locator('.subwindow table tbody td.cell-find-match')).toHaveCount(0);
+    await expect(input(page)).toBeFocused();
+    // Filter mode: clears the WHERE clause and restores all rows
+    await enterFilterMode(page);
+    await expect(clearBtn).toBeHidden();
+    await input(page).fill("name LIKE 'A%'");
+    await page.waitForTimeout(DEBOUNCE);
+    await expect(page.locator('.subwindow .win-statusbar .status-left')).toContainText('1 of 10 rows');
+    await expect(clearBtn).toBeVisible();
+    await clearBtn.click();
+    await expect(input(page)).toHaveValue('');
+    await expect(clearBtn).toBeHidden();
+    await expect(page.locator('.subwindow .win-statusbar .status-left')).toContainText('10 of 10 rows');
+  });
+
+  test('Clear works in a /-opened temporary search; Escape still reverts to Filter', async ({ page }) => {
+    const clearBtn = page.locator('.subwindow .filter-clear');
+    await enterFilterMode(page);
+    await input(page).fill("name LIKE 'A%'");
+    await page.waitForTimeout(DEBOUNCE);
+    // "/" from the grid opens a temporary search
+    await page.locator('.subwindow table tbody td.data-cell').first().click();
+    await page.keyboard.press('/');
+    await expect(page.locator('.subwindow .toolbar-mode .mode-search')).toHaveClass(/active/);
+    await input(page).fill('example.com');  // matches within the one filtered row
+    await page.waitForTimeout(DEBOUNCE);
+    await expect(page.locator('.subwindow table tbody td.cell-find-match')).toHaveCount(1);
+    // Clear empties the search but keeps the temporary Search mode
+    await clearBtn.click();
+    await expect(input(page)).toHaveValue('');
+    await expect(page.locator('.subwindow table tbody td.cell-find-match')).toHaveCount(0);
+    await expect(page.locator('.subwindow .toolbar-mode .mode-search')).toHaveClass(/active/);
+    // Escape still flips back to Filter with the WHERE text intact
+    await input(page).press('Escape');
+    await expect(page.locator('.subwindow .toolbar-mode .mode-filter')).toHaveClass(/active/);
+    await expect(input(page)).toHaveValue("name LIKE 'A%'");
+    await expect(clearBtn).toBeVisible();
+  });
+
+  test('Clear button visibility follows each mode\'s own text across toggles', async ({ page }) => {
+    const clearBtn = page.locator('.subwindow .filter-clear');
+    await input(page).fill('davi');
+    await page.waitForTimeout(DEBOUNCE);
+    await expect(clearBtn).toBeVisible();
+    // Filter mode has no text — button hides
+    await enterFilterMode(page);
+    await expect(clearBtn).toBeHidden();
+    // Back to Search — the retained search text brings it back
+    await page.locator('.subwindow .toolbar-mode .mode-search').click();
+    await expect(input(page)).toHaveValue('davi');
+    await expect(clearBtn).toBeVisible();
+  });
+
+  test('Clear removes a filter SQL error state', async ({ page }) => {
+    const clearBtn = page.locator('.subwindow .filter-clear');
+    await enterFilterMode(page);
+    await input(page).fill('name LIKE');  // incomplete WHERE clause
+    await page.waitForTimeout(DEBOUNCE);
+    await expect(input(page)).toHaveClass(/filter-error/);
+    await clearBtn.click();
+    await expect(input(page)).not.toHaveClass(/filter-error/);
+    await expect(input(page)).toHaveValue('');
+    await expect(page.locator('.subwindow .win-statusbar .status-left')).toContainText('10 of 10 rows');
+  });
+
   test('quick-search matches recompute when the filter changes', async ({ page }) => {
     await input(page).fill('example.com');
     await page.waitForTimeout(DEBOUNCE);
