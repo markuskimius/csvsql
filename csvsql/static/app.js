@@ -627,7 +627,7 @@ const app = (() => {
     const originalCount = compression.zipOriginalCount;
     if (originalCount && groupTables.length < originalCount) {
       const missing = originalCount - groupTables.length;
-      setStatus(`Warning: ${missing} table(s) from ${compressedFilename} no longer open — using Save As to avoid overwriting`, 'error');
+      setStatus(`Warning: ${missing} table(s) from ${compressedFilename} no longer open — using Save As to avoid overwriting`, 'warning');
       await saveActiveTableAs();
       return;
     }
@@ -701,7 +701,7 @@ const app = (() => {
 
     if (excelOriginalCount && groupTables.length < excelOriginalCount) {
       const missing = excelOriginalCount - groupTables.length;
-      setStatus(`Warning: ${missing} sheet(s) from ${excelFilename} no longer open — using Save As to avoid overwriting`, 'error');
+      setStatus(`Warning: ${missing} sheet(s) from ${excelFilename} no longer open — using Save As to avoid overwriting`, 'warning');
       await saveActiveTableAs();
       return;
     }
@@ -7524,7 +7524,7 @@ const app = (() => {
       clearInterval(_queryTimer);
       _queryTimer = null;
     }
-    setStatus('Query interrupted', 'error');
+    setStatus('Query interrupted', 'warning');
     // Restore interrupt button back to normal
     const btn = document.getElementById('btn-interrupt');
     if (btn) btn.style.display = 'none';
@@ -7616,7 +7616,7 @@ const app = (() => {
     if (intoInfo) {
       const rows = sqlResultToRows(result);
       if (rows.length === 0) {
-        setStatus('INTO query returned no rows', 'error');
+        setStatus('INTO query returned no rows — no table created', 'warning');
         return;
       }
       const name = sanitizeTableName(intoInfo.targetName);
@@ -7668,6 +7668,11 @@ const app = (() => {
       await showQueryResult(sql, rows);
       const suffix = truncated ? ` (showing first ${MAX_RESULT_ROWS.toLocaleString()} of ${totalRows.toLocaleString()})` : '';
       setStatus(`Query returned ${totalRows.toLocaleString()} row(s) in ${formatElapsed(elapsed)}${suffix}`, 'success');
+    } else if (result.length === 0 && /^\s*(SELECT|WITH|VALUES)\b/i.test(sql)) {
+      // sql.js exec() returns an empty result set for a SELECT with no
+      // matches, indistinguishable from a no-op statement — tell the user
+      // why no result table appeared
+      setStatus(`Query matched no rows in ${formatElapsed(elapsed)} — no result table created`, 'warning');
     } else {
       const msg = result.length > 0 ? `${result[0].values.length} row(s) affected` : 'OK';
       setStatus(`${msg} in ${formatElapsed(elapsed)}`, 'success');
@@ -8234,7 +8239,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.64 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.65 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
       <h4>Third-Party Libraries</h4>
@@ -8328,7 +8333,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <p><strong>Query history:</strong> Press <code>&uarr;</code> with the cursor at the very start of the input (or <code>&darr;</code> at the very end) to step through previously executed queries; <code>&darr;</code> past the newest entry restores whatever you were typing. History holds the last 100 queries, skips duplicates, and persists across page reloads. While the autocomplete dropdown is open, the arrow keys navigate the dropdown instead. The <strong>History</strong> button (next to Run and Clear) opens a panel listing all saved queries, newest first: click an entry to copy it into the input for editing, click its <code>&#9654;</code> button to execute it immediately, or click <strong>Clear History</strong> to erase the history.</p>
 <p><strong>Autocompletion:</strong> As you type, a dropdown suggests table names (after <code>FROM</code>, <code>JOIN</code>, <code>INSERT INTO</code>, etc.), column names (after <code>tablename.</code> or a query alias, plus columns of any table referenced in the statement), and SQL keywords &mdash; filtered to those valid at the cursor position (for example, type names appear only inside <code>CAST(... AS</code>, and commands like <code>VACUUM</code> only at the start of a statement). <code>Tab</code> or <code>Enter</code> accepts the highlighted suggestion, <code>&uarr;</code>/<code>&darr;</code> navigate, <code>Escape</code> dismisses, and <code>Ctrl+Space</code> opens the dropdown manually. Names that need quoting (spaces, special characters, keyword collisions) are inserted bracket-quoted automatically. Suggestions never appear inside string literals or comments, and while the dropdown is closed no keys are intercepted. The same autocompletion works in every table&rsquo;s filter bar, where that table&rsquo;s own columns are suggested first.</p>
 <p>Tables are referenced by the name shown in their window title bar. Names are sanitized to <code>[a-zA-Z0-9_]</code> characters.</p>
-<p>Query results open in new windows and are automatically registered as queryable tables &mdash; you can run further SQL queries or use the filter bar on any result set.</p>
+<p>Query results open in new windows and are automatically registered as queryable tables &mdash; you can run further SQL queries or use the filter bar on any result set. A query that matches no rows opens no result window &mdash; the console status line says so in amber, the color used for notable-but-non-error outcomes (errors stay red).</p>
 
 <h4>SQL Syntax Reference</h4>
 <p>Standard SQLite syntax is supported. All column values are stored as TEXT.</p>

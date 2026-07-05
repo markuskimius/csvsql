@@ -16,6 +16,7 @@
   --accent-hover: #9588ff;
   --danger: #e05577;
   --danger-text: #ff7799;
+  --warning-text: #e0aa4e;
   --success: #55cc88;
   --win-title: #333355;
   --win-title-active: #444477;
@@ -1718,6 +1719,12 @@ body {
   color: var(--danger-text);
   font-weight: 600;
   background: rgba(224, 85, 119, 0.12);
+}
+
+#console-status.warning {
+  color: var(--warning-text);
+  font-weight: 600;
+  background: rgba(224, 170, 78, 0.1);
 }
 
 #console-status.success {

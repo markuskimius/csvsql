@@ -80,8 +80,31 @@ test.describe('SQL Queries', () => {
     expect(status).not.toContain('Error');
   });
 
+  test('SELECT matching no rows explains why no table was created', async ({ page }) => {
+    const status = await executeSQL(page, "SELECT * FROM [sample1] WHERE 1 = 0");
+    expect(status).toContain('matched no rows');
+    expect(status).toContain('no result table created');
+    await expect(page.locator('#console-status')).toHaveClass('warning');
+
+    // No result window should appear
+    const windowCount = await page.evaluate(() => app._test.windows.length);
+    expect(windowCount).toBe(1); // original only
+  });
+
+  test('SELECT INTO matching no rows warns and creates no table', async ({ page }) => {
+    const status = await executeSQL(page, "SELECT * INTO [empty_result] FROM [sample1] WHERE 1 = 0");
+    expect(status).toContain('no rows');
+    expect(status).toContain('no table created');
+    await expect(page.locator('#console-status')).toHaveClass('warning');
+
+    const hasTable = await page.evaluate(() => !!app._test.tables['empty_result']);
+    expect(hasTable).toBe(false);
+  });
+
   test('SQL syntax error shows error message', async ({ page }) => {
     const status = await executeSQL(page, 'SELECTT * FROMM nowhere');
     expect(status.toLowerCase()).toMatch(/error/);
+    // Real failures keep the red error style, not the amber warning style
+    await expect(page.locator('#console-status')).toHaveClass('error');
   });
 });
