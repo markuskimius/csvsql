@@ -57,6 +57,24 @@ const app = (() => {
   // Sort optimization
   const collator = new Intl.Collator(undefined, { sensitivity: 'base' });
 
+  // Numeric-aware value comparison used by column sort and the autofilter
+  // value list: numbers order numerically, everything else (and numeric
+  // ties) falls back to locale string comparison
+  function compareCellValues(va, vb) {
+    const na = Number(va), nb = Number(vb);
+    if (!isNaN(na) && !isNaN(nb) && va !== '' && vb !== '') {
+      if (na !== nb) return na < nb ? -1 : 1;
+      // Doubles tie, but distinct integer strings may differ beyond
+      // 2^53 precision (or past double range) — compare exactly
+      const ia = String(va).trim(), ib = String(vb).trim();
+      if (ia !== ib && /^[+-]?\d+$/.test(ia) && /^[+-]?\d+$/.test(ib)) {
+        const ba = BigInt(ia), bb = BigInt(ib);
+        if (ba !== bb) return ba < bb ? -1 : 1;
+      }
+    }
+    return collator.compare(String(va), String(vb));
+  }
+
   // Zip group counter — tables from the same zip share a zipGroupId
   let nextZipGroupId = 1;
 
@@ -3325,12 +3343,7 @@ const app = (() => {
       displayRows.sort((a, b) => {
         for (const { col, dir } of win.sortCols) {
           const m = dir === 'asc' ? 1 : -1;
-          const va = a[col] ?? '', vb = b[col] ?? '';
-          const na = Number(va), nb = Number(vb);
-          if (!isNaN(na) && !isNaN(nb) && va !== '' && vb !== '') {
-            if (na !== nb) return (na - nb) * m;
-          }
-          const cmp = collator.compare(String(va), String(vb));
+          const cmp = compareCellValues(a[col] ?? '', b[col] ?? '');
           if (cmp !== 0) return cmp * m;
         }
         return 0;
@@ -5893,7 +5906,9 @@ const app = (() => {
         values.push({ raw: v, display: useTransform ? String(getDisplayValue(win.tableName, col, row)) : v });
       }
     }
-    values.sort((a, b) => collator.compare(a.display, b.display));
+    // Order by raw value (like column sort) — display transforms can make
+    // numeric values non-numeric (e.g. "$129.50"), breaking numeric order
+    values.sort((a, b) => compareCellValues(a.raw, b.raw));
 
     const existingFilter = win.columnFilters[col];
     const items = values.map(v => ({
@@ -8168,7 +8183,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.61 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.62 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
       <h4>Third-Party Libraries</h4>
@@ -8247,12 +8262,12 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 <h4>Sorting &amp; Filtering</h4>
 <ul>
-<li><strong>Sort:</strong> Click the sort badge (triangle icon) in a column header to sort ascending &rarr; descending &rarr; unsorted.</li>
+<li><strong>Sort:</strong> Click the sort badge (triangle icon) in a column header to sort ascending &rarr; descending &rarr; unsorted. Numeric values sort numerically (exact ordering even for integers beyond 2<sup>53</sup>); other values sort alphabetically.</li>
 <li><strong>Multi-column sort:</strong> Shift+click additional sort badges. Numbers inside triangle badges indicate sort priority.</li>
 <li><strong>Filter:</strong> Flip the toolbar toggle to <em>Filter</em> and type a SQL <code>WHERE</code> clause in the filter bar (without the <code>WHERE</code> keyword). For example: <code>age > 30 AND name LIKE '%Smith%'</code></li>
 <li><strong>Quick search (default):</strong> With the toolbar toggle on <em>Search</em> (the default; <code>/</code> also focuses it whenever the table window is active), type to highlight every matching cell &mdash; the same highlight as Find &amp; Replace. Column headers are searched too, and header matches come before the data cells when stepping through. Rows are not filtered. The search matches what you see: when a plugin format is enabled for a column it matches the formatted display value, otherwise the raw value (Find &amp; Replace always matches raw values). A match counter next to the input shows your position. <code>Enter</code> or <code>Tab</code> moves the cursor into the first match; <code>Tab</code>/<code>Shift+Tab</code> then step to the next/previous match and <code>Escape</code> returns to the search box. While stepping through matches, any other key acts on the matched cell as usual and ends the match navigation &mdash; <code>i</code>/<code>F2</code>/<code>Ctrl+U</code> edit it, arrows move the selection, <code>Shift</code>+arrows extend it &mdash; while <code>n</code>/<code>p</code> keep jumping between matches from anywhere in the table. Off-screen matches scroll smoothly into view (honors the OS reduced-motion setting). Stepping past the last match wraps around to the first (and vice versa) &mdash; the counter shows &ldquo;wrapped&rdquo; and a toast appears so it&rsquo;s obvious. Pressing <code>/</code> while the toggle is on Filter switches to search mode only temporarily: <code>Escape</code> flips the toggle back to Filter, while the highlights stay for <code>n</code>/<code>p</code> until you clear the search text or press <code>Escape</code> in the table.</li>
 <li>The filter supports all SQLite expressions including <code>REGEXP</code> (see below). Autocompletion suggests the table&rsquo;s column names and SQL keywords as you type &mdash; see the SQL Console section.</li>
-<li><strong>Column autofilter:</strong> Click the funnel icon on any column header to open a dropdown with checkboxes for each unique value. Use the search box to narrow the list. Uncheck values and click Apply to hide matching rows. Multiple column filters AND together and combine with the WHERE filter bar. The funnel fills teal when a filter is active. Click Clear to remove a column&rsquo;s filter. Click the Filtered chip in the status bar to clear all column autofilters and the WHERE filter at once.</li>
+<li><strong>Column autofilter:</strong> Click the funnel icon on any column header to open a dropdown with checkboxes for each unique value. Use the search box to narrow the list. Values are listed in numeric order for numeric columns, ordered by the raw value even when a plugin format displays them differently. Uncheck values and click Apply to hide matching rows. Multiple column filters AND together and combine with the WHERE filter bar. The funnel fills teal when a filter is active. Click Clear to remove a column&rsquo;s filter. Click the Filtered chip in the status bar to clear all column autofilters and the WHERE filter at once.</li>
 <li><strong>Status chips:</strong> <strong>Sorted</strong> and <strong>Filtered</strong> chips are always shown in the status bar center. <strong>Linking</strong> only appears when the table is a link source, <strong>Linked</strong> only when it is a link target, and <strong>Formatted</strong> only when a plugin has matching column transform rules. <strong>Sorted</strong> and <strong>Filtered</strong> chips clear the sort or filters when clicked (chip becomes inactive). <strong>Linked</strong> (on target tables receiving link filters) and <strong>Formatted</strong> chips toggle suspend/resume &mdash; suspended features show the chip with strikethrough. A <strong>Linking</strong> chip appears on the source table driving link filters; click to suspend/resume outbound linking. Keyboard shortcuts: <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>1</code> (clear sort), <code>2</code> (clear filters), <code>3</code> (toggle link), <code>4</code> (toggle format).</li>
 <li><strong>Column badges:</strong> The sort badge (orange triangle) and filter button (funnel icon) are rendered inline inside the column header as equal-sized clickable buttons. Both the sort triangle outline and funnel outline light up only when hovering their own button. Click the sort badge to sort; click the filter button to open the autofilter. The sort badge shows a filled triangle when sorted or a faint outline when unsorted. The filter button shows a faint funnel outline when inactive or a filled teal funnel when a filter is active. Small linking (coral red dot), link (green dot), and format (pink dot) badges appear centered over the bottom border of column headers &mdash; each badge type only renders when the table is relevant for that feature (link source, link target, or has matching transforms respectively). Active badges are filled, inactive badges show faint outlines. The linking badge appears on columns used for outbound linking; the link badge appears on columns receiving link filters. For transitive links, badges show a depth number (2 for secondary, 3 for tertiary, etc.). Badge colors match the status bar chips.</li>
 </ul>
