@@ -1437,6 +1437,85 @@ test.describe('Cross-table linking', () => {
     expect(afterClear).toBe(0);
   });
 
+  test('clicking a source cell keeps focus on the rebuilt cell and Escape deselects', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Link Test',
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+
+    // Clicking a link-source cell makes applyLinkFilters rebuild the source
+    // window's table DOM during the mousedown handler — before the browser's
+    // deferred focus runs. Focus must still land on the (rebuilt) cell so
+    // keyboard interaction (Escape, arrows, edit keys) keeps working.
+    const ordersWin = page.locator('.subwindow', { hasText: 'orders' }).first();
+    await ordersWin.locator('td.data-cell').first().click();
+    await page.waitForTimeout(100);
+
+    const afterClick = await page.evaluate(() => {
+      const w = app._test.windows.find(win => win.tableName === 'orders');
+      const cust = app._test.windows.find(win => win.tableName === 'customers');
+      return {
+        selSize: w.selectedCells.size,
+        focusedIsCell: document.activeElement.classList.contains('data-cell'),
+        custFilterCount: Object.keys(cust.linkFilters).length,
+      };
+    });
+    expect(afterClick.selSize).toBe(1);
+    expect(afterClick.focusedIsCell).toBe(true);
+    expect(afterClick.custFilterCount).toBeGreaterThan(0);
+
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(100);
+
+    const afterEsc = await page.evaluate(() => {
+      const w = app._test.windows.find(win => win.tableName === 'orders');
+      const cust = app._test.windows.find(win => win.tableName === 'customers');
+      return {
+        selSize: w.selectedCells.size,
+        highlighted: document.querySelectorAll('.cell-selected').length,
+        custFilterCount: Object.keys(cust.linkFilters).length,
+      };
+    });
+    expect(afterEsc.selSize).toBe(0);
+    expect(afterEsc.highlighted).toBe(0);
+    expect(afterEsc.custFilterCount).toBe(0);
+  });
+
+  test('Escape deselects and clears link filters when no cell holds focus', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Link Test',
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+
+    await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const ordersTable = app._test.tables['orders'];
+      const row = ordersTable.rows[0];
+      ordersWin.anchorCell = { rownum: row._rownum, col: 'order_id' };
+      ordersWin.selectedCells = new Set([`${row._rownum}:order_id`]);
+      app._test.applyLinkFilters(ordersWin);
+      if (document.activeElement) document.activeElement.blur();
+    });
+
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(100);
+
+    const afterEsc = await page.evaluate(() => {
+      const ordersWin = app._test.windows.find(w => w.tableName === 'orders');
+      const custWin = app._test.windows.find(w => w.tableName === 'customers');
+      return {
+        selSize: ordersWin.selectedCells.size,
+        custFilterCount: Object.keys(custWin.linkFilters).length,
+      };
+    });
+    expect(afterEsc.selSize).toBe(0);
+    expect(afterEsc.custFilterCount).toBe(0);
+  });
+
   test('multi-row selection collects all source values', async ({ page }) => {
     await loadLinkPlugin(page, {
       name: 'Link Test',

@@ -35,6 +35,22 @@ test.describe('Column selection', () => {
     expect(state.copyWithHeader).toBe(true);
   });
 
+  test('Escape clears a header-click column selection', async ({ page }) => {
+    // A header click selects the column without moving focus to any cell, so
+    // Escape is handled by the document-level fallback, not the grid handler.
+    const header = page.locator('.subwindow table thead th').nth(1);
+    await header.click();
+    await page.waitForTimeout(100);
+    let state = await getWinState(page, 'sample1');
+    expect(state.selectedCells.length).toBe(10);
+
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(100);
+    state = await getWinState(page, 'sample1');
+    expect(state.selectedCells.length).toBe(0);
+    expect(state.anchorCell).toBe(null);
+  });
+
   test('header click sets anchorCell to first display row of clicked column', async ({ page }) => {
     const header = page.locator('.subwindow table thead th').nth(2); // email
     await header.click();
