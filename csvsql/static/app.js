@@ -3787,18 +3787,22 @@ const app = (() => {
     let dragState = null;
     const onDragMove = (ev) => {
       if (!dragState) return;
+      // Resolve against win._table, not the closed-over `table` — the mousedown
+      // that armed this gesture can trigger a link-plugin rebuild that replaces
+      // the table element, and these document-level handlers must keep working.
+      const curTable = win._table;
       const el = document.elementFromPoint(ev.clientX, ev.clientY);
       const td = el && el.closest && el.closest('td.data-cell');
-      if (!td || !table.contains(td)) return;
+      if (!td || !curTable || !curTable.contains(td)) return;
       const di = parseInt(td.parentElement.dataset.displayIdx, 10);
       const ci = parseInt(td.dataset.colIdx, 10);
       if (isNaN(di) || isNaN(ci)) return;
       if (di === dragState.lastDi && ci === dragState.lastCi) return;
       if (!dragState.isDragging && (di !== dragState.startDi || ci !== dragState.startCi)) {
         dragState.isDragging = true;
-        table.classList.add('drag-selecting');
       }
       if (dragState.isDragging) {
+        curTable.classList.add('drag-selecting');
         const sel = window.getSelection && window.getSelection();
         if (sel && sel.removeAllRanges) sel.removeAllRanges();
         rebuildSelectionRect(win, di, ci);
@@ -3809,7 +3813,7 @@ const app = (() => {
     };
     const onDragEnd = () => {
       if (dragState && dragState.isDragging) {
-        table.classList.remove('drag-selecting');
+        if (win._table) win._table.classList.remove('drag-selecting');
         focusCellAt(win, dragState.lastDi, dragState.lastCi);
       }
       dragState = null;
@@ -3888,7 +3892,7 @@ const app = (() => {
       if (!rowDragState) return;
       const el = document.elementFromPoint(ev.clientX, ev.clientY);
       const td = el && el.closest && el.closest('td.row-num');
-      if (!td || !table.contains(td)) return;
+      if (!td || !win._table || !win._table.contains(td)) return;
       const di = parseInt(td.parentElement.dataset.displayIdx, 10);
       if (isNaN(di) || di === rowDragState.lastDi) return;
       rowDragState.lastDi = di;
@@ -8239,7 +8243,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.65 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.24.66 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
       <h4>Third-Party Libraries</h4>

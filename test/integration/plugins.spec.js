@@ -1405,6 +1405,73 @@ test.describe('Cross-table linking', () => {
     expect(result.filterValues).toEqual(['1']);
   });
 
+  test('drag-select sweeps multiple cells on the first click in a link source', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Drag Link',
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+
+    // No prior selection: the first mousedown flips the orders window into
+    // link-source state, which rebuilds its table DOM mid-gesture. The drag
+    // must keep sweeping cells on the rebuilt table.
+    const ordersWin = page.locator('.subwindow').filter({ hasText: 'orders' });
+    const start = ordersWin.locator('table tbody tr[data-display-idx="0"] td.data-cell').nth(0);
+    const end = ordersWin.locator('table tbody tr[data-display-idx="2"] td.data-cell').nth(1);
+    const sBox = await start.boundingBox();
+    const eBox = await end.boundingBox();
+
+    await page.mouse.move(sBox.x + sBox.width / 2, sBox.y + sBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(eBox.x + eBox.width / 2, eBox.y + eBox.height / 2, { steps: 10 });
+    await page.mouse.up();
+    await page.waitForTimeout(100);
+
+    const sel = await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'orders');
+      return [...w.selectedCells].sort();
+    });
+    expect(sel).toEqual([
+      '1:customer_id', '1:order_id',
+      '2:customer_id', '2:order_id',
+      '3:customer_id', '3:order_id',
+    ]);
+  });
+
+  test('row-number drag selects multiple rows on the first click in a link source', async ({ page }) => {
+    await loadLinkPlugin(page, {
+      name: 'Row Drag Link',
+      links: [
+        { source: { table: 'orders', column: 'customer_id' }, target: { table: 'customers', column: 'id' } }
+      ]
+    });
+
+    // Same mid-gesture rebuild as the cell drag, via the row-number drag path.
+    const ordersWin = page.locator('.subwindow').filter({ hasText: 'orders' });
+    const start = ordersWin.locator('table tbody tr[data-display-idx="0"] td.row-num');
+    const end = ordersWin.locator('table tbody tr[data-display-idx="2"] td.row-num');
+    const sBox = await start.boundingBox();
+    const eBox = await end.boundingBox();
+
+    await page.mouse.move(sBox.x + sBox.width / 2, sBox.y + sBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(eBox.x + eBox.width / 2, eBox.y + eBox.height / 2, { steps: 10 });
+    await page.mouse.up();
+    await page.waitForTimeout(100);
+
+    const sel = await page.evaluate(() => {
+      const w = app._test.windows.find(w => w.tableName === 'orders');
+      return [...w.selectedCells].sort();
+    });
+    // Rows 1–3, all 3 columns each
+    expect(sel).toEqual([
+      '1:customer_id', '1:order_id', '1:total',
+      '2:customer_id', '2:order_id', '2:total',
+      '3:customer_id', '3:order_id', '3:total',
+    ]);
+  });
+
   test('clearing selection clears link filters on target', async ({ page }) => {
     await loadLinkPlugin(page, {
       name: 'Link Test',
