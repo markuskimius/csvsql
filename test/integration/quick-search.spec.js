@@ -79,6 +79,46 @@ test.describe('Quick search (toolbar Search mode)', () => {
     await expect(current).toHaveText('david@example.com');
   });
 
+  test('Enter / Shift+Enter step through matches like Tab / Shift+Tab', async ({ page }) => {
+    const current = page.locator('.subwindow table tbody td.cell-find-current');
+    await input(page).fill('davi');
+    await page.waitForTimeout(DEBOUNCE);
+    await input(page).press('Enter');
+    await expect(current).toBeFocused();
+    await expect(current).toHaveText('David Brown');
+    await page.keyboard.press('Enter');
+    await expect(current).toBeFocused();
+    await expect(current).toHaveText('david@example.com');
+    await expect(countEl(page)).toHaveText('2 of 3');
+    await page.keyboard.press('Enter');
+    await expect(current).toHaveText('Eve Davis');
+    await page.keyboard.press('Enter');
+    await expect(countEl(page)).toHaveText('1 of 3 — wrapped');
+    await page.keyboard.press('Shift+Enter');
+    await expect(countEl(page)).toHaveText('3 of 3 — wrapped');
+    await expect(current).toHaveText('Eve Davis');
+    // Enter never enters edit mode while navigating
+    await expect(current).not.toHaveAttribute('contenteditable', 'true');
+  });
+
+  test('Enter steps from header matches into data matches', async ({ page }) => {
+    await input(page).fill('e');
+    await page.waitForTimeout(DEBOUNCE);
+    await input(page).press('Enter');
+    const currentTh = page.locator('.subwindow table thead th.cell-find-current');
+    await expect(currentTh).toContainText('name');
+    await page.keyboard.press('Enter');
+    await expect(currentTh).toContainText('email');
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Enter');
+    const currentTd = page.locator('.subwindow table tbody td.cell-find-current');
+    await expect(currentTd).toBeFocused();
+    await expect(currentTd).toHaveText('Alice Johnson');
+    await page.keyboard.press('Shift+Enter');
+    await expect(currentTh).toBeFocused();
+    await expect(currentTh).toContainText('member_since');
+  });
+
   test('Tab in the search input also enters the grid at the first match', async ({ page }) => {
     await input(page).fill('alice');
     await page.waitForTimeout(DEBOUNCE);
@@ -136,6 +176,37 @@ test.describe('Quick search (toolbar Search mode)', () => {
     await page.keyboard.press('p');
     await expect(page.locator('.subwindow table tbody td.cell-find-current')).toHaveText('Eve Davis');
     await expect(page.locator('.toast', { hasText: 'wrapped to the last match' })).toBeVisible();
+  });
+
+  test('N / P step backward / forward (reverse of n / p)', async ({ page }) => {
+    const current = page.locator('.subwindow table tbody td.cell-find-current');
+    await input(page).fill('davi');
+    await page.waitForTimeout(DEBOUNCE);
+    await input(page).press('Enter'); // David Brown
+    await page.keyboard.press('Shift+P');
+    await expect(current).toHaveText('david@example.com');
+    await page.keyboard.press('Shift+P');
+    await expect(current).toHaveText('Eve Davis');
+    await page.keyboard.press('Shift+N');
+    await expect(current).toHaveText('david@example.com');
+    await expect(current).toBeFocused();
+    // Navigation mode survives N / P: Tab still steps matches afterwards
+    await page.keyboard.press('Tab');
+    await expect(current).toHaveText('Eve Davis');
+  });
+
+  test('N / P also step through header matches', async ({ page }) => {
+    // 'e' matches name, email, member_since first
+    await input(page).fill('e');
+    await page.waitForTimeout(DEBOUNCE);
+    await input(page).press('Enter');
+    const currentTh = page.locator('.subwindow table thead th.cell-find-current');
+    await expect(currentTh).toContainText('name');
+    await page.keyboard.press('Shift+P');
+    await expect(currentTh).toContainText('email');
+    await page.keyboard.press('Shift+N');
+    await expect(currentTh).toContainText('name');
+    await expect(currentTh).toBeFocused();
   });
 
   test('/ from Filter mode opens search temporarily; Escape reverts keeping highlights', async ({ page }) => {

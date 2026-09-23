@@ -3247,8 +3247,8 @@ const app = (() => {
     });
 
     // Search mode: Enter or Tab moves the cursor into the current (first)
-    // match cell and starts search navigation — Tab/Shift+Tab on the grid then
-    // step through matches, Escape there returns here.
+    // match cell and starts search navigation — Tab/Shift+Tab (or Enter/
+    // Shift+Enter) on the grid then step through matches, Escape there returns here.
     // Escape in the input returns focus to the current match (search), or the
     // selected cell / middle cell — and flips a temporary `/`-opened search
     // back to Filter.
@@ -4064,12 +4064,12 @@ const app = (() => {
     table.addEventListener('keydown', (e) => {
       const td = e.target;
       // Focused header cells (quick-search header matches) only participate in
-      // search keys: Tab/Shift+Tab and Escape in navigation mode, n/p always,
+      // search keys: Tab/Enter (+Shift) and Escape in navigation mode, n/p always,
       // Escape clears an active search. Anything else ends navigation.
       if (td.tagName === 'TH' && td.dataset.colIdx !== undefined) {
         const hasMatches = win._searchMatchList && win._searchMatchList.length > 0;
         const plainMods = !e.ctrlKey && !e.metaKey && !e.altKey;
-        if (hasMatches && win._searchNavActive && plainMods && e.key === 'Tab') {
+        if (hasMatches && win._searchNavActive && plainMods && (e.key === 'Tab' || e.key === 'Enter')) {
           e.preventDefault();
           quickSearchGoto(win, e.shiftKey ? -1 : 1, { select: true });
           return;
@@ -4081,9 +4081,9 @@ const app = (() => {
           if (searchInput) { searchInput.focus(); searchInput.select(); }
           return;
         }
-        if (hasMatches && plainMods && !e.shiftKey && (e.key === 'n' || e.key === 'p')) {
+        if (hasMatches && searchStepKey(e)) {
           e.preventDefault();
-          quickSearchGoto(win, e.key === 'n' ? 1 : -1, { select: true });
+          quickSearchGoto(win, searchStepKey(e), { select: true });
           return;
         }
         if (e.key === 'Escape' && win._searchMatchList) {
@@ -4108,13 +4108,13 @@ const app = (() => {
                       navKey === 'ArrowLeft' || navKey === 'ArrowRight';
 
       // Quick-search navigation mode (entered from the search input via
-      // Enter/Tab): Tab / Shift+Tab step through matches, Escape returns to
+      // Enter/Tab): Tab / Shift+Tab and Enter / Shift+Enter step through matches, Escape returns to
       // the search box. Any other action key leaves navigation mode and falls
       // through to the normal handlers below ("i"/F2/Ctrl+U edit, arrows
       // move/extend the selection, etc.); n/p keep navigating as usual.
       if (!inEdit && win._searchNavActive) {
         const hasMatches = win._searchMatchList && win._searchMatchList.length > 0;
-        if (hasMatches && e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (hasMatches && (e.key === 'Tab' || e.key === 'Enter') && !e.ctrlKey && !e.metaKey && !e.altKey) {
           e.preventDefault();
           quickSearchGoto(win, e.shiftKey ? -1 : 1, { select: true });
           return;
@@ -4127,7 +4127,7 @@ const app = (() => {
           return;
         }
         if (e.key !== 'Shift' && e.key !== 'Control' && e.key !== 'Meta' && e.key !== 'Alt' &&
-            e.key !== 'n' && e.key !== 'p') {
+            !searchStepKey(e)) {
           win._searchNavActive = false;
         }
       }
@@ -4152,11 +4152,12 @@ const app = (() => {
         }
       }
 
-      // n / p in select mode step to the next / previous quick-search match
-      if (!inEdit && noMods && (e.key === 'n' || e.key === 'p') &&
+      // n / p (and N / P, reversed) in select mode step to the next /
+      // previous quick-search match
+      if (!inEdit && searchStepKey(e) &&
           win._searchMatchList && win._searchMatchList.length > 0) {
         e.preventDefault();
-        quickSearchGoto(win, e.key === 'n' ? 1 : -1, { select: true });
+        quickSearchGoto(win, searchStepKey(e), { select: true });
         return;
       }
 
@@ -6693,18 +6694,18 @@ const app = (() => {
       }
       // Mid-glide safety net: while a smooth scroll animates between search
       // matches, a re-render can momentarily drop focus to <body>. Keep the
-      // navigation keys working so rapid Tab/n/p presses aren't swallowed.
+      // navigation keys working so rapid Tab/Enter/n/p presses aren't swallowed.
       if (e.target === document.body && !e.ctrlKey && !e.metaKey && !e.altKey) {
         const win = getActiveDataWindow();
         if (win && win._searchNavActive && win._searchMatchList && win._searchMatchList.length > 0) {
-          if (e.key === 'Tab') {
+          if (e.key === 'Tab' || e.key === 'Enter') {
             e.preventDefault();
             quickSearchGoto(win, e.shiftKey ? -1 : 1, { select: true });
             return;
           }
-          if (!e.shiftKey && (e.key === 'n' || e.key === 'p')) {
+          if (searchStepKey(e)) {
             e.preventDefault();
-            quickSearchGoto(win, e.key === 'n' ? 1 : -1, { select: true });
+            quickSearchGoto(win, searchStepKey(e), { select: true });
             return;
           }
           if (e.key === 'Escape') {
@@ -8291,7 +8292,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.25.0 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.25.1 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
       <h4>Third-Party Libraries</h4>
@@ -8374,7 +8375,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <li><strong>Sort:</strong> Click the sort badge (triangle icon) in a column header to sort ascending &rarr; descending &rarr; unsorted. Numeric values sort numerically (exact ordering even for integers beyond 2<sup>53</sup>); other values sort alphabetically.</li>
 <li><strong>Multi-column sort:</strong> Shift+click additional sort badges. Numbers inside triangle badges indicate sort priority.</li>
 <li><strong>Filter:</strong> Flip the toolbar toggle to <em>Filter</em> and type a SQL <code>WHERE</code> clause in the filter bar (without the <code>WHERE</code> keyword). For example: <code>age > 30 AND name LIKE '%Smith%'</code>. A <em>Clear</em> button appears while the bar has text and removes the filter, restoring all rows.</li>
-<li><strong>Quick search (default):</strong> With the toolbar toggle on <em>Search</em> (the default; <code>/</code> also focuses it whenever the table window is active), type to highlight every matching cell &mdash; the same highlight as Find &amp; Replace. Column headers are searched too, and header matches come before the data cells when stepping through. Rows are not filtered. The search matches what you see: when a plugin format is enabled for a column it matches the formatted display value, otherwise the raw value (Find &amp; Replace always matches raw values). A match counter next to the input shows your position. <code>Enter</code> or <code>Tab</code> moves the cursor into the first match; <code>Tab</code>/<code>Shift+Tab</code> then step to the next/previous match and <code>Escape</code> returns to the search box. While stepping through matches, any other key acts on the matched cell as usual and ends the match navigation &mdash; <code>i</code>/<code>F2</code>/<code>Ctrl+U</code> edit it, arrows move the selection, <code>Shift</code>+arrows extend it &mdash; while <code>n</code>/<code>p</code> keep jumping between matches from anywhere in the table. Off-screen matches scroll smoothly into view (honors the OS reduced-motion setting). Stepping past the last match wraps around to the first (and vice versa) &mdash; the counter shows &ldquo;wrapped&rdquo; and a toast appears so it&rsquo;s obvious. Pressing <code>/</code> while the toggle is on Filter switches to search mode only temporarily: <code>Escape</code> flips the toggle back to Filter, while the highlights stay for <code>n</code>/<code>p</code> until you clear the search text (the <em>Clear</em> button next to the input does this in one click) or press <code>Escape</code> in the table.</li>
+<li><strong>Quick search (default):</strong> With the toolbar toggle on <em>Search</em> (the default; <code>/</code> also focuses it whenever the table window is active), type to highlight every matching cell &mdash; the same highlight as Find &amp; Replace. Column headers are searched too, and header matches come before the data cells when stepping through. Rows are not filtered. The search matches what you see: when a plugin format is enabled for a column it matches the formatted display value, otherwise the raw value (Find &amp; Replace always matches raw values). A match counter next to the input shows your position. <code>Enter</code> or <code>Tab</code> moves the cursor into the first match; <code>Tab</code>/<code>Shift+Tab</code> (or <code>Enter</code>/<code>Shift+Enter</code>) then step to the next/previous match and <code>Escape</code> returns to the search box. While stepping through matches, any other key acts on the matched cell as usual and ends the match navigation &mdash; <code>i</code>/<code>F2</code>/<code>Ctrl+U</code> edit it, arrows move the selection, <code>Shift</code>+arrows extend it &mdash; while <code>n</code>/<code>p</code> keep jumping to the next/previous match from anywhere in the table (<code>N</code>/<code>P</code> go the other way: <code>N</code> previous, <code>P</code> next). Off-screen matches scroll smoothly into view (honors the OS reduced-motion setting). Stepping past the last match wraps around to the first (and vice versa) &mdash; the counter shows &ldquo;wrapped&rdquo; and a toast appears so it&rsquo;s obvious. Pressing <code>/</code> while the toggle is on Filter switches to search mode only temporarily: <code>Escape</code> flips the toggle back to Filter, while the highlights stay for <code>n</code>/<code>p</code> until you clear the search text (the <em>Clear</em> button next to the input does this in one click) or press <code>Escape</code> in the table.</li>
 <li>The filter supports all SQLite expressions including <code>REGEXP</code> (see below). Autocompletion suggests the table&rsquo;s column names and SQL keywords as you type &mdash; see the SQL Console section.</li>
 <li><strong>Column autofilter:</strong> Click the funnel icon on any column header to open a dropdown with checkboxes for each unique value. Use the search box to narrow the list. Values are listed in numeric order for numeric columns, ordered by the raw value even when a plugin format displays them differently. Uncheck values and click Apply to hide matching rows. Multiple column filters AND together and combine with the WHERE filter bar. The funnel fills teal when a filter is active. Click Clear to remove a column&rsquo;s filter. Click the Filtered chip in the status bar to clear all column autofilters and the WHERE filter at once.</li>
 <li><strong>Status chips:</strong> <strong>Sorted</strong> and <strong>Filtered</strong> chips are always shown in the status bar center. <strong>Linking</strong> only appears when the table is a link source, <strong>Linked</strong> only when it is a link target, and <strong>Formatted</strong> only when a plugin has matching column transform rules. <strong>Sorted</strong> and <strong>Filtered</strong> chips clear the sort or filters when clicked (chip becomes inactive). <strong>Linked</strong> (on target tables receiving link filters) and <strong>Formatted</strong> chips toggle suspend/resume &mdash; suspended features show the chip with strikethrough. A <strong>Linking</strong> chip appears on the source table driving link filters; click to suspend/resume outbound linking. Keyboard shortcuts: <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>1</code> (clear sort), <code>2</code> (clear filters), <code>3</code> (toggle link), <code>4</code> (toggle format).</li>
@@ -8461,9 +8462,10 @@ INSERT INTO projects VALUES ('1', 'Alpha', 'active')</pre>
 <tr><td><code>i</code>, <code>F2</code>, <code>Ctrl</code>/<code>&#8984;</code>+<code>U</code>, or double-click</td><td>Enter edit mode on the selected cell</td></tr>
 <tr><td><code>/</code> (data window active, not editing)</td><td>Quick search: focus the search input (switching a Filter-mode toolbar to Search temporarily)</td></tr>
 <tr><td><code>Enter</code> or <code>Tab</code> (in search input)</td><td>Move the cursor into the current quick-search match (starts match navigation)</td></tr>
-<tr><td><code>Tab</code>/<code>Shift+Tab</code> (match navigation)</td><td>Step to the next / previous quick-search match; any other key ends navigation and acts normally</td></tr>
+<tr><td><code>Tab</code>/<code>Shift+Tab</code> or <code>Enter</code>/<code>Shift+Enter</code> (match navigation)</td><td>Step to the next / previous quick-search match; any other key ends navigation and acts normally</td></tr>
 <tr><td><code>Escape</code> (match navigation)</td><td>Return the cursor to the search box</td></tr>
 <tr><td><code>n</code>/<code>p</code> (cell selected, quick search active)</td><td>Jump to the next / previous quick-search match</td></tr>
+<tr><td><code>N</code>/<code>P</code> (cell selected, quick search active)</td><td>Jump to the previous / next quick-search match</td></tr>
 <tr><td><code>Escape</code> (in filter/search input)</td><td>Return focus to the current match or selected cell (reverts a temporary <code>/</code> search mode)</td></tr>
 <tr><td>Arrow keys (no cell selected)</td><td>Focus the cell in the middle of the visible table</td></tr>
 <tr><td>Arrow keys or <code>h</code>/<code>j</code>/<code>k</code>/<code>l</code> (cell selected, not editing)</td><td>Move selection to the adjacent cell</td></tr>
@@ -11033,6 +11035,17 @@ ${_aiImageContext()}`;
     applyCellHighlights(win, false);
     if (win._searchMatchList && win._searchMatchList.length > 0) quickSearchGoto(win, 0);
     else updateSearchCount(win);
+  }
+
+  // Quick-search step keys: n / P = next, p / N = previous (vim-style N
+  // reverses n). Returns 1 / -1, or 0 when the key isn't a step key.
+  function searchStepKey(e) {
+    if (e.ctrlKey || e.metaKey || e.altKey) return 0;
+    switch (e.key) {
+      case 'n': case 'P': return 1;
+      case 'p': case 'N': return -1;
+      default: return 0;
+    }
   }
 
   // Step to the next (dir=1) / previous (dir=-1) match; dir=0 (re-)anchors on
