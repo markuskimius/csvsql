@@ -816,6 +816,28 @@ body {
   box-shadow: 0 2px 8px rgba(0,0,0,0.4);
 }
 
+/* Optional column-number line at the top of each header (View → Show Column
+   Numbers). Negative margins stretch it across the th's padding so its
+   bottom border reads as a separate header row. */
+.data-table.show-col-numbers th {
+  vertical-align: bottom;
+}
+.col-num {
+  margin: -3px -4px 3px -8px;
+  padding: 1px 0;
+  border-bottom: 1px solid var(--border);
+  text-align: center;
+  font-size: 10px;
+  font-weight: normal;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.data-table th.col-highlight .col-num,
+.data-table th.col-selected .col-num {
+  color: var(--text);
+  font-weight: 600;
+}
+
 .col-name {
   flex: 1;
   min-width: 0;
@@ -1135,6 +1157,9 @@ body {
    selections (replaces the column-count text while active) */
 .status-right .status-stats {
   color: var(--text);
+}
+.status-right .status-col-pos + .status-stats {
+  margin-left: 1.5em;
 }
 
 .status-chip {

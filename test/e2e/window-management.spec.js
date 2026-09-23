@@ -123,10 +123,10 @@ test.describe('Window Management', () => {
 });
 
 test.describe('Windows Menu', () => {
-  test('no View menu exists', async ({ page }) => {
+  test('View menu holds only view options, not window layout', async ({ page }) => {
     await openApp(page);
-    const viewMenu = page.locator('#menu-view');
-    await expect(viewMenu).toHaveCount(0);
+    const labels = await page.locator('#menu-view .menu-dropdown button').allTextContents();
+    expect(labels).toEqual(['Show Column Numbers']);
   });
 
   test('Windows menu contains layout buttons', async ({ page }) => {

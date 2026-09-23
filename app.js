@@ -54,6 +54,10 @@ const app = (() => {
   let _applyingLinkFilters = false;
   let _activeLinkSourceId = null;
 
+  // Optional column-number line at the top of each table header (View menu). Per-viewer preference, persisted in localStorage.
+  let _showColNumbers = false;
+  try { _showColNumbers = localStorage.getItem('csvsql_show_col_numbers') === '1'; } catch (_) {}
+
   // Sort optimization
   const collator = new Intl.Collator(undefined, { sensitivity: 'base' });
 
@@ -3397,6 +3401,7 @@ const app = (() => {
     });
     table.appendChild(colgroup);
     win._colgroup = colgroup;
+    if (_showColNumbers) table.classList.add('show-col-numbers');
     if (win.colWidths) {
       table.classList.add('fixed-layout');
       table.style.width = ((win.rowNumWidth || 50) + win.colWidths.reduce((a, b) => a + b, 0)) + 'px';
@@ -3429,6 +3434,12 @@ const app = (() => {
 
     columns.forEach((col, colIdx) => {
       const th = document.createElement('th');
+      if (_showColNumbers) {
+        const colNum = document.createElement('div');
+        colNum.className = 'col-num';
+        colNum.textContent = colIdx + 1;
+        th.appendChild(colNum);
+      }
       const thInner = document.createElement('div');
       thInner.className = 'th-inner';
       const colLabel = document.createElement('span');
@@ -4696,9 +4707,10 @@ const app = (() => {
     return r.toLocaleString('en-US', { maximumFractionDigits: 6 });
   }
 
-  // Show Count/Sum/Avg/Min/Max for multi-cell selections in the status bar's
-  // right segment, replacing the column-count text (win._statusRightBase)
-  // while the selection is active.
+  // Status bar right segment: the selection's column position ("Col 3 of 12",
+  // "Cols 2–4 of 12") replaces the column-count text (win._statusRightBase)
+  // while anything is selected; multi-cell selections append
+  // Count/Sum/Avg/Min/Max.
   // Count = non-empty cells; Sum/Avg/Min/Max computed over numeric cells only.
   function updateSelectionStats(win) {
     if (!win.statusbarEl) return;
@@ -4708,6 +4720,22 @@ const app = (() => {
     const t = tables[win.tableName];
     const sel = win.selectedCells;
     let stats = '';
+    let position = '';
+    if (t && sel && sel.size > 0) {
+      const selCols = new Set();
+      for (const key of sel) selCols.add(key.slice(key.indexOf(':') + 1));
+      let lo = Infinity, hi = -1;
+      for (const c of selCols) {
+        const i = t.columns.indexOf(c);
+        if (i < 0) continue;
+        if (i < lo) lo = i;
+        if (i > hi) hi = i;
+      }
+      if (hi >= 0) {
+        position = lo === hi ? `Col ${lo + 1} of ${t.columns.length}`
+          : `Cols ${lo + 1}–${hi + 1} of ${t.columns.length}`;
+      }
+    }
     if (t && sel && sel.size >= 2) {
       const rowMap = new Map(t.rows.map(r => [r._rownum, r]));
       let count = 0, numCount = 0, sum = 0, min = Infinity, max = -Infinity;
@@ -4734,13 +4762,21 @@ const app = (() => {
       stats = parts.join('   ');
     }
     statusLeft.textContent = win._statusBase || '';
-    if (stats) {
+    if (position || stats) {
       statusRight.textContent = '';
-      const span = document.createElement('span');
-      span.className = 'status-stats';
-      span.textContent = stats;
-      span.title = stats;
-      statusRight.appendChild(span);
+      if (position) {
+        const pos = document.createElement('span');
+        pos.className = 'status-col-pos';
+        pos.textContent = position;
+        statusRight.appendChild(pos);
+      }
+      if (stats) {
+        const span = document.createElement('span');
+        span.className = 'status-stats';
+        span.textContent = stats;
+        span.title = stats;
+        statusRight.appendChild(span);
+      }
     } else {
       statusRight.textContent = win._statusRightBase || '';
     }
@@ -6357,6 +6393,16 @@ const app = (() => {
     setTimeout(() => {
       document.addEventListener('click', removeContextMenu, { once: true });
     }, 0);
+  }
+
+  function setShowColumnNumbers(on) {
+    _showColNumbers = !!on;
+    try { localStorage.setItem('csvsql_show_col_numbers', _showColNumbers ? '1' : '0'); } catch (_) {}
+    for (const w of windows) {
+      if (w.tableName && tables[w.tableName] && w._table) rebuildTable(w);
+    }
+    const active = getActiveDataWindow();
+    if (active && active.anchorCell) refocusAnchorCell(active);
   }
 
   function removeContextMenu() {
@@ -8016,6 +8062,7 @@ const app = (() => {
     document.getElementById('btn-cascade').addEventListener('click', () => layoutCascade());
     document.getElementById('btn-minimize-all').addEventListener('click', () => minimizeAll());
     document.getElementById('btn-restore-all').addEventListener('click', () => restoreAll());
+    document.getElementById('btn-col-numbers').addEventListener('click', () => setShowColumnNumbers(!_showColNumbers));
     document.getElementById('btn-load-plugin').addEventListener('click', () => loadPluginFromFile());
     document.getElementById('btn-expr-ref').addEventListener('click', () => showExpressionReference());
     document.getElementById('btn-undo').addEventListener('click', () => {
@@ -8090,6 +8137,7 @@ const app = (() => {
       document.getElementById('btn-col-manager').disabled = !(win && win.tableName && tables[win.tableName]);
       document.getElementById('btn-find').disabled = !(win && win.tableName && tables[win.tableName]);
       document.getElementById('btn-rename-table').disabled = !(win && win.tableName && tables[win.tableName]);
+      document.getElementById('btn-col-numbers').textContent = _showColNumbers ? 'Hide Column Numbers' : 'Show Column Numbers';
     }
 
     function openItem(item) {
@@ -8243,7 +8291,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
     showHelpWindow('About CSVSQL', `
       <p><strong>CSVSQL</strong> &mdash; A browser-based CSV database with SQL query support.</p>
-      <p>Version 0.24.66 &mdash; &copy; 2026 Mark Kim</p>
+      <p>Version 0.25.0 &mdash; &copy; 2026 Mark Kim</p>
       <h4>License</h4>
       <div class="about-text">${escHtml(license)}</div>
       <h4>Third-Party Libraries</h4>
@@ -8296,7 +8344,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <li><strong>Cut / Copy / Paste:</strong> Select cells and use <code>Ctrl</code>/<code>&#8984;</code>+<code>X</code>, <code>Ctrl</code>/<code>&#8984;</code>+<code>C</code>, <code>Ctrl</code>/<code>&#8984;</code>+<code>V</code>. Data is copied as tab-separated values. When a plugin display transform is active, copy uses the formatted display values; when formatting is disabled, copy uses raw values. Select All and row selection copies include the column header row. Copy and cut work from any focus context (column header, titlebar, etc.), not just when a data cell is focused. In edit mode, these shortcuts pass through to native browser behavior for text within the cell.</li>
 <li><strong>Undo / Redo:</strong> <code>Ctrl</code>/<code>&#8984;</code>+<code>Z</code> to undo, <code>Ctrl</code>/<code>&#8984;</code>+<code>Shift</code>+<code>Z</code> or <code>Ctrl</code>/<code>&#8984;</code>+<code>Y</code> to redo. A toast notification confirms each undo/redo (and each copy, cut, and paste) with what was affected. Undoes cell edits, paste, cut, row insert/delete, column insert/delete, column rename, column reorder, and column resize. Multi-cell paste and cut undo as a single step. Also available from the Edit menu.</li>
 <li><strong>Find &amp; Replace:</strong> <code>Ctrl</code>/<code>&#8984;</code>+<code>F</code> (or <strong>Edit &rarr; Find &amp; Replace&hellip;</strong>) opens a non-modal dialog targeting the active table. All matches are highlighted; <code>Enter</code>/<code>Shift+Enter</code> (or the Prev/Next buttons) step between them, scrolling each match into view. Options: <em>Match case</em> and <em>Entire cell</em>. <strong>Replace</strong> replaces the current match; <strong>Replace All</strong> replaces every match as a single undo entry. Search respects the window&rsquo;s active filters and sort, and matches raw cell values (not plugin-formatted display values). <code>Escape</code> closes the dialog.</li>
-<li><strong>Selection statistics:</strong> When two or more cells are selected, the right side of the status bar shows <em>Count</em> (non-empty cells) plus <em>Sum</em>, <em>Avg</em>, <em>Min</em>, and <em>Max</em> computed over the numeric cells in the selection, temporarily replacing the column count.</li>
+<li><strong>Column numbers:</strong> While a cell or column is selected, the right side of the status bar shows its position (<em>Col 3 of 12</em>, or <em>Cols 2&ndash;4 of 12</em> for a multi-column selection) in place of the column count. Choose <strong>View &rarr; Show Column Numbers</strong> to show a numbered line above every column header. Numbers follow the current column order, which is also the order used on save. The setting is remembered.</li>
+<li><strong>Selection statistics:</strong> When two or more cells are selected, the right side of the status bar shows <em>Count</em> (non-empty cells) plus <em>Sum</em>, <em>Avg</em>, <em>Min</em>, and <em>Max</em> computed over the numeric cells in the selection, next to the column position.</li>
 <li><strong>Rows:</strong> Right-click (or long-press) a row number to insert below or delete. Right-click the <code>#</code> corner cell to insert a row at the beginning.</li>
 <li><strong>Columns:</strong> Right-click (or long-press) a column header to rename, sort, insert a column to the right, or delete. Right-click the <code>#</code> corner cell to insert a column at the beginning. <code>Ctrl</code>/<code>&#8984;</code>+click a column header also renames inline &mdash; duplicate names are rejected with a red border on the input.</li>
 <li><strong>Select a column:</strong> Click a column header to select the entire column. Click the sort badge (triangle) to sort. Selection is the target for <code>Ctrl</code>/<code>&#8984;</code>+<code>&larr;</code>/<code>&rarr;</code> column reorder.</li>

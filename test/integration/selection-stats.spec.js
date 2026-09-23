@@ -14,9 +14,9 @@ test.describe('Selection statistics', () => {
   test('no stats for a single-cell selection', async ({ page }) => {
     await page.locator('.subwindow table tbody td.data-cell').first().click();
     await expect(statsEl(page)).toHaveCount(0);
-    // Row-count and column-count texts are intact
+    // Row count intact; the right segment shows the column position
     await expect(page.locator('.subwindow .win-statusbar .status-left')).toContainText('10 of 10 rows');
-    await expect(page.locator('.subwindow .win-statusbar .status-right')).toContainText('3 columns');
+    await expect(page.locator('.subwindow .win-statusbar .status-right')).toHaveText('Col 1 of 3');
   });
 
   test('numeric selection shows Count, Sum, Avg, Min, Max', async ({ page }) => {
